@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+*.db
+
+# Environment
+.env
+.env.local
+
+# Tools
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+htmlcov/
+
+# Node / SvelteKit
+node_modules/
+ui/build/
+ui/.svelte-kit/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

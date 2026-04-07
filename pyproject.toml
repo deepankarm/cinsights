@@ -1,0 +1,72 @@
+[project]
+name = "cinsights"
+version = "0.1.0"
+description = "LLM-powered insights from coding agent sessions"
+readme = "README.md"
+license = "Apache-2.0"
+authors = [{ name = "Deepankar Mahapatro" }]
+keywords = ["claude-code", "coding-agent", "insights", "observability", "phoenix"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+]
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115,<1.0",
+    "uvicorn[standard]>=0.34,<1.0",
+    "sqlmodel>=0.0.22,<0.1",
+    "alembic>=1.15,<2.0",
+    "typer[all]>=0.15,<1.0",
+    "pydantic-settings>=2.7,<3.0",
+    "anthropic>=0.52,<1.0",
+    "arize-phoenix>=8.0",
+    "httpx>=0.28,<1.0",
+    "rich>=13.0,<14.0",
+    "jinja2>=3.1,<4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/deepankarm/cinsights"
+Repository = "https://github.com/deepankarm/cinsights.git"
+Issues = "https://github.com/deepankarm/cinsights/issues"
+
+[project.scripts]
+cinsights = "cinsights.cli:app"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11",
+    "pytest>=8.0",
+    "pytest-asyncio>=1.0",
+    "pytest-cov>=7.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cinsights"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["B008"]  # Depends() in FastAPI defaults is idiomatic
+
+[tool.ruff.lint.per-file-ignores]
+"src/cinsights/prompts/*.py" = ["E501"]  # Long lines in prompt strings
+"src/cinsights/analysis/session.py" = ["E501"]  # Long Field descriptions for structured output
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+addopts = "-ra -q"
