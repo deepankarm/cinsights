@@ -1,0 +1,22 @@
+## Session Overview
+- **Model**: {{ model }}
+- **Duration**: {{ duration_s | int }}s ({{ "%.1f" | format(duration_min) }} min)
+- **Total spans**: {{ total_spans }}
+- **Tool calls**: {{ tool_call_count }}
+- **Errors**: {{ error_count }}
+- **Tokens**: {{ total_tokens }}
+- **Start**: {{ start_time }}
+
+## Tool Distribution
+{% for name, count in tool_counts %}
+- {{ name }}: {{ count }}
+{% endfor %}
+
+## Timeline
+{% for span in spans %}
+[{{ loop.index }}] {{ span.start_time.strftime('%H:%M:%S') }} | {{ span.span_kind }}{% if span.tool_name %} ({{ span.tool_name }}){% endif %} | {{ "%.0f" | format(span.duration_ms) }}ms | {{ "OK" if span.is_success else "ERROR" }}
+{% if span.input_value %}    INPUT: {{ span.input_display }}
+{% endif %}{% if span.output_value %}    OUTPUT: {{ span.output_display }}
+{% endif %}{% if not span.is_success and span.error_message %}    ERROR: {{ span.error_message }}
+{% endif %}
+{% endfor %}
