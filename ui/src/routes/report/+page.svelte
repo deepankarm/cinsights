@@ -136,18 +136,34 @@
 	{#if atAGlance}
 		<div class="glance-banner">
 			<h2 class="glance-title">At a Glance</h2>
-			<div class="glance-grid">
-				<div class="glance-item glance-working">
-					<strong>What's working:</strong> {@html renderLinkedMarkdown(atAGlance.whats_working)}
+			<div class="glance-cards">
+				<div class="glance-card glance-working">
+					<div class="glance-card-icon">✓</div>
+					<div class="glance-card-content">
+						<h3>What's working</h3>
+						<div class="glance-text">{@html renderLinkedMarkdown(atAGlance.whats_working)}</div>
+					</div>
 				</div>
-				<div class="glance-item glance-hindering">
-					<strong>What's hindering:</strong> {@html renderLinkedMarkdown(atAGlance.whats_hindering)}
+				<div class="glance-card glance-hindering">
+					<div class="glance-card-icon">!</div>
+					<div class="glance-card-content">
+						<h3>What's hindering</h3>
+						<div class="glance-text">{@html renderLinkedMarkdown(atAGlance.whats_hindering)}</div>
+					</div>
 				</div>
-				<div class="glance-item glance-wins">
-					<strong>Quick wins:</strong> {@html renderLinkedMarkdown(atAGlance.quick_wins)}
+				<div class="glance-card glance-wins">
+					<div class="glance-card-icon">→</div>
+					<div class="glance-card-content">
+						<h3>Quick wins</h3>
+						<div class="glance-text">{@html renderLinkedMarkdown(atAGlance.quick_wins)}</div>
+					</div>
 				</div>
-				<div class="glance-item glance-ambitious">
-					<strong>Ambitious workflows:</strong> {@html renderLinkedMarkdown(atAGlance.ambitious_workflows)}
+				<div class="glance-card glance-ambitious">
+					<div class="glance-card-icon">★</div>
+					<div class="glance-card-content">
+						<h3>Ambitious workflows</h3>
+						<div class="glance-text">{@html renderLinkedMarkdown(atAGlance.ambitious_workflows)}</div>
+					</div>
 				</div>
 			</div>
 		</div>
@@ -502,11 +518,31 @@
 	.back-link:hover { color: #2563eb; }
 
 	/* At a Glance */
-	.glance-banner { background: linear-gradient(135deg, #fef3c7, #fde68a); border: 1px solid #f59e0b; border-radius: 12px; padding: 24px; margin-bottom: 24px; }
-	.glance-title { font-size: 18px; font-weight: 700; color: #92400e; margin-bottom: 16px; }
-	.glance-grid { display: flex; flex-direction: column; gap: 12px; }
-	.glance-item { font-size: 14px; color: #78350f; line-height: 1.6; }
-	.glance-item strong { color: #92400e; }
+	.glance-banner { margin-bottom: 24px; }
+	.glance-title { font-size: 20px; font-weight: 700; color: #0f172a; margin-bottom: 16px; }
+	.glance-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+	.glance-card { border-radius: 10px; padding: 18px; display: flex; gap: 14px; }
+	.glance-card-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; flex-shrink: 0; }
+	.glance-card-content h3 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 6px; }
+	.glance-text { font-size: 14px; line-height: 1.6; }
+	.glance-text :global(p) { margin-bottom: 6px; }
+	.glance-text :global(p:last-child) { margin-bottom: 0; }
+	.glance-working { background: #f0fdf4; border: 1px solid #bbf7d0; }
+	.glance-working .glance-card-icon { background: #dcfce7; color: #16a34a; }
+	.glance-working h3 { color: #15803d; }
+	.glance-working .glance-text { color: #166534; }
+	.glance-hindering { background: #fef2f2; border: 1px solid #fecaca; }
+	.glance-hindering .glance-card-icon { background: #fee2e2; color: #dc2626; }
+	.glance-hindering h3 { color: #991b1b; }
+	.glance-hindering .glance-text { color: #7f1d1d; }
+	.glance-wins { background: #eff6ff; border: 1px solid #bfdbfe; }
+	.glance-wins .glance-card-icon { background: #dbeafe; color: #2563eb; }
+	.glance-wins h3 { color: #1e40af; }
+	.glance-wins .glance-text { color: #1e3a5f; }
+	.glance-ambitious { background: #faf5ff; border: 1px solid #e9d5ff; }
+	.glance-ambitious .glance-card-icon { background: #f3e8ff; color: #7c3aed; }
+	.glance-ambitious h3 { color: #5b21b6; }
+	.glance-ambitious .glance-text { color: #4c1d95; }
 
 	/* Stats Pills */
 	.stats-pills { display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }
