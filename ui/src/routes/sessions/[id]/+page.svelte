@@ -145,7 +145,7 @@
 </svelte:head>
 
 <div class="nav-row">
-	<a href="/" class="back-link">&larr; Back to dashboard</a>
+	<a href="/sessions" class="back-link">&larr; Back to sessions</a>
 	<a href="/report" class="back-link">View Report &rarr;</a>
 </div>
 

@@ -7,12 +7,12 @@
 <div class="app">
 	<header>
 		<nav>
-			<a href="/" class="logo">cinsights</a>
+			<a href="/report" class="logo">cinsights</a>
 			<span class="tagline">coding agent insights</span>
 			<div class="nav-links">
-				<a href="/" class="nav-link">Sessions</a>
-				<a href="/projects" class="nav-link">Projects</a>
 				<a href="/report" class="nav-link">Report</a>
+				<a href="/projects" class="nav-link">Projects</a>
+				<a href="/sessions" class="nav-link">Sessions</a>
 			</div>
 		</nav>
 	</header>
