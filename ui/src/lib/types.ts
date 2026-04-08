@@ -1,6 +1,8 @@
 export interface SessionRead {
 	id: string;
 	session_id: string | null;
+	user_id: string | null;
+	project_name: string | null;
 	start_time: string;
 	end_time: string | null;
 	model: string | null;
@@ -32,6 +34,8 @@ export interface InsightRead {
 export interface SessionDetail {
 	id: string;
 	session_id: string | null;
+	user_id: string | null;
+	project_name: string | null;
 	start_time: string;
 	end_time: string | null;
 	model: string | null;
@@ -39,7 +43,6 @@ export interface SessionDetail {
 	prompt_tokens: number;
 	completion_tokens: number;
 	status: string;
-	project_name: string | null;
 	tool_calls: ToolCallRead[];
 	insights: InsightRead[];
 }

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime
 
+import pandas as pd
 from phoenix.client import Client
 
 from cinsights.sources.base import SessionData, SpanData, TraceData
@@ -32,12 +34,117 @@ def _span_from_phoenix(span: dict, trace_id: str) -> SpanData:
     )
 
 
+def _df_rows_to_spans(df: pd.DataFrame) -> list[SpanData]:
+    """Convert dataframe rows to SpanData objects."""
+    spans = []
+    for span_id, row in df.iterrows():
+        attrs = {}
+        for col in df.columns:
+            if col.startswith("attributes."):
+                val = row[col]
+                if val is not None and str(val) != "nan":
+                    key = col[len("attributes."):]
+                    attrs[key] = val
+
+        parent_id = row.get("parent_id")
+        if parent_id is not None and str(parent_id) == "nan":
+            parent_id = None
+
+        spans.append(
+            SpanData(
+                span_id=str(span_id),
+                trace_id=str(row.get("context.trace_id", "")),
+                parent_id=str(parent_id) if parent_id else None,
+                name=str(row.get("name", "")),
+                span_kind=str(row.get("span_kind", "UNKNOWN")),
+                status_code=str(row.get("status_code", "UNSET")),
+                start_time=row["start_time"].to_pydatetime(),
+                end_time=row["end_time"].to_pydatetime(),
+                attributes=attrs,
+            )
+        )
+    return spans
+
+
+@dataclass
+class DiscoveredSession:
+    """Lightweight session info discovered from span attributes."""
+
+    session_id: str
+    span_count: int
+    last_span_time: datetime
+    start_time: datetime
+    end_time: datetime
+
+
 class PhoenixSource:
     """Fetch trace data from a local Arize Phoenix instance."""
 
     def __init__(self, base_url: str = "http://localhost:6006", project: str = "claude-code"):
         self.client = Client(base_url=base_url)
         self.project = project
+        self._all_spans_df: pd.DataFrame | None = None  # Cache within a run
+
+    def _fetch_all_spans_df(self) -> pd.DataFrame:
+        """Fetch all spans as a dataframe, cached for the lifetime of this source."""
+        if self._all_spans_df is not None:
+            return self._all_spans_df
+        try:
+            self._all_spans_df = self.client.spans.get_spans_dataframe(
+                project_name=self.project,
+                limit=10000,
+            )
+        except Exception:
+            logger.exception("Failed to fetch spans dataframe from Phoenix")
+            self._all_spans_df = pd.DataFrame()
+        return self._all_spans_df
+
+    def discover_sessions(
+        self,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+    ) -> list[DiscoveredSession]:
+        """Discover all sessions by scanning span attributes.
+
+        Returns lightweight session metadata (ID, span count, timestamps)
+        for deciding what needs (re-)analysis.
+        """
+        df = self._fetch_all_spans_df()
+        if df.empty:
+            return []
+
+        sid_col = "attributes.session.id"
+        if sid_col not in df.columns:
+            return []
+
+        # Drop rows without session.id
+        df_with_sid = df[df[sid_col].notna()]
+        if df_with_sid.empty:
+            return []
+
+        results = []
+        for session_id, group in df_with_sid.groupby(sid_col):
+            session_start = group["start_time"].min().to_pydatetime()
+            session_end = group["end_time"].max().to_pydatetime()
+            last_span = group["end_time"].max().to_pydatetime()
+
+            if start_time and session_end < start_time:
+                continue
+            if end_time and session_start > end_time:
+                continue
+
+            results.append(
+                DiscoveredSession(
+                    session_id=str(session_id),
+                    span_count=len(group),
+                    last_span_time=last_span,
+                    start_time=session_start,
+                    end_time=session_end,
+                )
+            )
+
+        results.sort(key=lambda s: s.start_time, reverse=True)
+        return results
 
     def get_sessions(
         self,
@@ -46,105 +153,16 @@ class PhoenixSource:
         limit: int = 100,
     ) -> list[SessionData]:
         """Fetch sessions from Phoenix with their traces."""
-        try:
-            phoenix_sessions = self.client.sessions.list(
-                project_name=self.project, limit=limit
+        discovered = self.discover_sessions(start_time, end_time)
+        return [
+            SessionData(
+                session_id=d.session_id,
+                traces=[],
+                start_time=d.start_time,
+                end_time=d.end_time,
             )
-        except Exception:
-            # Fall back to fetching traces directly and grouping by session.id
-            logger.info("sessions.list not available, falling back to traces")
-            return self._sessions_from_traces(start_time, end_time, limit)
-
-        results = []
-        for ps in phoenix_sessions:
-            session_start = _parse_dt(ps["start_time"])
-            session_end = _parse_dt(ps["end_time"])
-
-            if start_time and session_end < start_time:
-                continue
-            if end_time and session_start > end_time:
-                continue
-
-            traces = []
-            for trace_ref in ps.get("traces", []):
-                trace_id = trace_ref.get("trace_id", "")
-                if not trace_id:
-                    continue
-                traces.append(
-                    TraceData(
-                        trace_id=trace_id,
-                        start_time=_parse_dt(
-                            trace_ref.get("start_time", ps["start_time"])
-                        ),
-                        end_time=_parse_dt(trace_ref.get("end_time", ps["end_time"])),
-                    )
-                )
-
-            results.append(
-                SessionData(
-                    session_id=ps["session_id"],
-                    traces=traces,
-                    start_time=session_start,
-                    end_time=session_end,
-                )
-            )
-
-        return results[:limit]
-
-    def _sessions_from_traces(
-        self,
-        start_time: datetime | None,
-        end_time: datetime | None,
-        limit: int,
-    ) -> list[SessionData]:
-        """Build session list from traces when sessions API is unavailable."""
-        try:
-            traces = self.client.traces.get_traces(
-                project_identifier=self.project,
-                start_time=start_time,
-                end_time=end_time,
-                limit=limit,
-            )
-        except Exception:
-            logger.exception("Failed to fetch traces from Phoenix")
-            return []
-
-        # Group traces by session.id (from root span attributes)
-        session_map: dict[str, list[TraceData]] = {}
-        for t in traces:
-            trace_id = t["trace_id"]
-            trace_start = _parse_dt(t["start_time"])
-            trace_end = _parse_dt(t["end_time"])
-
-            # Try to get session.id from spans
-            session_id = trace_id  # fallback
-            for span in t.get("spans", []):
-                attrs = span.get("attributes", {})
-                if "session.id" in attrs:
-                    session_id = attrs["session.id"]
-                    break
-
-            td = TraceData(
-                trace_id=trace_id,
-                start_time=trace_start,
-                end_time=trace_end,
-            )
-            session_map.setdefault(session_id, []).append(td)
-
-        results = []
-        for session_id, trace_list in session_map.items():
-            trace_list.sort(key=lambda t: t.start_time)
-            results.append(
-                SessionData(
-                    session_id=session_id,
-                    traces=trace_list,
-                    start_time=trace_list[0].start_time,
-                    end_time=trace_list[-1].end_time,
-                )
-            )
-
-        results.sort(key=lambda s: s.start_time, reverse=True)
-        return results[:limit]
+            for d in discovered[:limit]
+        ]
 
     def get_trace(self, trace_id: str) -> TraceData | None:
         """Fetch a single trace with all its spans."""
@@ -162,9 +180,7 @@ class PhoenixSource:
             return None
 
         trace = traces[0]
-        spans = [
-            _span_from_phoenix(s, trace_id) for s in trace.get("spans", [])
-        ]
+        spans = [_span_from_phoenix(s, trace_id) for s in trace.get("spans", [])]
         spans.sort(key=lambda s: s.start_time)
 
         return TraceData(
@@ -199,59 +215,19 @@ class PhoenixSource:
         return result
 
     def get_spans_by_session(self, session_id: str) -> list[SpanData]:
-        """Fetch all spans for a session ID (across all its traces).
-
-        Session IDs are stored as span attributes (session.id / attributes.session.id).
-        We fetch all spans via the dataframe API and filter by session.id.
-        """
-        try:
-            df = self.client.spans.get_spans_dataframe(
-                project_name=self.project,
-                limit=5000,
-            )
-            if df.empty:
-                return []
-
-            # Filter by session.id attribute
-            sid_col = "attributes.session.id"
-            if sid_col not in df.columns:
-                return []
-
-            filtered = df[df[sid_col] == session_id]
-            if filtered.empty:
-                return []
-
-            all_spans = []
-            for span_id, row in filtered.iterrows():
-                # Build attributes dict from attributes.* columns
-                attrs = {}
-                for col in filtered.columns:
-                    if col.startswith("attributes."):
-                        val = row[col]
-                        if val is not None and str(val) != "nan":
-                            # Strip "attributes." prefix for our normalized model
-                            key = col[len("attributes."):]
-                            attrs[key] = val
-
-                parent_id = row.get("parent_id")
-                if parent_id is not None and str(parent_id) == "nan":
-                    parent_id = None
-
-                span = SpanData(
-                    span_id=str(span_id),
-                    trace_id=str(row.get("context.trace_id", "")),
-                    parent_id=str(parent_id) if parent_id else None,
-                    name=str(row.get("name", "")),
-                    span_kind=str(row.get("span_kind", "UNKNOWN")),
-                    status_code=str(row.get("status_code", "UNSET")),
-                    start_time=row["start_time"].to_pydatetime(),
-                    end_time=row["end_time"].to_pydatetime(),
-                    attributes=attrs,
-                )
-                all_spans.append(span)
-
-            all_spans.sort(key=lambda s: s.start_time)
-            return all_spans
-        except Exception:
-            logger.exception("Failed to fetch spans for session %s", session_id)
+        """Fetch all spans for a session ID (across all its traces)."""
+        df = self._fetch_all_spans_df()
+        if df.empty:
             return []
+
+        sid_col = "attributes.session.id"
+        if sid_col not in df.columns:
+            return []
+
+        filtered = df[df[sid_col] == session_id]
+        if filtered.empty:
+            return []
+
+        spans = _df_rows_to_spans(filtered)
+        spans.sort(key=lambda s: s.start_time)
+        return spans

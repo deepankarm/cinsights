@@ -40,6 +40,20 @@ class SpanData:
         return self.status_code != "ERROR"
 
     @property
+    def user_id(self) -> str | None:
+        return self.attributes.get("user.id")
+
+    @property
+    def project_name(self) -> str | None:
+        # Handle both flat ("project.name") and nested ({"project": {"name": ...}})
+        if "project.name" in self.attributes:
+            return self.attributes["project.name"]
+        project = self.attributes.get("project")
+        if isinstance(project, dict):
+            return project.get("name")
+        return None
+
+    @property
     def model_name(self) -> str | None:
         return self.attributes.get("llm.model_name")
 

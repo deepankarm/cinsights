@@ -41,27 +41,51 @@ def _store_analysis(
     # CC traces use CHAIN spans with tool.name attribute for tool calls
     tool_spans = [s for s in spans if s.tool_name and s.parent_id is not None]
 
+    # Extract user.id and project.name from span attributes
+    # Note: project.name is an OTEL resource attribute — Phoenix doesn't expose it
+    # via API yet (see Arize-ai/phoenix#11645). Will be null until that ships.
+    user_id = None
+    project_name = None
+    for s in spans:
+        if not user_id:
+            user_id = s.user_id
+        if not project_name:
+            project_name = s.project_name
+        if user_id and project_name:
+            break
+
+    last_span_time = max(s.end_time for s in spans) if spans else None
+
     if not existing:
         coding_session = CodingSession(
             id=trace_id,
             session_id=session_id,
+            user_id=user_id,
+            project_name=project_name,
             start_time=trace.start_time,
             end_time=trace.end_time,
             model=root.model_name if root else None,
             total_tokens=root.total_tokens if root else 0,
             prompt_tokens=root.prompt_tokens if root else 0,
             completion_tokens=root.completion_tokens if root else 0,
+            span_count=len(spans),
+            last_span_time=last_span_time,
             status=SessionStatus.PENDING,
         )
         db.add(coding_session)
     else:
         coding_session = existing
+        # Update metadata that may have changed
+        coding_session.user_id = user_id or existing.user_id
+        coding_session.project_name = project_name or existing.project_name
+        coding_session.span_count = len(spans)
+        coding_session.last_span_time = last_span_time
 
     # Clear old data if re-analyzing
-    if force and existing:
-        for tc in list(existing.tool_calls):
+    if force or existing:
+        for tc in list(coding_session.tool_calls):
             db.delete(tc)
-        for ins in list(existing.insights):
+        for ins in list(coding_session.insights):
             db.delete(ins)
         db.flush()
 
@@ -214,7 +238,7 @@ async def _analyze_async(
                 task, description=f"Found {len(work_items)} session(s) with spans"
             )
     else:
-        # Discover from Phoenix
+        # Discover all sessions from Phoenix
         start_time = datetime.now(UTC) - timedelta(hours=hours)
 
         with Progress(
@@ -222,27 +246,45 @@ async def _analyze_async(
             TextColumn("[progress.description]{task.description}"),
             console=console,
         ) as progress:
-            task = progress.add_task("Fetching sessions from Phoenix...", total=None)
-            sessions = source.get_sessions(start_time=start_time, limit=limit)
-            progress.update(task, description=f"Found {len(sessions)} sessions")
+            task = progress.add_task("Discovering sessions from Phoenix...", total=None)
+            discovered = source.discover_sessions(start_time=start_time)
+            progress.update(task, description=f"Found {len(discovered)} sessions")
 
-        if not sessions:
+        if not discovered:
             console.print(f"[yellow]No sessions found in the last {hours} hours.[/yellow]")
             raise typer.Exit(0)
 
-        # Filter to traces needing analysis
+        # Filter to sessions needing analysis (new or changed)
+        skipped = 0
         engine = get_engine()
         with Session(engine) as db:
-            for session_data in sessions:
-                for trace in session_data.traces:
-                    existing = db.get(CodingSession, trace.trace_id)
-                    if existing and existing.status == SessionStatus.ANALYZED and not force:
+            for d in discovered[:limit]:
+                existing = db.get(CodingSession, d.session_id)
+                if existing and existing.status == SessionStatus.ANALYZED and not force:
+                    # Check if session has changed (more spans or newer span)
+                    changed = existing.span_count != d.span_count
+                    if not changed:
+                        skipped += 1
                         continue
-                    spans = source.get_spans(trace.trace_id)
-                    if spans:
-                        work_items.append(
-                            (trace.trace_id, session_data.session_id, trace, spans)
-                        )
+                    console.print(
+                        f"  [cyan]↻[/cyan] {d.session_id[:16]}... changed "
+                        f"({existing.span_count}→{d.span_count} spans)"
+                    )
+
+                spans = source.get_spans_by_session(d.session_id)
+                if spans:
+                    from cinsights.sources.base import TraceData
+
+                    trace = TraceData(
+                        trace_id=d.session_id,
+                        start_time=d.start_time,
+                        end_time=d.end_time,
+                        spans=spans,
+                    )
+                    work_items.append((d.session_id, d.session_id, trace, spans))
+
+        if skipped:
+            console.print(f"  [dim]{skipped} session(s) unchanged, skipped[/dim]")
 
     if not work_items:
         console.print("[yellow]No traces to analyze (all already analyzed).[/yellow]")
