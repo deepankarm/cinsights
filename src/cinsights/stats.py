@@ -114,32 +114,50 @@ class DigestStats(BaseModel):
 
 
 def detect_project_from_tool_calls(tool_calls: list) -> str | None:
-    """Extract project name from file paths in tool call inputs."""
-    file_path_re = re.compile(r'"?(/(?:Users|home)/\w+/[\w/.-]+\.\w+)')
-    repo_markers = ("repos", "projects", "code", "work", "src")
+    """Extract project name from file paths in tool call inputs.
 
-    repo_counts: dict[str, int] = {}
+    Extracts directory paths from file_path JSON fields, finds the deepest
+    common directory for each file, and returns the most frequent one.
+    Correctly identifies subdirectory projects (e.g., gnagents inside
+    repos/GoodNotes/gnai/gnagents/).
+    """
+    file_path_re = re.compile(r'"file_path":\s*"(/[^"]+)"')
+    # Directories that indicate "this is inside a project, go up one level"
+    src_markers = {"internal", "src", "cmd", "lib", "pkg", "app", "tests", "test"}
+
+    dir_counts: dict[str, int] = {}
     for tc in tool_calls:
         input_val = tc.input_value if hasattr(tc, "input_value") else tc.get("input_value")
         if not input_val:
             continue
         for match in file_path_re.finditer(input_val):
-            parts = match.group(1).split("/")
-            for i, p in enumerate(parts):
-                if p in repo_markers:
-                    remaining = [x for x in parts[i + 1 :] if x and not x.startswith(".")]
-                    if len(remaining) >= 2:
-                        repo_counts[remaining[1]] = repo_counts.get(remaining[1], 0) + 1
-                    elif remaining:
-                        repo_counts[remaining[0]] = repo_counts.get(remaining[0], 0) + 1
-                    break
+            parts = [p for p in match.group(1).split("/") if p]
+            # Walk backwards from the file to find the project directory
+            # It's the directory just before internal/, src/, etc.
+            # Or the deepest non-system directory if no marker found
+            found = False
+            for i in range(len(parts) - 1, 0, -1):
+                if parts[i] in src_markers:
+                    project = parts[i - 1]
+                    # Skip system/user dirs
+                    if project not in ("Users", "home", "root", "var", "tmp"):
+                        dir_counts[project] = dir_counts.get(project, 0) + 1
+                        found = True
+                        break
+            if not found and len(parts) >= 3:
+                # Fallback: use the directory 2 levels before the file
+                # e.g., /Users/X/repos/Y/Z/file.py → Z
+                    candidate = parts[-2]
+                    if candidate not in ("Users", "home", "root", ".claude-personal",
+                                         ".claude-work", ".claude"):
+                        dir_counts[candidate] = dir_counts.get(candidate, 0) + 1
 
-    if not repo_counts:
+    if not dir_counts:
         return None
 
-    winner, count = max(repo_counts.items(), key=lambda x: x[1])
-    total = sum(repo_counts.values())
-    return winner if count / total > 0.7 else None
+    winner, count = max(dir_counts.items(), key=lambda x: x[1])
+    total = sum(dir_counts.values())
+    return winner if count / total > 0.5 else None
 
 
 # --- Query helpers ---
@@ -377,12 +395,27 @@ def compute_plan_mode_stats(db, start, end, project_name=None) -> PlanModeStats:
 
 
 def detect_claude_md(db, start, end, project_name=None) -> bool:
-    """Check if any session in the period reads or edits a CLAUDE.md file."""
+    """Check if any session reads or edits a CLAUDE.md file."""
     q = _tc_agg_query(
-        (func.count(),), start, end, project_name
-    ).where(ToolCall.input_value.like("%CLAUDE.md%"))
-    count = db.exec(q).one()
-    return count > 0
+        (ToolCall.input_value,), start, end, project_name
+    ).where(
+        col(ToolCall.tool_name).in_(["Read", "Edit", "Write"])
+    ).where(ToolCall.input_value.isnot(None))
+
+    for input_val in db.exec(q).all():
+        if not input_val:
+            continue
+        # Parse the file_path from JSON input and check if it ends with CLAUDE.md
+        import json as json_mod
+
+        try:
+            data = json_mod.loads(input_val)
+            fp = data.get("file_path", "") if isinstance(data, dict) else ""
+            if fp.endswith("CLAUDE.md") or fp.endswith("CLAUDE.local.md"):
+                return True
+        except (json_mod.JSONDecodeError, TypeError):
+            continue
+    return False
 
 
 def detect_overlapping_sessions(db, start, end, project_name=None) -> list[dict]:
