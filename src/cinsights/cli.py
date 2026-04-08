@@ -61,7 +61,9 @@ def _store_analysis(
 
     last_span_time = max(s.end_time for s in spans) if spans else None
 
-    # Aggregate tokens from all Turn spans
+    # Aggregate tokens from all Turn spans + build context growth data
+    import json as json_mod
+
     turn_spans = sorted(
         [s for s in spans if s.name.startswith("Turn ")],
         key=lambda s: s.start_time,
@@ -69,6 +71,15 @@ def _store_analysis(
     total_completion = sum(s.completion_tokens for s in turn_spans)
     last_turn_prompt = turn_spans[-1].prompt_tokens if turn_spans else 0
     total_tokens = last_turn_prompt + total_completion
+
+    context_growth = json_mod.dumps([
+        {
+            "turn": int(s.name.replace("Turn ", "")),
+            "prompt_tokens": s.prompt_tokens,
+            "completion_tokens": s.completion_tokens,
+        }
+        for s in turn_spans
+    ])
 
     if not existing:
         coding_session = CodingSession(
@@ -82,6 +93,7 @@ def _store_analysis(
             total_tokens=total_tokens,
             prompt_tokens=last_turn_prompt,
             completion_tokens=total_completion,
+            context_growth_json=context_growth,
             span_count=len(spans),
             last_span_time=last_span_time,
             status=SessionStatus.PENDING,
@@ -95,6 +107,7 @@ def _store_analysis(
         coding_session.total_tokens = total_tokens
         coding_session.prompt_tokens = last_turn_prompt
         coding_session.completion_tokens = total_completion
+        coding_session.context_growth_json = context_growth
         coding_session.span_count = len(spans)
         coding_session.last_span_time = last_span_time
 
