@@ -148,7 +148,11 @@ def _base_query(start: datetime, end: datetime, project_name: str | None = None)
 
 def _tc_agg_query(columns, start, end, project_name=None):
     """Build a tool_call aggregate query with session join + filters."""
-    q = select(*columns).join(CodingSession, ToolCall.session_id == CodingSession.id)
+    q = (
+        select(*columns)
+        .select_from(ToolCall)
+        .join(CodingSession, ToolCall.session_id == CodingSession.id)
+    )
     for clause in _session_filter(start, end, project_name):
         q = q.where(clause)
     return q
@@ -181,7 +185,7 @@ def compute_error_breakdown(db, start, end, project_name=None):
     ).all()
 
     error_types: dict[str, int] = {}
-    for (output,) in failed_calls:
+    for output in failed_calls:
         if not output:
             error_types["Other"] = error_types.get("Other", 0) + 1
             continue
@@ -209,7 +213,7 @@ def compute_language_distribution(db, start, end, project_name=None) -> dict[str
 
     inputs = db.exec(q).all()
     lang_counts: dict[str, int] = {}
-    for (input_val,) in inputs:
+    for input_val in inputs:
         if not input_val:
             continue
         for match in _FILE_PATH_RE.finditer(input_val):
@@ -274,14 +278,19 @@ def compute_session_health(db, start, end, project_name=None) -> list[SessionHea
 
 
 def compute_permission_count(db, start, end, project_name=None) -> int:
-    q = _tc_agg_query(
-        (func.count(),), start, end, project_name
-    ).where(
+    q = (
+        select(func.count())
+        .select_from(ToolCall)
+        .join(CodingSession, ToolCall.session_id == CodingSession.id)
+    )
+    for clause in _session_filter(start, end, project_name):
+        q = q.where(clause)
+    q = q.where(
         col(ToolCall.tool_name).in_(
             ["Permission Request", "Notification: permission_prompt"]
         )
     )
-    return db.exec(q).one()[0]
+    return db.exec(q).one()
 
 
 def detect_overlapping_sessions(db, start, end, project_name=None) -> list[dict]:
@@ -364,8 +373,14 @@ def compute_all(
     )
     active_days = len({s.start_time.date() for s in sessions})
 
-    tc_count_q = _tc_agg_query((func.count(),), start, end, project_name)
-    total_tool_calls = db.exec(tc_count_q).one()[0]
+    tc_count_q = (
+        select(func.count())
+        .select_from(ToolCall)
+        .join(CodingSession, ToolCall.session_id == CodingSession.id)
+    )
+    for clause in _session_filter(start, end, project_name):
+        tc_count_q = tc_count_q.where(clause)
+    total_tool_calls = db.exec(tc_count_q).one()
 
     analysis_tokens = sum(
         s.analysis_prompt_tokens + s.analysis_completion_tokens for s in sessions
