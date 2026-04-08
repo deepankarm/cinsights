@@ -7,6 +7,7 @@
 	let digest: DigestDetail | null = $state(null);
 	let loading = $state(true);
 	let error: string | null = $state(null);
+	let showAllSessions = $state(false);
 
 	onMount(async () => {
 		try {
@@ -201,17 +202,30 @@
 		</div>
 
 		<!-- Session Health Grid -->
+		{@const healthLimit = 20}
+		{@const healthItems = showAllSessions ? stats.session_health : stats.session_health.slice(0, healthLimit)}
 		<div class="section">
-			<h2>Session Health</h2>
+			<h2>Session Health ({stats.session_health.length})</h2>
 			<div class="health-grid">
-				{#each stats.session_health as h}
+				{#each healthItems as h}
+					{@const sessionNum = sessionIds.indexOf(h.session_id) + 1}
 					<a href="/sessions/{h.session_id}" class="health-card" style="border-left: 3px solid {gradeColor(h.grade)}">
-						<span class="health-grade" style="color:{gradeColor(h.grade)}">{h.grade}</span>
+						<div class="health-top">
+							<span class="health-grade" style="color:{gradeColor(h.grade)}">{h.grade}</span>
+							{#if sessionNum > 0}
+								<span class="health-session-num">Session {sessionNum}</span>
+							{/if}
+						</div>
 						<span class="health-date">{new Date(h.start_time).toLocaleDateString()}</span>
 						<span class="health-meta">{h.duration_minutes}m | {h.tool_count} tools | {formatTokens(h.total_tokens ?? 0)}</span>
 					</a>
 				{/each}
 			</div>
+			{#if stats.session_health.length > healthLimit}
+				<button class="show-more-btn" onclick={() => showAllSessions = !showAllSessions}>
+					{showAllSessions ? 'Show fewer' : `Show all ${stats.session_health.length} sessions`}
+				</button>
+			{/if}
 		</div>
 	{/if}
 
@@ -430,9 +444,13 @@
 	.health-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
 	.health-card { background: white; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; text-decoration: none; color: inherit; }
 	.health-card:hover { background: #f8fafc; }
+	.health-top { display: flex; justify-content: space-between; align-items: center; }
 	.health-grade { font-size: 18px; font-weight: 700; }
+	.health-session-num { font-size: 11px; font-weight: 600; color: #2563eb; }
 	.health-date { font-size: 12px; color: #64748b; }
 	.health-meta { font-size: 11px; color: #94a3b8; }
+	.show-more-btn { display: block; margin: 12px auto 0; background: none; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 16px; font-size: 13px; color: #64748b; cursor: pointer; }
+	.show-more-btn:hover { background: #f8fafc; color: #334155; }
 
 	/* Sections */
 	.section { margin-bottom: 32px; }
