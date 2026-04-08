@@ -76,6 +76,15 @@ class PlanModeStats(BaseModel):
     plan_agent_tokens: int
 
 
+class ProjectBreakdown(BaseModel):
+    name: str
+    session_count: int
+    total_tokens: int
+    total_tool_calls: int
+    top_tools: list[str]
+    has_claude_md: bool
+
+
 class DigestStats(BaseModel):
     """All computed statistics for a digest period."""
 
@@ -106,6 +115,7 @@ class DigestStats(BaseModel):
     permission_stats: PermissionStats
     plan_mode_stats: PlanModeStats
     has_claude_md: bool
+    project_breakdown: list[ProjectBreakdown]
 
     analysis_tokens_used: int
 
@@ -530,6 +540,34 @@ def compute_all(
         "start_time": s.start_time.isoformat(),
     } for s in sessions]
 
+    # Per-project breakdown (only for global digests)
+    proj_breakdown: list[ProjectBreakdown] = []
+    if not project_name:
+        proj_groups: dict[str, list] = {}
+        for s in sessions:
+            pn = s.project_name or "unknown"
+            proj_groups.setdefault(pn, []).append(s)
+
+        for pn, proj_sessions in sorted(
+            proj_groups.items(), key=lambda x: -len(x[1])
+        ):
+            proj_ids = [s.id for s in proj_sessions]
+            proj_tc = db.exec(
+                select(ToolCall.tool_name, func.count())
+                .where(col(ToolCall.session_id).in_(proj_ids))
+                .group_by(ToolCall.tool_name)
+                .order_by(func.count().desc())
+                .limit(3)
+            ).all()
+            proj_breakdown.append(ProjectBreakdown(
+                name=pn,
+                session_count=len(proj_sessions),
+                total_tokens=sum(s.total_tokens for s in proj_sessions),
+                total_tool_calls=sum(c for _, c in proj_tc),
+                top_tools=[name for name, _ in proj_tc],
+                has_claude_md=detect_claude_md(db, start, end, pn),
+            ))
+
     return DigestStats(
         period_start=start, period_end=end,
         session_count=len(sessions), analyzed_count=len(sessions),
@@ -546,5 +584,6 @@ def compute_all(
         permission_stats=compute_permission_stats(db, start, end, p),
         plan_mode_stats=compute_plan_mode_stats(db, start, end, p),
         has_claude_md=detect_claude_md(db, start, end, p),
+        project_breakdown=proj_breakdown,
         analysis_tokens_used=analysis_tokens,
     )
