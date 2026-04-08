@@ -56,12 +56,15 @@ class DigestDetail(BaseModel):
 async def list_digests(
     limit: int = 10,
     project: str | None = None,
+    global_only: bool = False,
     db: Session = Depends(get_db),
 ):
-    """List digests, newest first. Optionally filter by project."""
+    """List digests, newest first. Filter by project or global scope."""
     q = select(Digest).order_by(col(Digest.created_at).desc())
     if project:
         q = q.where(Digest.project_name == project)
+    elif global_only:
+        q = q.where(Digest.project_name.is_(None))
     digests = db.exec(q.limit(limit)).all()
 
     return [
