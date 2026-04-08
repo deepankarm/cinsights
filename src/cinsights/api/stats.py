@@ -14,9 +14,10 @@ router = APIRouter(prefix="/api/stats", tags=["stats"])
 @router.get("/overview", response_model=DigestStats)
 async def get_stats_overview(
     days: int = 7,
+    project: str | None = None,
     db: Session = Depends(get_db),
 ):
     """Compute all stats for the given period. Zero LLM cost."""
     end = datetime.now(UTC)
     start = end - timedelta(days=days)
-    return compute_all(db, start, end)
+    return compute_all(db, start, end, project_name=project)

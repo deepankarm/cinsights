@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/state';
 	import { getDigests, getDigest } from '$lib/api';
 	import { renderMarkdown } from '$lib/markdown';
 	import type { DigestDetail, DigestSectionRead, DigestStatsData } from '$lib/types';
@@ -9,9 +10,11 @@
 	let error: string | null = $state(null);
 	let showAllSessions = $state(false);
 
+	const projectFilter = $derived(page.url.searchParams.get('project'));
+
 	onMount(async () => {
 		try {
-			const digests = await getDigests();
+			const digests = await getDigests(projectFilter ?? undefined);
 			if (digests.length > 0 && digests[0].status === 'complete') {
 				digest = await getDigest(digests[0].id);
 			}
@@ -104,12 +107,25 @@
 {:else if !digest}
 	<div class="empty-state">
 		<h2>No Report Yet</h2>
-		<p>Run <code>cinsights digest --days 30</code> to generate your insights report.</p>
+		{#if projectFilter}
+			<p>Run <code>cinsights digest --days 30 --project {projectFilter}</code> to generate a report for this project.</p>
+			<a href="/projects" class="back-link">&larr; Back to Projects</a>
+		{:else}
+			<p>Run <code>cinsights digest --days 30</code> to generate your insights report.</p>
+		{/if}
 	</div>
 {:else}
 	<!-- Header -->
 	<div class="report-header">
-		<h1>Insights Report</h1>
+		{#if projectFilter}
+			<a href="/projects" class="back-link">&larr; All Projects</a>
+		{/if}
+		<h1>
+			{#if digest.project_name}
+				<span class="project-label">{digest.project_name}</span>
+			{/if}
+			Insights Report
+		</h1>
 		<p class="subtitle">
 			{new Date(digest.period_start).toLocaleDateString()} - {new Date(digest.period_end).toLocaleDateString()}
 			| {digest.session_count} sessions
@@ -410,7 +426,10 @@
 
 	.report-header { margin-bottom: 24px; }
 	.report-header h1 { font-size: 28px; font-weight: 700; color: #0f172a; }
+	.project-label { font-family: monospace; color: #2563eb; margin-right: 8px; }
 	.subtitle { color: #64748b; font-size: 14px; }
+	.back-link { color: #64748b; text-decoration: none; font-size: 13px; display: inline-block; margin-bottom: 8px; }
+	.back-link:hover { color: #2563eb; }
 
 	/* At a Glance */
 	.glance-banner { background: linear-gradient(135deg, #fef3c7, #fde68a); border: 1px solid #f59e0b; border-radius: 12px; padding: 24px; margin-bottom: 24px; }

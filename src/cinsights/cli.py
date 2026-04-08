@@ -41,18 +41,18 @@ def _store_analysis(
     # CC traces use CHAIN spans with tool.name attribute for tool calls
     tool_spans = [s for s in spans if s.tool_name and s.parent_id is not None]
 
-    # Extract user.id and project.name from span attributes
-    # Note: project.name is an OTEL resource attribute — Phoenix doesn't expose it
-    # via API yet (see Arize-ai/phoenix#11645). Will be null until that ships.
+    # Extract user.id from span attributes
     user_id = None
-    project_name = None
     for s in spans:
         if not user_id:
             user_id = s.user_id
-        if not project_name:
-            project_name = s.project_name
-        if user_id and project_name:
+        if user_id:
             break
+
+    # Detect project from file paths in tool calls (heuristic)
+    from cinsights.stats import detect_project_from_tool_calls
+
+    project_name = detect_project_from_tool_calls(tool_spans)
 
     last_span_time = max(s.end_time for s in spans) if spans else None
 
@@ -397,7 +397,7 @@ async def _digest_async(
     with Session(engine) as db:
         # Compute stats
         console.print(f"[bold]Computing stats for last {days} days...[/bold]")
-        stats = compute_all(db, start, end)
+        stats = compute_all(db, start, end, project_name=project)
 
         if stats.session_count == 0:
             console.print("[yellow]No analyzed sessions in this period.[/yellow]")

@@ -1,8 +1,6 @@
 """Computed statistics from the database — zero LLM cost.
 
-All functions take a SQLModel Session and date range, and return
-structured data from pure SQL queries against coding_session,
-tool_call, and insight tables.
+All functions take a SQLModel Session, date range, and optional project_name filter.
 """
 
 from __future__ import annotations
@@ -24,49 +22,20 @@ from cinsights.db.models import (
 # --- File extension to language mapping ---
 
 _EXT_TO_LANG: dict[str, str] = {
-    ".py": "Python",
-    ".go": "Go",
-    ".js": "JavaScript",
-    ".ts": "TypeScript",
-    ".tsx": "TypeScript",
-    ".jsx": "JavaScript",
-    ".rs": "Rust",
-    ".java": "Java",
-    ".rb": "Ruby",
-    ".php": "PHP",
-    ".c": "C",
-    ".cpp": "C++",
-    ".h": "C/C++",
-    ".cs": "C#",
-    ".swift": "Swift",
-    ".kt": "Kotlin",
-    ".scala": "Scala",
-    ".json": "JSON",
-    ".yaml": "YAML",
-    ".yml": "YAML",
-    ".toml": "TOML",
-    ".xml": "XML",
-    ".html": "HTML",
-    ".css": "CSS",
-    ".scss": "CSS",
-    ".md": "Markdown",
-    ".sql": "SQL",
-    ".sh": "Shell",
-    ".bash": "Shell",
-    ".zsh": "Shell",
-    ".dockerfile": "Docker",
-    ".tf": "Terraform",
-    ".svelte": "Svelte",
-    ".vue": "Vue",
+    ".py": "Python", ".go": "Go", ".js": "JavaScript", ".ts": "TypeScript",
+    ".tsx": "TypeScript", ".jsx": "JavaScript", ".rs": "Rust", ".java": "Java",
+    ".rb": "Ruby", ".php": "PHP", ".c": "C", ".cpp": "C++", ".h": "C/C++",
+    ".cs": "C#", ".swift": "Swift", ".kt": "Kotlin", ".scala": "Scala",
+    ".json": "JSON", ".yaml": "YAML", ".yml": "YAML", ".toml": "TOML",
+    ".xml": "XML", ".html": "HTML", ".css": "CSS", ".scss": "CSS",
+    ".md": "Markdown", ".sql": "SQL", ".sh": "Shell", ".bash": "Shell",
+    ".zsh": "Shell", ".dockerfile": "Docker", ".tf": "Terraform",
+    ".svelte": "Svelte", ".vue": "Vue",
 }
 
-# Tools that operate on files
 _FILE_TOOLS = {"Read", "Edit", "Write", "Glob", "Grep", "NotebookEdit"}
-
-# Regex to extract file paths from tool input
 _FILE_PATH_RE = re.compile(r'["\']?(/[^\s"\',:}{]+\.\w+)')
 
-# Error type patterns in failed tool output
 _ERROR_PATTERNS = [
     ("Command Failed", re.compile(r"exit code [1-9]|command.+failed|error code", re.I)),
     ("User Rejected", re.compile(r"user.+reject|denied|doesn't want", re.I)),
@@ -96,13 +65,11 @@ class SessionHealthScore(BaseModel):
 class DigestStats(BaseModel):
     """All computed statistics for a digest period."""
 
-    # Period
     period_start: datetime
     period_end: datetime
     session_count: int
     analyzed_count: int
 
-    # Aggregates
     total_tool_calls: int
     total_tokens: int
     total_prompt_tokens: int
@@ -110,81 +77,111 @@ class DigestStats(BaseModel):
     total_duration_minutes: float
     active_days: int
 
-    # Distributions
     tool_distribution: dict[str, int]
-    error_breakdown: dict[str, int]  # tool_name -> failed count
-    error_types: dict[str, int]  # "Command Failed" -> count
+    error_breakdown: dict[str, int]
+    error_types: dict[str, int]
     language_distribution: dict[str, int]
-    time_of_day: dict[int, int]  # hour -> session count
+    time_of_day: dict[int, int]
 
-    # Session-level
-    session_durations: list[dict]  # [{session_id, duration_min, start_time}]
+    session_durations: list[dict]
     session_health: list[SessionHealthScore]
-    tokens_per_session: list[dict]  # [{session_id, tokens, start_time}]
-
-    # Overlap detection
-    overlapping_sessions: list[dict]  # [{session_ids, overlap_minutes}]
-
-    # Per-session insight summaries (for LLM digest context)
+    tokens_per_session: list[dict]
+    overlapping_sessions: list[dict]
     session_summaries: list[dict]
-
-    # Permission/notification stats
     permission_prompt_count: int
-
-    # cinsights own usage
     analysis_tokens_used: int
 
 
-def _base_query(start: datetime, end: datetime):
-    """Filter for sessions in the date range that are analyzed."""
-    return (
-        select(CodingSession)
-        .where(CodingSession.start_time >= start)
-        .where(CodingSession.start_time <= end)
-        .where(CodingSession.status == SessionStatus.ANALYZED)
-    )
+# --- Project detection ---
 
 
-def compute_tool_distribution(
-    db: Session, start: datetime, end: datetime
-) -> dict[str, int]:
+def detect_project_from_tool_calls(tool_calls: list) -> str | None:
+    """Extract project name from file paths in tool call inputs."""
+    file_path_re = re.compile(r'"?(/(?:Users|home)/\w+/[\w/.-]+\.\w+)')
+    repo_markers = ("repos", "projects", "code", "work", "src")
+
+    repo_counts: dict[str, int] = {}
+    for tc in tool_calls:
+        input_val = tc.input_value if hasattr(tc, "input_value") else tc.get("input_value")
+        if not input_val:
+            continue
+        for match in file_path_re.finditer(input_val):
+            parts = match.group(1).split("/")
+            for i, p in enumerate(parts):
+                if p in repo_markers:
+                    remaining = [x for x in parts[i + 1 :] if x and not x.startswith(".")]
+                    if len(remaining) >= 2:
+                        repo_counts[remaining[1]] = repo_counts.get(remaining[1], 0) + 1
+                    elif remaining:
+                        repo_counts[remaining[0]] = repo_counts.get(remaining[0], 0) + 1
+                    break
+
+    if not repo_counts:
+        return None
+
+    winner, count = max(repo_counts.items(), key=lambda x: x[1])
+    total = sum(repo_counts.values())
+    return winner if count / total > 0.7 else None
+
+
+# --- Query helpers ---
+
+
+def _session_filter(start: datetime, end: datetime, project_name: str | None = None):
+    """Common WHERE clauses for session queries."""
+    clauses = [
+        CodingSession.start_time >= start,
+        CodingSession.start_time <= end,
+        CodingSession.status == SessionStatus.ANALYZED,
+    ]
+    if project_name:
+        clauses.append(CodingSession.project_name == project_name)
+    return clauses
+
+
+def _base_query(start: datetime, end: datetime, project_name: str | None = None):
+    q = select(CodingSession)
+    for clause in _session_filter(start, end, project_name):
+        q = q.where(clause)
+    return q
+
+
+def _tc_agg_query(columns, start, end, project_name=None):
+    """Build a tool_call aggregate query with session join + filters."""
+    q = select(*columns).join(CodingSession, ToolCall.session_id == CodingSession.id)
+    for clause in _session_filter(start, end, project_name):
+        q = q.where(clause)
+    return q
+
+
+# --- Compute functions ---
+
+
+def compute_tool_distribution(db, start, end, project_name=None) -> dict[str, int]:
     rows = db.exec(
-        select(ToolCall.tool_name, func.count())
-        .join(CodingSession, ToolCall.session_id == CodingSession.id)
-        .where(CodingSession.start_time >= start)
-        .where(CodingSession.start_time <= end)
-        .group_by(ToolCall.tool_name)
-        .order_by(func.count().desc())
+        _tc_agg_query(
+            (ToolCall.tool_name, func.count()), start, end, project_name
+        ).group_by(ToolCall.tool_name).order_by(func.count().desc())
     ).all()
     return {name: count for name, count in rows}
 
 
-def compute_error_breakdown(
-    db: Session, start: datetime, end: datetime
-) -> tuple[dict[str, int], dict[str, int]]:
-    """Returns (tool_error_counts, error_type_counts)."""
-    # Errors by tool name
+def compute_error_breakdown(db, start, end, project_name=None):
     tool_errors = db.exec(
-        select(ToolCall.tool_name, func.count())
-        .join(CodingSession, ToolCall.session_id == CodingSession.id)
-        .where(CodingSession.start_time >= start)
-        .where(CodingSession.start_time <= end)
-        .where(ToolCall.success == False)  # noqa: E712
-        .group_by(ToolCall.tool_name)
-        .order_by(func.count().desc())
+        _tc_agg_query(
+            (ToolCall.tool_name, func.count()), start, end, project_name
+        ).where(ToolCall.success == False)  # noqa: E712
+        .group_by(ToolCall.tool_name).order_by(func.count().desc())
     ).all()
 
-    # Error types by parsing output
-    error_types: dict[str, int] = {}
     failed_calls = db.exec(
-        select(ToolCall.output_value)
-        .join(CodingSession, ToolCall.session_id == CodingSession.id)
-        .where(CodingSession.start_time >= start)
-        .where(CodingSession.start_time <= end)
-        .where(ToolCall.success == False)  # noqa: E712
+        _tc_agg_query(
+            (ToolCall.output_value,), start, end, project_name
+        ).where(ToolCall.success == False)  # noqa: E712
     ).all()
 
-    for output in failed_calls:
+    error_types: dict[str, int] = {}
+    for (output,) in failed_calls:
         if not output:
             error_types["Other"] = error_types.get("Other", 0) + 1
             continue
@@ -203,21 +200,16 @@ def compute_error_breakdown(
     )
 
 
-def compute_language_distribution(
-    db: Session, start: datetime, end: datetime
-) -> dict[str, int]:
-    """Extract languages from file paths in tool call inputs."""
-    inputs = db.exec(
-        select(ToolCall.input_value)
-        .join(CodingSession, ToolCall.session_id == CodingSession.id)
-        .where(CodingSession.start_time >= start)
-        .where(CodingSession.start_time <= end)
-        .where(col(ToolCall.tool_name).in_(list(_FILE_TOOLS)))
-        .where(ToolCall.input_value.isnot(None))
-    ).all()
+def compute_language_distribution(db, start, end, project_name=None) -> dict[str, int]:
+    q = _tc_agg_query(
+        (ToolCall.input_value,), start, end, project_name
+    ).where(
+        col(ToolCall.tool_name).in_(list(_FILE_TOOLS))
+    ).where(ToolCall.input_value.isnot(None))
 
+    inputs = db.exec(q).all()
     lang_counts: dict[str, int] = {}
-    for input_val in inputs:
+    for (input_val,) in inputs:
         if not input_val:
             continue
         for match in _FILE_PATH_RE.finditer(input_val):
@@ -226,15 +218,11 @@ def compute_language_distribution(
             lang = _EXT_TO_LANG.get(ext)
             if lang:
                 lang_counts[lang] = lang_counts.get(lang, 0) + 1
-
     return dict(sorted(lang_counts.items(), key=lambda x: -x[1]))
 
 
-def compute_time_of_day(
-    db: Session, start: datetime, end: datetime
-) -> dict[int, int]:
-    """Session start hour distribution (0-23)."""
-    sessions = db.exec(_base_query(start, end)).all()
+def compute_time_of_day(db, start, end, project_name=None) -> dict[int, int]:
+    sessions = db.exec(_base_query(start, end, project_name)).all()
     hours: dict[int, int] = {}
     for s in sessions:
         h = s.start_time.hour
@@ -242,12 +230,10 @@ def compute_time_of_day(
     return dict(sorted(hours.items()))
 
 
-def compute_session_health(
-    db: Session, start: datetime, end: datetime
-) -> list[SessionHealthScore]:
-    """Compute health scores for each session."""
+def compute_session_health(db, start, end, project_name=None) -> list[SessionHealthScore]:
     sessions = db.exec(
-        _base_query(start, end).order_by(col(CodingSession.start_time).desc())
+        _base_query(start, end, project_name)
+        .order_by(col(CodingSession.start_time).desc())
     ).all()
 
     scores = []
@@ -266,8 +252,6 @@ def compute_session_health(
         ).one()
 
         error_rate = error_count / max(tool_count, 1)
-
-        # Grade based on error rate
         if error_rate <= 0.05:
             grade = "A"
         elif error_rate <= 0.10:
@@ -279,47 +263,30 @@ def compute_session_health(
         else:
             grade = "F"
 
-        scores.append(
-            SessionHealthScore(
-                session_id=s.id,
-                start_time=s.start_time,
-                duration_minutes=round(duration, 1),
-                tool_count=tool_count,
-                error_count=error_count,
-                error_rate=round(error_rate, 3),
-                total_tokens=s.total_tokens,
-                grade=grade,
-                model=s.model,
-            )
-        )
-
+        scores.append(SessionHealthScore(
+            session_id=s.id, start_time=s.start_time,
+            duration_minutes=round(duration, 1),
+            tool_count=tool_count, error_count=error_count,
+            error_rate=round(error_rate, 3), total_tokens=s.total_tokens,
+            grade=grade, model=s.model,
+        ))
     return scores
 
 
-def compute_permission_count(
-    db: Session, start: datetime, end: datetime
-) -> int:
-    """Count permission/notification tool calls (spans named 'Permission Request')."""
-    return db.exec(
-        select(func.count())
-        .select_from(ToolCall)
-        .join(CodingSession, ToolCall.session_id == CodingSession.id)
-        .where(CodingSession.start_time >= start)
-        .where(CodingSession.start_time <= end)
-        .where(
-            col(ToolCall.tool_name).in_(
-                ["Permission Request", "Notification: permission_prompt"]
-            )
+def compute_permission_count(db, start, end, project_name=None) -> int:
+    q = _tc_agg_query(
+        (func.count(),), start, end, project_name
+    ).where(
+        col(ToolCall.tool_name).in_(
+            ["Permission Request", "Notification: permission_prompt"]
         )
-    ).one()
+    )
+    return db.exec(q).one()[0]
 
 
-def detect_overlapping_sessions(
-    db: Session, start: datetime, end: datetime
-) -> list[dict]:
-    """Detect sessions that overlap in time (multi-clauding)."""
+def detect_overlapping_sessions(db, start, end, project_name=None) -> list[dict]:
     sessions = db.exec(
-        _base_query(start, end)
+        _base_query(start, end, project_name)
         .where(CodingSession.end_time.isnot(None))
         .order_by(CodingSession.start_time)
     ).all()
@@ -331,29 +298,22 @@ def detect_overlapping_sessions(
                 overlap_sec = (
                     min(s1.end_time, s2.end_time) - s2.start_time
                 ).total_seconds()
-                if overlap_sec > 60:  # At least 1 minute overlap
-                    overlaps.append(
-                        {
-                            "session_ids": [s1.id, s2.id],
-                            "overlap_minutes": round(overlap_sec / 60, 1),
-                        }
-                    )
+                if overlap_sec > 60:
+                    overlaps.append({
+                        "session_ids": [s1.id, s2.id],
+                        "overlap_minutes": round(overlap_sec / 60, 1),
+                    })
     return overlaps
 
 
-def collect_session_summaries(
-    db: Session, start: datetime, end: datetime
-) -> list[dict]:
-    """Collect per-session insight summaries for the digest LLM prompt."""
+def collect_session_summaries(db, start, end, project_name=None) -> list[dict]:
     sessions = db.exec(
-        _base_query(start, end).order_by(CodingSession.start_time)
+        _base_query(start, end, project_name).order_by(CodingSession.start_time)
     ).all()
 
     summaries = []
     for s in sessions:
-        insights = db.exec(
-            select(Insight).where(Insight.session_id == s.id)
-        ).all()
+        insights = db.exec(select(Insight).where(Insight.session_id == s.id)).all()
 
         summary_text = ""
         friction_texts = []
@@ -379,102 +339,69 @@ def collect_session_summaries(
             .where(ToolCall.success == False)  # noqa: E712
         ).one()
 
-        summaries.append(
-            {
-                "session_id": s.id,
-                "start_time": s.start_time.isoformat(),
-                "duration_min": round(duration, 1),
-                "model": s.model,
-                "tool_count": tool_count,
-                "error_count": error_count,
-                "total_tokens": s.total_tokens,
-                "summary": summary_text,
-                "frictions": friction_texts,
-                "wins": win_texts,
-            }
-        )
-
+        summaries.append({
+            "session_id": s.id, "start_time": s.start_time.isoformat(),
+            "duration_min": round(duration, 1), "model": s.model,
+            "tool_count": tool_count, "error_count": error_count,
+            "total_tokens": s.total_tokens, "summary": summary_text,
+            "frictions": friction_texts, "wins": win_texts,
+        })
     return summaries
 
 
 def compute_all(
-    db: Session,
-    start: datetime,
-    end: datetime,
+    db: Session, start: datetime, end: datetime, project_name: str | None = None,
 ) -> DigestStats:
-    """Compute all statistics for a digest period."""
-    sessions = db.exec(_base_query(start, end)).all()
+    """Compute all statistics for a digest period, optionally filtered by project."""
+    sessions = db.exec(_base_query(start, end, project_name)).all()
 
-    # Basic aggregates
     total_tokens = sum(s.total_tokens for s in sessions)
     total_prompt = sum(s.prompt_tokens for s in sessions)
     total_completion = sum(s.completion_tokens for s in sessions)
     total_duration = sum(
         (s.end_time - s.start_time).total_seconds() / 60
-        for s in sessions
-        if s.end_time
+        for s in sessions if s.end_time
     )
     active_days = len({s.start_time.date() for s in sessions})
-    total_tool_calls = db.exec(
-        select(func.count())
-        .select_from(ToolCall)
-        .join(CodingSession, ToolCall.session_id == CodingSession.id)
-        .where(CodingSession.start_time >= start)
-        .where(CodingSession.start_time <= end)
-    ).one()
+
+    tc_count_q = _tc_agg_query((func.count(),), start, end, project_name)
+    total_tool_calls = db.exec(tc_count_q).one()[0]
+
     analysis_tokens = sum(
         s.analysis_prompt_tokens + s.analysis_completion_tokens for s in sessions
     )
 
-    # Distributions
-    tool_dist = compute_tool_distribution(db, start, end)
-    error_breakdown, error_types = compute_error_breakdown(db, start, end)
-    lang_dist = compute_language_distribution(db, start, end)
-    time_of_day = compute_time_of_day(db, start, end)
+    p = project_name  # shorthand
+    tool_dist = compute_tool_distribution(db, start, end, p)
+    error_breakdown, error_types = compute_error_breakdown(db, start, end, p)
+    lang_dist = compute_language_distribution(db, start, end, p)
+    time_of_day = compute_time_of_day(db, start, end, p)
 
-    # Per-session data
-    session_durations = [
-        {
-            "session_id": s.id,
-            "duration_min": round(
-                (s.end_time - s.start_time).total_seconds() / 60, 1
-            )
-            if s.end_time
-            else 0,
-            "start_time": s.start_time.isoformat(),
-        }
-        for s in sessions
-    ]
-    tokens_per_session = [
-        {
-            "session_id": s.id,
-            "tokens": s.total_tokens,
-            "start_time": s.start_time.isoformat(),
-        }
-        for s in sessions
-    ]
+    session_durations = [{
+        "session_id": s.id,
+        "duration_min": round((s.end_time - s.start_time).total_seconds() / 60, 1)
+        if s.end_time else 0,
+        "start_time": s.start_time.isoformat(),
+    } for s in sessions]
+
+    tokens_per_session = [{
+        "session_id": s.id, "tokens": s.total_tokens,
+        "start_time": s.start_time.isoformat(),
+    } for s in sessions]
 
     return DigestStats(
-        period_start=start,
-        period_end=end,
-        session_count=len(sessions),
-        analyzed_count=len(sessions),
-        total_tool_calls=total_tool_calls,
-        total_tokens=total_tokens,
-        total_prompt_tokens=total_prompt,
-        total_completion_tokens=total_completion,
-        total_duration_minutes=round(total_duration, 1),
-        active_days=active_days,
-        tool_distribution=tool_dist,
-        error_breakdown=error_breakdown,
-        error_types=error_types,
-        language_distribution=lang_dist,
-        time_of_day=time_of_day,
-        session_durations=session_durations,
-        session_health=compute_session_health(db, start, end),
+        period_start=start, period_end=end,
+        session_count=len(sessions), analyzed_count=len(sessions),
+        total_tool_calls=total_tool_calls, total_tokens=total_tokens,
+        total_prompt_tokens=total_prompt, total_completion_tokens=total_completion,
+        total_duration_minutes=round(total_duration, 1), active_days=active_days,
+        tool_distribution=tool_dist, error_breakdown=error_breakdown,
+        error_types=error_types, language_distribution=lang_dist,
+        time_of_day=time_of_day, session_durations=session_durations,
+        session_health=compute_session_health(db, start, end, p),
         tokens_per_session=tokens_per_session,
-        overlapping_sessions=detect_overlapping_sessions(db, start, end),
-        session_summaries=collect_session_summaries(db, start, end),
-        permission_prompt_count=compute_permission_count(db, start, end),
+        overlapping_sessions=detect_overlapping_sessions(db, start, end, p),
+        session_summaries=collect_session_summaries(db, start, end, p),
+        permission_prompt_count=compute_permission_count(db, start, end, p),
         analysis_tokens_used=analysis_tokens,
     )

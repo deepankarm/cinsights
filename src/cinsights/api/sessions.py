@@ -221,6 +221,28 @@ async def get_session_detail(session_id: str, db: Session = Depends(get_db)):
     )
 
 
+class SessionUpdate(BaseModel):
+    project_name: str | None = None
+
+
+@router.patch("/{session_id}")
+async def update_session(
+    session_id: str,
+    body: SessionUpdate,
+    db: Session = Depends(get_db),
+):
+    """Update session metadata (e.g., manual project tagging)."""
+    session = db.get(CodingSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if body.project_name is not None:
+        session.project_name = body.project_name
+
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/{session_id}/analyze", response_model=SessionDetail)
 async def trigger_analysis(session_id: str, db: Session = Depends(get_db)):
     """Manually trigger LLM analysis for a session."""
