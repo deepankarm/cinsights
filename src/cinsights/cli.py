@@ -417,7 +417,7 @@ async def _digest_async(
         table.add_row("Active days", str(stats.active_days))
         table.add_row("Top tool", next(iter(stats.tool_distribution), "-"))
         table.add_row("Languages", ", ".join(list(stats.language_distribution.keys())[:3]))
-        table.add_row("Permissions", str(stats.permission_prompt_count))
+        table.add_row("Permissions", str(stats.permission_stats.count))
         console.print(table)
 
         if stats_only:
@@ -501,8 +501,6 @@ def _store_digest_sections(db, digest_record, result, json_mod):
          _dump(result.forward.workflow_patterns)),
         (DigestSectionType.AMBITIOUS_WORKFLOWS, "On the Horizon", "",
          _dump(result.forward.ambitious_workflows)),
-        (DigestSectionType.FUN_ENDING, "Fun Ending",
-         result.narrative.fun_ending, None),
     ]
 
     for i, (stype, title, content, meta) in enumerate(sections):

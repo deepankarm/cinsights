@@ -58,8 +58,22 @@ class SessionHealthScore(BaseModel):
     error_count: int
     error_rate: float
     total_tokens: int
-    grade: str  # A, B, C, D, F
+    grade: str
     model: str | None
+
+
+class PermissionStats(BaseModel):
+    count: int
+    total_wait_seconds: float
+    avg_wait_seconds: float
+    max_wait_seconds: float
+
+
+class PlanModeStats(BaseModel):
+    entries: int
+    total_duration_seconds: float
+    plan_agent_count: int
+    plan_agent_tokens: int
 
 
 class DigestStats(BaseModel):
@@ -88,7 +102,11 @@ class DigestStats(BaseModel):
     tokens_per_session: list[dict]
     overlapping_sessions: list[dict]
     session_summaries: list[dict]
-    permission_prompt_count: int
+
+    permission_stats: PermissionStats
+    plan_mode_stats: PlanModeStats
+    has_claude_md: bool
+
     analysis_tokens_used: int
 
 
@@ -128,7 +146,6 @@ def detect_project_from_tool_calls(tool_calls: list) -> str | None:
 
 
 def _session_filter(start: datetime, end: datetime, project_name: str | None = None):
-    """Common WHERE clauses for session queries."""
     clauses = [
         CodingSession.start_time >= start,
         CodingSession.start_time <= end,
@@ -147,7 +164,6 @@ def _base_query(start: datetime, end: datetime, project_name: str | None = None)
 
 
 def _tc_agg_query(columns, start, end, project_name=None):
-    """Build a tool_call aggregate query with session join + filters."""
     q = (
         select(*columns)
         .select_from(ToolCall)
@@ -229,8 +245,7 @@ def compute_time_of_day(db, start, end, project_name=None) -> dict[int, int]:
     sessions = db.exec(_base_query(start, end, project_name)).all()
     hours: dict[int, int] = {}
     for s in sessions:
-        h = s.start_time.hour
-        hours[h] = hours.get(h, 0) + 1
+        hours[s.start_time.hour] = hours.get(s.start_time.hour, 0) + 1
     return dict(sorted(hours.items()))
 
 
@@ -277,20 +292,97 @@ def compute_session_health(db, start, end, project_name=None) -> list[SessionHea
     return scores
 
 
-def compute_permission_count(db, start, end, project_name=None) -> int:
-    q = (
-        select(func.count())
-        .select_from(ToolCall)
-        .join(CodingSession, ToolCall.session_id == CodingSession.id)
-    )
-    for clause in _session_filter(start, end, project_name):
-        q = q.where(clause)
-    q = q.where(
-        col(ToolCall.tool_name).in_(
-            ["Permission Request", "Notification: permission_prompt"]
+def compute_permission_stats(db, start, end, project_name=None) -> PermissionStats:
+    """Count permission prompts and compute wait times."""
+    # Get all tool calls sorted by time for sessions in range
+    sessions = db.exec(_base_query(start, end, project_name)).all()
+    session_ids = {s.id for s in sessions}
+
+    if not session_ids:
+        return PermissionStats(
+            count=0, total_wait_seconds=0, avg_wait_seconds=0, max_wait_seconds=0
         )
+
+    all_tcs = db.exec(
+        select(ToolCall)
+        .where(col(ToolCall.session_id).in_(list(session_ids)))
+        .order_by(ToolCall.timestamp)
+    ).all()
+
+    perm_count = 0
+    waits: list[float] = []
+
+    for i, tc in enumerate(all_tcs):
+        is_perm = (
+            "permission_prompt" in tc.tool_name.lower()
+            or tc.tool_name == "Notification: permission_prompt"
+        )
+        if is_perm:
+            perm_count += 1
+            # Find next non-permission tool call to measure wait
+            for j in range(i + 1, min(i + 10, len(all_tcs))):
+                nxt = all_tcs[j]
+                if "ermission" not in nxt.tool_name and "otification" not in nxt.tool_name:
+                    wait = (nxt.timestamp - tc.timestamp).total_seconds()
+                    if 0 < wait < 600:  # cap at 10min
+                        waits.append(wait)
+                    break
+
+    return PermissionStats(
+        count=perm_count,
+        total_wait_seconds=round(sum(waits), 1),
+        avg_wait_seconds=round(sum(waits) / len(waits), 1) if waits else 0,
+        max_wait_seconds=round(max(waits), 1) if waits else 0,
     )
-    return db.exec(q).one()
+
+
+def compute_plan_mode_stats(db, start, end, project_name=None) -> PlanModeStats:
+    """Count plan mode entries and agent stats."""
+    sessions = db.exec(_base_query(start, end, project_name)).all()
+    session_ids = {s.id for s in sessions}
+
+    if not session_ids:
+        return PlanModeStats(
+            entries=0, total_duration_seconds=0,
+            plan_agent_count=0, plan_agent_tokens=0,
+        )
+
+    plan_tcs = db.exec(
+        select(ToolCall)
+        .where(col(ToolCall.session_id).in_(list(session_ids)))
+        .where(col(ToolCall.tool_name).in_(["EnterPlanMode", "ExitPlanMode", "Subagent: Plan"]))
+    ).all()
+
+    entries = sum(1 for tc in plan_tcs if tc.tool_name == "EnterPlanMode")
+    plan_agents = [tc for tc in plan_tcs if "Subagent: Plan" in tc.tool_name]
+    total_dur = sum(tc.duration_ms or 0 for tc in plan_tcs if tc.tool_name == "ExitPlanMode") / 1000
+
+    # Extract tokens from plan agent input/output (stored in tool call)
+    plan_tokens = 0
+    for tc in plan_agents:
+        if tc.input_value:
+            import json
+            try:
+                data = json.loads(tc.input_value)
+                plan_tokens += data.get("llm.token_count.total", 0) if isinstance(data, dict) else 0
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+    return PlanModeStats(
+        entries=entries,
+        total_duration_seconds=round(total_dur, 1),
+        plan_agent_count=len(plan_agents),
+        plan_agent_tokens=plan_tokens,
+    )
+
+
+def detect_claude_md(db, start, end, project_name=None) -> bool:
+    """Check if any session in the period reads or edits a CLAUDE.md file."""
+    q = _tc_agg_query(
+        (func.count(),), start, end, project_name
+    ).where(ToolCall.input_value.like("%CLAUDE.md%"))
+    count = db.exec(q).one()
+    return count > 0
 
 
 def detect_overlapping_sessions(db, start, end, project_name=None) -> list[dict]:
@@ -386,7 +478,7 @@ def compute_all(
         s.analysis_prompt_tokens + s.analysis_completion_tokens for s in sessions
     )
 
-    p = project_name  # shorthand
+    p = project_name
     tool_dist = compute_tool_distribution(db, start, end, p)
     error_breakdown, error_types = compute_error_breakdown(db, start, end, p)
     lang_dist = compute_language_distribution(db, start, end, p)
@@ -417,6 +509,8 @@ def compute_all(
         tokens_per_session=tokens_per_session,
         overlapping_sessions=detect_overlapping_sessions(db, start, end, p),
         session_summaries=collect_session_summaries(db, start, end, p),
-        permission_prompt_count=compute_permission_count(db, start, end, p),
+        permission_stats=compute_permission_stats(db, start, end, p),
+        plan_mode_stats=compute_plan_mode_stats(db, start, end, p),
+        has_claude_md=detect_claude_md(db, start, end, p),
         analysis_tokens_used=analysis_tokens,
     )

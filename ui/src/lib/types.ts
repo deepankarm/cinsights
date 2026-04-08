@@ -114,7 +114,19 @@ export interface DigestStatsData {
 	}>;
 	tokens_per_session: Array<{ session_id: string; tokens: number; start_time: string }>;
 	overlapping_sessions: Array<{ session_ids: string[]; overlap_minutes: number }>;
-	permission_prompt_count: number;
+	permission_stats: {
+		count: number;
+		total_wait_seconds: number;
+		avg_wait_seconds: number;
+		max_wait_seconds: number;
+	};
+	plan_mode_stats: {
+		entries: number;
+		total_duration_seconds: number;
+		plan_agent_count: number;
+		plan_agent_tokens: number;
+	};
+	has_claude_md: boolean;
 	analysis_tokens_used: number;
 	session_summaries: Array<{
 		session_id: string;
