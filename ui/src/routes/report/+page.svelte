@@ -9,6 +9,7 @@
 	let loading = $state(true);
 	let error: string | null = $state(null);
 	let showAllSessions = $state(false);
+	let expandedSections = $state({ features: false, patterns: false, ambitious: false });
 
 	const projectFilter = $derived(page.url.searchParams.get('project'));
 
@@ -444,67 +445,85 @@
 		</div>
 	{/if}
 
-	<!-- Feature Recommendations -->
+	<!-- Feature Recommendations (collapsible) -->
 	{#if features && features.length > 0}
 		<div class="section">
-			<h2>CC Features to Try</h2>
-			<div class="cards-list">
-				{#each features as feat}
-					<div class="card card-blue">
-						<div class="feature-name">{feat.feature}</div>
-						<h3>{feat.title}</h3>
-						<p><strong>Why for you:</strong> {@html renderLinkedMarkdown(feat.why_for_you)}</p>
-						{#if feat.setup_code}
-							<div class="code-block-wrap">
-								<pre class="code-block">{feat.setup_code}</pre>
-								<button class="copy-btn" onclick={(e) => copyText(feat.setup_code ?? '', e.currentTarget as HTMLButtonElement)}>Copy</button>
-							</div>
-						{/if}
-					</div>
-				{/each}
-			</div>
+			<button class="section-toggle" onclick={() => expandedSections.features = !expandedSections.features}>
+				<span class="toggle-arrow" class:open={expandedSections.features}>&#9654;</span>
+				<h2>CC Features to Try ({features.length})</h2>
+				<span class="section-preview">{features.map(f => f.feature).join(' · ')}</span>
+			</button>
+			{#if expandedSections.features}
+				<div class="cards-list">
+					{#each features as feat}
+						<div class="card card-blue">
+							<div class="feature-name">{feat.feature}</div>
+							<h3>{feat.title}</h3>
+							<p><strong>Why for you:</strong> {@html renderLinkedMarkdown(feat.why_for_you)}</p>
+							{#if feat.setup_code}
+								<div class="code-block-wrap">
+									<pre class="code-block">{feat.setup_code}</pre>
+									<button class="copy-btn" onclick={(e) => copyText(feat.setup_code ?? '', e.currentTarget as HTMLButtonElement)}>Copy</button>
+								</div>
+							{/if}
+						</div>
+					{/each}
+				</div>
+			{/if}
 		</div>
 	{/if}
 
-	<!-- Workflow Patterns -->
+	<!-- Workflow Patterns (collapsible) -->
 	{#if patterns && patterns.length > 0}
 		<div class="section">
-			<h2>New Ways to Use Claude Code</h2>
-			<div class="cards-list">
-				{#each patterns as p}
-					<div class="card card-cyan">
-						<h3>{p.name}</h3>
-						<p>{@html renderLinkedMarkdown(p.description)}</p>
-						<p class="card-rationale">{@html renderLinkedMarkdown(p.rationale)}</p>
-						<div class="code-block-wrap">
-							<div class="prompt-label">Paste into Claude Code:</div>
-							<pre class="code-block">{p.starter_prompt}</pre>
-							<button class="copy-btn" onclick={(e) => copyText(p.starter_prompt, e.currentTarget as HTMLButtonElement)}>Copy</button>
+			<button class="section-toggle" onclick={() => expandedSections.patterns = !expandedSections.patterns}>
+				<span class="toggle-arrow" class:open={expandedSections.patterns}>&#9654;</span>
+				<h2>New Ways to Use Claude Code ({patterns.length})</h2>
+				<span class="section-preview">{patterns.map(p => p.name).join(' · ')}</span>
+			</button>
+			{#if expandedSections.patterns}
+				<div class="cards-list">
+					{#each patterns as p}
+						<div class="card card-cyan">
+							<h3>{p.name}</h3>
+							<p>{@html renderLinkedMarkdown(p.description)}</p>
+							<p class="card-rationale">{@html renderLinkedMarkdown(p.rationale)}</p>
+							<div class="code-block-wrap">
+								<div class="prompt-label">Paste into Claude Code:</div>
+								<pre class="code-block">{p.starter_prompt}</pre>
+								<button class="copy-btn" onclick={(e) => copyText(p.starter_prompt, e.currentTarget as HTMLButtonElement)}>Copy</button>
+							</div>
 						</div>
-					</div>
-				{/each}
-			</div>
+					{/each}
+				</div>
+			{/if}
 		</div>
 	{/if}
 
-	<!-- Ambitious Workflows -->
+	<!-- Ambitious Workflows (collapsible) -->
 	{#if ambitious && ambitious.length > 0}
 		<div class="section">
-			<h2>On the Horizon</h2>
-			<div class="cards-list">
-				{#each ambitious as a}
-					<div class="card card-purple">
-						<h3>{a.name}</h3>
-						<p>{@html renderLinkedMarkdown(a.description)}</p>
-						<p class="card-rationale">{@html renderLinkedMarkdown(a.rationale)}</p>
-						<div class="code-block-wrap">
-							<div class="prompt-label">Paste into Claude Code:</div>
-							<pre class="code-block">{a.starter_prompt}</pre>
-							<button class="copy-btn" onclick={(e) => copyText(a.starter_prompt, e.currentTarget as HTMLButtonElement)}>Copy</button>
+			<button class="section-toggle" onclick={() => expandedSections.ambitious = !expandedSections.ambitious}>
+				<span class="toggle-arrow" class:open={expandedSections.ambitious}>&#9654;</span>
+				<h2>On the Horizon ({ambitious.length})</h2>
+				<span class="section-preview">{ambitious.map(a => a.name).join(' · ')}</span>
+			</button>
+			{#if expandedSections.ambitious}
+				<div class="cards-list">
+					{#each ambitious as a}
+						<div class="card card-purple">
+							<h3>{a.name}</h3>
+							<p>{@html renderLinkedMarkdown(a.description)}</p>
+							<p class="card-rationale">{@html renderLinkedMarkdown(a.rationale)}</p>
+							<div class="code-block-wrap">
+								<div class="prompt-label">Paste into Claude Code:</div>
+								<pre class="code-block">{a.starter_prompt}</pre>
+								<button class="copy-btn" onclick={(e) => copyText(a.starter_prompt, e.currentTarget as HTMLButtonElement)}>Copy</button>
+							</div>
 						</div>
-					</div>
-				{/each}
-			</div>
+					{/each}
+				</div>
+			{/if}
 		</div>
 	{/if}
 
@@ -629,6 +648,12 @@
 	.card-blue { background: #eff6ff; border-color: #93c5fd; }
 	.card-cyan { background: #ecfeff; border-color: #67e8f9; }
 	.card-purple { background: linear-gradient(135deg, #faf5ff, #f5f3ff); border-color: #c4b5fd; }
+
+	.section-toggle { background: none; border: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 0; margin-bottom: 12px; width: 100%; text-align: left; }
+	.section-toggle h2 { margin: 0; white-space: nowrap; }
+	.section-preview { font-size: 13px; color: #94a3b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.toggle-arrow { font-size: 10px; color: #94a3b8; transition: transform 0.15s; flex-shrink: 0; }
+	.toggle-arrow.open { transform: rotate(90deg); }
 
 	.feature-name { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #2563eb; margin-bottom: 4px; }
 	.friction-examples { margin: 8px 0 0 20px; font-size: 13px; color: #334155; }
