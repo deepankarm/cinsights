@@ -61,6 +61,15 @@ def _store_analysis(
 
     last_span_time = max(s.end_time for s in spans) if spans else None
 
+    # Aggregate tokens from all Turn spans
+    turn_spans = sorted(
+        [s for s in spans if s.name.startswith("Turn ")],
+        key=lambda s: s.start_time,
+    )
+    total_completion = sum(s.completion_tokens for s in turn_spans)
+    last_turn_prompt = turn_spans[-1].prompt_tokens if turn_spans else 0
+    total_tokens = last_turn_prompt + total_completion
+
     if not existing:
         coding_session = CodingSession(
             id=trace_id,
@@ -70,9 +79,9 @@ def _store_analysis(
             start_time=trace.start_time,
             end_time=trace.end_time,
             model=root.model_name if root else None,
-            total_tokens=root.total_tokens if root else 0,
-            prompt_tokens=root.prompt_tokens if root else 0,
-            completion_tokens=root.completion_tokens if root else 0,
+            total_tokens=total_tokens,
+            prompt_tokens=last_turn_prompt,
+            completion_tokens=total_completion,
             span_count=len(spans),
             last_span_time=last_span_time,
             status=SessionStatus.PENDING,
@@ -83,6 +92,9 @@ def _store_analysis(
         # Update metadata that may have changed
         coding_session.user_id = user_id or existing.user_id
         coding_session.project_name = project_name or existing.project_name
+        coding_session.total_tokens = total_tokens
+        coding_session.prompt_tokens = last_turn_prompt
+        coding_session.completion_tokens = total_completion
         coding_session.span_count = len(spans)
         coding_session.last_span_time = last_span_time
 
