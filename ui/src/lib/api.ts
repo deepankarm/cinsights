@@ -31,10 +31,37 @@ export async function triggerAnalysis(id: string): Promise<SessionDetail> {
 }
 
 // Digest API
-export async function getDigests(): Promise<DigestRead[]> {
-	return fetchJSON('/api/digests/');
+export async function getDigests(project?: string): Promise<DigestRead[]> {
+	let url = '/api/digests/';
+	if (project) url += `?project=${encodeURIComponent(project)}`;
+	return fetchJSON(url);
 }
 
 export async function getDigest(id: string): Promise<DigestDetail> {
 	return fetchJSON(`/api/digests/${id}`);
+}
+
+// Projects API
+export interface ProjectRead {
+	name: string;
+	session_count: number;
+	total_tokens: number;
+	total_tool_calls: number;
+	top_tools: string[];
+	languages: string[];
+	latest_session: string;
+	has_digest: boolean;
+}
+
+export async function getProjects(): Promise<ProjectRead[]> {
+	return fetchJSON('/api/projects/');
+}
+
+export async function tagSession(sessionId: string, projectName: string): Promise<void> {
+	const res = await fetch(`/api/sessions/${sessionId}`, {
+		method: 'PATCH',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ project_name: projectName }),
+	});
+	if (!res.ok) throw new Error(`Tag failed: ${res.status}`);
 }

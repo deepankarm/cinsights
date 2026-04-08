@@ -11,6 +11,7 @@
 			<span class="tagline">coding agent insights</span>
 			<div class="nav-links">
 				<a href="/" class="nav-link">Sessions</a>
+				<a href="/projects" class="nav-link">Projects</a>
 				<a href="/report" class="nav-link">Report</a>
 			</div>
 		</nav>

@@ -55,12 +55,14 @@ class DigestDetail(BaseModel):
 @router.get("/", response_model=list[DigestRead])
 async def list_digests(
     limit: int = 10,
+    project: str | None = None,
     db: Session = Depends(get_db),
 ):
-    """List digests, newest first."""
-    digests = db.exec(
-        select(Digest).order_by(col(Digest.created_at).desc()).limit(limit)
-    ).all()
+    """List digests, newest first. Optionally filter by project."""
+    q = select(Digest).order_by(col(Digest.created_at).desc())
+    if project:
+        q = q.where(Digest.project_name == project)
+    digests = db.exec(q.limit(limit)).all()
 
     return [
         DigestRead(
