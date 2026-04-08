@@ -9,6 +9,7 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 from sqlmodel import Session
+from sqlmodel import select as select_fn
 
 from cinsights.config import get_settings
 
@@ -41,7 +42,8 @@ def _store_analysis(
     # CC traces: tool calls have tool.name, permission/notification use span name
     tool_spans = [
         s for s in spans
-        if s.parent_id is not None and (s.tool_name or "Permission" in s.name or "Notification" in s.name)
+        if s.parent_id is not None
+        and (s.tool_name or "Permission" in s.name or "Notification" in s.name)
     ]
 
     # Extract user.id from span attributes
@@ -93,12 +95,17 @@ def _store_analysis(
         db.flush()
 
     for span in tool_spans:
+        # Only store output for failed calls (error classification) to save DB space
+        output = None
+        if not span.is_success and span.output_value:
+            output = span.output_value[:2000]
+
         tc = ToolCall(
             session_id=trace_id,
             span_id=span.span_id,
             tool_name=span.tool_name or span.name,
             input_value=span.input_value[:2000] if span.input_value else None,
-            output_value=span.output_value[:2000] if span.output_value else None,
+            output_value=output,
             duration_ms=span.duration_ms,
             success=span.is_success,
             timestamp=span.start_time,
@@ -427,9 +434,33 @@ async def _digest_async(
             console.print("\n[dim]--stats-only mode, skipping LLM analysis.[/dim]")
             raise typer.Exit(0)
 
-        # Create digest record
         import json
 
+        from cinsights.db.models import DigestSection
+
+        # Delete existing digest for same scope (user + project)
+        scope_q = select_fn(Digest)
+        if user_id:
+            scope_q = scope_q.where(Digest.user_id == user_id)
+        else:
+            scope_q = scope_q.where(Digest.user_id.is_(None))
+        if project:
+            scope_q = scope_q.where(Digest.project_name == project)
+        else:
+            scope_q = scope_q.where(Digest.project_name.is_(None))
+
+        existing_digests = db.exec(scope_q).all()
+        for old in existing_digests:
+            for sec in db.exec(
+                select_fn(DigestSection).where(DigestSection.digest_id == old.id)
+            ).all():
+                db.delete(sec)
+            db.delete(old)
+        if existing_digests:
+            db.flush()
+            console.print(f"  [dim]Replaced {len(existing_digests)} previous digest(s)[/dim]")
+
+        # Create digest record
         digest_record = Digest(
             user_id=user_id,
             project_name=project,
