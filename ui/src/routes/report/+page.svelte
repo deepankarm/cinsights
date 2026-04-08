@@ -278,7 +278,7 @@
 						{#if f.examples && f.examples.length > 0}
 							<ul class="friction-examples">
 								{#each f.examples as ex}
-									<li>{ex}</li>
+									<li>{@html renderLinkedMarkdown(ex)}</li>
 								{/each}
 							</ul>
 						{/if}
