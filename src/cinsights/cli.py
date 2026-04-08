@@ -38,8 +38,11 @@ def _store_analysis(
     )
 
     root = next((s for s in spans if s.parent_id is None), None)
-    # CC traces use CHAIN spans with tool.name attribute for tool calls
-    tool_spans = [s for s in spans if s.tool_name and s.parent_id is not None]
+    # CC traces: tool calls have tool.name, permission/notification use span name
+    tool_spans = [
+        s for s in spans
+        if s.parent_id is not None and (s.tool_name or "Permission" in s.name or "Notification" in s.name)
+    ]
 
     # Extract user.id from span attributes
     user_id = None

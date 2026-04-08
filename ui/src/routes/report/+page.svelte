@@ -233,6 +233,64 @@
 			</div>
 		</div>
 
+		<!-- Charts Row 3: Tokens per Session + Interaction Stats -->
+		<div class="charts-row">
+			<div class="chart-card">
+				<div class="chart-title">Tokens per Session</div>
+				{#each stats.tokens_per_session as t, i}
+					{@const sessionNum = sessionIds.indexOf(t.session_id) + 1}
+					<div class="bar-row">
+						<span class="bar-label">{sessionNum > 0 ? `Session ${sessionNum}` : t.session_id.slice(0, 8)}</span>
+						<div class="bar-track"><div class="bar-fill bar-blue" style="width:{barWidth(t.tokens, Math.max(...stats.tokens_per_session.map(x => x.tokens), 1))}"></div></div>
+						<span class="bar-value">{formatTokens(t.tokens)}</span>
+					</div>
+				{/each}
+			</div>
+			<div class="chart-card">
+				<div class="chart-title">Interaction Stats</div>
+				<div class="interaction-stats">
+					<div class="istat">
+						<span class="istat-label">Permission Prompts</span>
+						<span class="istat-value">{stats.permission_stats.count}</span>
+					</div>
+					{#if stats.permission_stats.count > 0}
+						<div class="istat">
+							<span class="istat-label">Total Wait Time</span>
+							<span class="istat-value">{(stats.permission_stats.total_wait_seconds / 60).toFixed(1)}m</span>
+						</div>
+						<div class="istat">
+							<span class="istat-label">Avg Wait</span>
+							<span class="istat-value">{stats.permission_stats.avg_wait_seconds.toFixed(0)}s</span>
+						</div>
+						<div class="istat">
+							<span class="istat-label">Max Wait</span>
+							<span class="istat-value">{stats.permission_stats.max_wait_seconds.toFixed(0)}s</span>
+						</div>
+					{/if}
+					<div class="istat-divider"></div>
+					<div class="istat">
+						<span class="istat-label">Plan Mode Entries</span>
+						<span class="istat-value">{stats.plan_mode_stats.entries}</span>
+					</div>
+					{#if stats.plan_mode_stats.entries > 0}
+						<div class="istat">
+							<span class="istat-label">Planning Duration</span>
+							<span class="istat-value">{(stats.plan_mode_stats.total_duration_seconds / 60).toFixed(1)}m</span>
+						</div>
+						<div class="istat">
+							<span class="istat-label">Plan Agents</span>
+							<span class="istat-value">{stats.plan_mode_stats.plan_agent_count}</span>
+						</div>
+					{/if}
+					<div class="istat-divider"></div>
+					<div class="istat">
+						<span class="istat-label">CLAUDE.md</span>
+						<span class="istat-value" style="color: {stats.has_claude_md ? '#16a34a' : '#dc2626'}">{stats.has_claude_md ? 'Present' : 'Missing'}</span>
+					</div>
+				</div>
+			</div>
+		</div>
+
 		<!-- Session Health Grid -->
 		{@const healthLimit = 20}
 		{@const healthItems = showAllSessions ? stats.session_health : stats.session_health.slice(0, healthLimit)}
@@ -537,6 +595,12 @@
 	.copy-btn:hover { background: #cbd5e1; }
 
 	/* Fun Ending */
+	.interaction-stats { display: flex; flex-direction: column; gap: 8px; }
+	.istat { display: flex; justify-content: space-between; align-items: center; }
+	.istat-label { font-size: 13px; color: #475569; }
+	.istat-value { font-size: 15px; font-weight: 600; color: #0f172a; }
+	.istat-divider { height: 1px; background: #e2e8f0; margin: 4px 0; }
+
 	.callout { border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; font-size: 14px; line-height: 1.5; }
 	.callout-warn { background: #fefce8; border: 1px solid #fde68a; color: #854d0e; }
 	.pill-warn { border-color: #fde68a; }
