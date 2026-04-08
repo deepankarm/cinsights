@@ -144,7 +144,10 @@
 	/>
 </svelte:head>
 
-<a href="/" class="back-link">&larr; Back to dashboard</a>
+<div class="nav-row">
+	<a href="/" class="back-link">&larr; Back to dashboard</a>
+	<a href="/report" class="back-link">View Report &rarr;</a>
+</div>
 
 {#if loading}
 	<div class="loading">Loading...</div>
@@ -275,9 +278,12 @@
 {/if}
 
 <style>
-	.back-link {
-		display: inline-block;
+	.nav-row {
+		display: flex;
+		justify-content: space-between;
 		margin-bottom: 24px;
+	}
+	.back-link {
 		color: #64748b;
 		text-decoration: none;
 		font-size: 14px;
