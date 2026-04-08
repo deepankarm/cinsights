@@ -19,8 +19,6 @@ from cinsights.db.models import (
     ToolCall,
 )
 
-# --- File extension to language mapping ---
-
 _EXT_TO_LANG: dict[str, str] = {
     ".py": "Python", ".go": "Go", ".js": "JavaScript", ".ts": "TypeScript",
     ".tsx": "TypeScript", ".jsx": "JavaScript", ".rs": "Rust", ".java": "Java",
@@ -45,10 +43,6 @@ _ERROR_PATTERNS = [
     ("File Too Large", re.compile(r"too large|file size|exceeds", re.I)),
     ("Timeout", re.compile(r"timeout|timed out|deadline exceeded", re.I)),
 ]
-
-
-# --- Output models ---
-
 
 class SessionHealthScore(BaseModel):
     session_id: str
@@ -119,10 +113,6 @@ class DigestStats(BaseModel):
 
     analysis_tokens_used: int
 
-
-# --- Project detection ---
-
-
 def detect_project_from_tool_calls(tool_calls: list) -> str | None:
     """Extract project name from file paths in tool call inputs.
 
@@ -169,10 +159,6 @@ def detect_project_from_tool_calls(tool_calls: list) -> str | None:
     total = sum(dir_counts.values())
     return winner if count / total > 0.5 else None
 
-
-# --- Query helpers ---
-
-
 def _session_filter(start: datetime, end: datetime, project_name: str | None = None):
     clauses = [
         CodingSession.start_time >= start,
@@ -200,10 +186,6 @@ def _tc_agg_query(columns, start, end, project_name=None):
     for clause in _session_filter(start, end, project_name):
         q = q.where(clause)
     return q
-
-
-# --- Compute functions ---
-
 
 def compute_tool_distribution(db, start, end, project_name=None) -> dict[str, int]:
     rows = db.exec(
