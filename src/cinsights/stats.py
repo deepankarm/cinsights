@@ -476,6 +476,7 @@ def collect_session_summaries(db, start, end, project_name=None) -> list[dict]:
         summaries.append({
             "session_id": s.id, "start_time": s.start_time.isoformat(),
             "duration_min": round(duration, 1), "model": s.model,
+            "project": s.project_name or "unknown",
             "tool_count": tool_count, "error_count": error_count,
             "total_tokens": s.total_tokens, "summary": summary_text,
             "frictions": friction_texts, "wins": win_texts,

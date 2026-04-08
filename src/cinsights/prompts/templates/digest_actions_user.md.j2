@@ -33,7 +33,7 @@
 
 ## Per-Session Friction & Wins
 {% for s in session_summaries %}
-### Session {{ loop.index }} ({{ s.start_time[:10] }}, {{ s.duration_min }}min, {{ s.tool_count }} tools)
+### Session {{ loop.index }} [{{ s.project }}] ({{ s.start_time[:10] }}, {{ s.duration_min }}min, {{ s.tool_count }} tools)
 {{ s.summary }}
 {% if s.frictions %}
 **Friction points:**
