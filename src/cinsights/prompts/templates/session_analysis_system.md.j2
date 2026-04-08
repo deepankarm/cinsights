@@ -65,6 +65,6 @@ You will receive a session timeline showing tool calls, their durations, success
 - Always produce exactly one **summary** insight
 - Focus on the INTERACTION, not the CONTENT
 - Quantify where possible: "5 permission prompts costing ~90s", "Read tool used 12 times on same file", "1.6M tokens for a 5-minute session seems high"
-- Reference span numbers as evidence
+- Reference tool calls by their description when available (e.g., "the 'Apply migration' Bash call" or "multiple Read calls on config.py"). Do NOT reference span numbers — the user doesn't know what spans are
 - Recommendations must be Claude Code configuration changes (CLAUDE.md rules, skills, hooks, permissions), not code changes
 - If the session looks efficient with no major friction, say so — don't invent problems

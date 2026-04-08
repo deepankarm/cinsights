@@ -91,14 +91,14 @@ async def test_analyze_structured_output():
                 "title": "Test Summary",
                 "content": "A test session that did things.",
                 "severity": "info",
-                "evidence_spans": [1, 2],
+                "evidence": ["the Apply migration Bash call", "Read on file.py"],
             },
             {
                 "category": "friction",
                 "title": "File not found errors",
                 "content": "Agent tried to read missing files.",
                 "severity": "warning",
-                "evidence_spans": [3],
+                "evidence": ["Read on missing.go"],
             },
         ]
     }
@@ -124,7 +124,7 @@ async def test_analyze_structured_output():
         assert len(result.insights) == 2
         assert result.insights[0].category == InsightCategoryEnum.SUMMARY
         assert result.insights[0].title == "Test Summary"
-        assert result.insights[0].evidence_spans == [1, 2]
+        assert result.insights[0].evidence == ["the Apply migration Bash call", "Read on file.py"]
         assert result.insights[1].category == InsightCategoryEnum.FRICTION
         assert result.insights[1].severity == "warning"
 

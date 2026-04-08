@@ -47,9 +47,9 @@ class InsightItem(BaseModel):
         default=InsightSeverityEnum.INFO,
         description="Impact level: info for observations, warning for notable issues, critical for major problems",
     )
-    evidence_spans: list[int] = Field(
+    evidence: list[str] = Field(
         default_factory=list,
-        description="List of span numbers (from the timeline) that support this insight",
+        description="Evidence supporting this insight. Reference tool calls by description (e.g., 'the Apply migration Bash call failed') or by pattern (e.g., 'Read was called 8 times on registry.go'). Never reference span numbers.",
     )
 
 
@@ -98,6 +98,17 @@ class _SpanView:
     @property
     def output_display(self) -> str:
         return _truncate(self._span.output_value)
+
+    @property
+    def tool_description(self) -> str | None:
+        """Human-readable description from CC tool calls (e.g., 'Apply migration')."""
+        desc = self._span.attributes.get("tool.description", "")
+        if not desc:
+            return None
+        # CC sometimes puts the full input JSON as description, skip those
+        if desc.startswith("{") or len(desc) > 100:
+            return None
+        return desc
 
     @property
     def error_message(self) -> str | None:
