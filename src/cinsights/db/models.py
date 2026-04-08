@@ -81,10 +81,6 @@ class Insight(SQLModel, table=True):
 
     session: CodingSession = Relationship(back_populates="insights")
 
-
-# --- Digest (cross-session analysis) ---
-
-
 class DigestStatus(StrEnum):
     PENDING = "pending"
     COMPUTING_STATS = "computing_stats"

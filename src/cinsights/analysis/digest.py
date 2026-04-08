@@ -13,10 +13,6 @@ from cinsights.stats import DigestStats
 
 logger = logging.getLogger(__name__)
 
-
-# --- Structured output schemas ---
-
-
 class AtAGlance(BaseModel):
     whats_working: list[str] = Field(
         description="2-4 crisp one-sentence bullets on productive patterns",
@@ -88,10 +84,6 @@ class ForwardResult(BaseModel):
     impressive_wins: list[WinItem]
     workflow_patterns: list[WorkflowPattern]
     ambitious_workflows: list[WorkflowPattern]
-
-
-# --- Tool definitions for structured output ---
-
 _NARRATIVE_TOOL = {
     "name": "record_narrative",
     "description": "Record the narrative analysis sections of the digest.",

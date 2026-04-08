@@ -14,10 +14,6 @@ logger = logging.getLogger(__name__)
 
 MAX_IO_CHARS = 500  # Truncate tool I/O to keep prompt manageable
 
-
-# --- Structured output schema ---
-
-
 class InsightCategoryEnum(StrEnum):
     SUMMARY = "summary"
     FRICTION = "friction"
@@ -68,10 +64,6 @@ _ANALYSIS_TOOL = {
     "description": "Record the structured analysis results for a coding agent session.",
     "input_schema": AnalysisResult.model_json_schema(),
 }
-
-
-# --- Prompt helpers ---
-
 
 def _truncate(text: str | None, max_chars: int = MAX_IO_CHARS) -> str:
     if not text:
@@ -144,10 +136,6 @@ def _build_prompts(trace: TraceData, spans: list[SpanData]) -> tuple[str, str]:
         spans=[_SpanView(s) for s in spans],
     )
     return system_prompt, user_prompt
-
-
-# --- Analyzer ---
-
 
 class SessionAnalyzer:
     """Analyze coding agent sessions using Claude API with structured output."""

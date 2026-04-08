@@ -19,10 +19,6 @@ from cinsights.db.models import (
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
-
-# --- Response schemas ---
-
-
 class ToolCallRead(BaseModel):
     id: str
     tool_name: str
@@ -79,10 +75,6 @@ class StatsResponse(BaseModel):
     total_insights: int
     top_tools: dict[str, int]
     insight_counts: dict[str, int]
-
-
-# --- Endpoints ---
-
 
 @router.get("/", response_model=list[SessionRead])
 async def list_sessions(
