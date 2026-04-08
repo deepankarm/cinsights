@@ -33,7 +33,11 @@ export async function triggerAnalysis(id: string): Promise<SessionDetail> {
 // Digest API
 export async function getDigests(project?: string): Promise<DigestRead[]> {
 	let url = '/api/digests/';
-	if (project) url += `?project=${encodeURIComponent(project)}`;
+	if (project) {
+		url += `?project=${encodeURIComponent(project)}`;
+	} else {
+		url += '?global_only=true';
+	}
 	return fetchJSON(url);
 }
 
