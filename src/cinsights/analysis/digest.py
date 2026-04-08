@@ -34,7 +34,6 @@ class NarrativeResult(BaseModel):
     at_a_glance: AtAGlance
     work_areas: list[WorkArea]
     developer_persona: str = Field(description="2-3 paragraph narrative in markdown")
-    fun_ending: str = Field(description="Humorous observation from the data")
 
 
 class FrictionItem(BaseModel):

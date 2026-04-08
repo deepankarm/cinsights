@@ -92,7 +92,7 @@
 	let features = $derived(getSection('feature_recommendations')?.metadata as Array<{feature: string; title: string; why_for_you: string; setup_code: string | null}> | undefined);
 	let patterns = $derived(getSection('workflow_patterns')?.metadata as Array<{name: string; description: string; rationale: string; starter_prompt: string}> | undefined);
 	let ambitious = $derived(getSection('ambitious_workflows')?.metadata as Array<{name: string; description: string; rationale: string; starter_prompt: string}> | undefined);
-	let funEnding = $derived(getSection('fun_ending'));
+	// fun_ending removed — users found it annoying
 </script>
 
 <svelte:head>
@@ -161,7 +161,23 @@
 			<div class="pill"><span class="pill-value">{stats.total_tool_calls}</span><span class="pill-label">Tool Calls</span></div>
 			<div class="pill"><span class="pill-value">{stats.total_duration_minutes.toFixed(0)}m</span><span class="pill-label">Duration</span></div>
 			<div class="pill"><span class="pill-value">{stats.active_days}</span><span class="pill-label">Active Days</span></div>
+			<div class="pill"><span class="pill-value">{stats.plan_mode_stats.entries}</span><span class="pill-label">Plan Mode</span></div>
+			{#if stats.permission_stats.count > 0}
+				<div class="pill pill-warn"><span class="pill-value">{stats.permission_stats.count}</span><span class="pill-label">Permission Prompts</span></div>
+			{/if}
+			{#if !stats.has_claude_md}
+				<div class="pill pill-alert"><span class="pill-value">Missing</span><span class="pill-label">CLAUDE.md</span></div>
+			{/if}
 		</div>
+
+		<!-- Permission wait time callout -->
+		{#if stats.permission_stats.total_wait_seconds > 30}
+			<div class="callout callout-warn">
+				You spent <strong>{(stats.permission_stats.total_wait_seconds / 60).toFixed(1)} minutes</strong> waiting on permission prompts
+				({stats.permission_stats.count} prompts, avg {stats.permission_stats.avg_wait_seconds.toFixed(0)}s, max {stats.permission_stats.max_wait_seconds.toFixed(0)}s).
+				Consider pre-approving common tools in your settings.
+			</div>
+		{/if}
 
 		<!-- Charts Row 1: Tools + Errors -->
 		<div class="charts-row">
@@ -402,11 +418,6 @@
 	{/if}
 
 	<!-- Fun Ending -->
-	{#if funEnding}
-		<div class="fun-ending">
-			<p>{@html renderLinkedMarkdown(funEnding.content)}</p>
-		</div>
-	{/if}
 
 	<!-- Footer -->
 	<div class="report-footer">
@@ -526,8 +537,12 @@
 	.copy-btn:hover { background: #cbd5e1; }
 
 	/* Fun Ending */
-	.fun-ending { background: linear-gradient(135deg, #fef3c7, #fde68a); border: 1px solid #fbbf24; border-radius: 12px; padding: 24px; text-align: center; margin-bottom: 24px; }
-	.fun-ending p { font-size: 15px; color: #92400e; line-height: 1.6; }
+	.callout { border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; font-size: 14px; line-height: 1.5; }
+	.callout-warn { background: #fefce8; border: 1px solid #fde68a; color: #854d0e; }
+	.pill-warn { border-color: #fde68a; }
+	.pill-warn .pill-value { color: #ca8a04; }
+	.pill-alert { border-color: #fca5a5; }
+	.pill-alert .pill-value { color: #dc2626; font-size: 14px; }
 
 	/* Footer */
 	.report-footer { text-align: center; padding: 24px; color: #94a3b8; font-size: 12px; }

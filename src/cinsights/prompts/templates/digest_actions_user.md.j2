@@ -17,7 +17,14 @@
 {% endfor %}
 {% if not error_breakdown %}No tool failures recorded.{% endif %}
 
-## Permission Prompts: {{ permission_prompt_count }}
+## Permission Prompts
+- Count: {{ permission_stats.count }}
+- Total wait time: {{ permission_stats.total_wait_seconds | int }}s
+- Average wait: {{ permission_stats.avg_wait_seconds | int }}s
+- Max wait: {{ permission_stats.max_wait_seconds | int }}s
+
+## CLAUDE.md
+{% if has_claude_md %}Project has a CLAUDE.md file.{% else %}Project does NOT have a CLAUDE.md file.{% endif %}
 
 ## Session Health
 {% for h in session_health %}

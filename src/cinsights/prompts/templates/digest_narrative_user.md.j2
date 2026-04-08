@@ -33,7 +33,19 @@
 {% endfor %}
 {% else %}No parallel sessions detected.{% endif %}
 
-## Permission Prompts: {{ permission_prompt_count }}
+## Permission Prompts
+- Count: {{ permission_stats.count }}
+- Total wait time: {{ permission_stats.total_wait_seconds | int }}s ({{ "%.1f" | format(permission_stats.total_wait_seconds / 60) }}min)
+- Average wait: {{ permission_stats.avg_wait_seconds | int }}s
+- Max wait: {{ permission_stats.max_wait_seconds | int }}s
+
+## Plan Mode Usage
+- Plan mode entries: {{ plan_mode_stats.entries }}
+- Total planning duration: {{ plan_mode_stats.total_duration_seconds | int }}s
+- Plan agents spawned: {{ plan_mode_stats.plan_agent_count }}
+
+## CLAUDE.md
+{% if has_claude_md %}This project has a CLAUDE.md file.{% else %}This project does NOT have a CLAUDE.md file. This is a significant gap — recommend creating one.{% endif %}
 
 ## Session Health
 {% for h in session_health %}
