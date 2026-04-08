@@ -18,10 +18,18 @@ logger = logging.getLogger(__name__)
 
 
 class AtAGlance(BaseModel):
-    whats_working: str = Field(description="What interaction patterns are productive")
-    whats_hindering: str = Field(description="What recurring friction slows them down")
-    quick_wins: str = Field(description="2-3 immediate actionable improvements")
-    ambitious_workflows: str = Field(description="Forward-looking automation ideas")
+    whats_working: list[str] = Field(
+        description="2-4 crisp one-sentence bullets on productive patterns",
+    )
+    whats_hindering: list[str] = Field(
+        description="2-4 crisp one-sentence bullets on friction, with numbers",
+    )
+    quick_wins: list[str] = Field(
+        description="2-3 immediate actionable improvements for TODAY",
+    )
+    ambitious_workflows: list[str] = Field(
+        description="2-3 forward-looking automation ideas",
+    )
 
 
 class WorkArea(BaseModel):

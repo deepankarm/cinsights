@@ -83,7 +83,7 @@
 	}
 
 	let stats = $derived(digest?.stats as DigestStatsData | null);
-	let atAGlance = $derived(getSection('at_a_glance')?.metadata as Record<string, string> | undefined);
+	let atAGlance = $derived(getSection('at_a_glance')?.metadata as Record<string, string[]> | undefined);
 	let workAreas = $derived(getSection('work_areas')?.metadata as Array<{name: string; session_count: number; description: string}> | undefined);
 	let persona = $derived(getSection('developer_persona'));
 	let wins = $derived(getSection('impressive_wins')?.metadata as Array<{title: string; description: string; evidence: string}> | undefined);
@@ -141,28 +141,44 @@
 					<div class="glance-card-icon">✓</div>
 					<div class="glance-card-content">
 						<h3>What's working</h3>
-						<div class="glance-text">{@html renderLinkedMarkdown(atAGlance.whats_working)}</div>
+						<ul class="glance-list">
+							{#each atAGlance.whats_working as item}
+								<li>{@html renderLinkedMarkdown(item)}</li>
+							{/each}
+						</ul>
 					</div>
 				</div>
 				<div class="glance-card glance-hindering">
 					<div class="glance-card-icon">!</div>
 					<div class="glance-card-content">
 						<h3>What's hindering</h3>
-						<div class="glance-text">{@html renderLinkedMarkdown(atAGlance.whats_hindering)}</div>
+						<ul class="glance-list">
+							{#each atAGlance.whats_hindering as item}
+								<li>{@html renderLinkedMarkdown(item)}</li>
+							{/each}
+						</ul>
 					</div>
 				</div>
 				<div class="glance-card glance-wins">
 					<div class="glance-card-icon">→</div>
 					<div class="glance-card-content">
 						<h3>Quick wins</h3>
-						<div class="glance-text">{@html renderLinkedMarkdown(atAGlance.quick_wins)}</div>
+						<ul class="glance-list">
+							{#each atAGlance.quick_wins as item}
+								<li>{@html renderLinkedMarkdown(item)}</li>
+							{/each}
+						</ul>
 					</div>
 				</div>
 				<div class="glance-card glance-ambitious">
 					<div class="glance-card-icon">★</div>
 					<div class="glance-card-content">
 						<h3>Ambitious workflows</h3>
-						<div class="glance-text">{@html renderLinkedMarkdown(atAGlance.ambitious_workflows)}</div>
+						<ul class="glance-list">
+							{#each atAGlance.ambitious_workflows as item}
+								<li>{@html renderLinkedMarkdown(item)}</li>
+							{/each}
+						</ul>
 					</div>
 				</div>
 			</div>
@@ -524,9 +540,10 @@
 	.glance-card { border-radius: 10px; padding: 18px; display: flex; gap: 14px; }
 	.glance-card-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; flex-shrink: 0; }
 	.glance-card-content h3 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 6px; }
-	.glance-text { font-size: 14px; line-height: 1.6; }
-	.glance-text :global(p) { margin-bottom: 6px; }
-	.glance-text :global(p:last-child) { margin-bottom: 0; }
+	.glance-list { font-size: 14px; line-height: 1.6; margin: 0; padding-left: 16px; }
+	.glance-list li { margin-bottom: 4px; }
+	.glance-list li:last-child { margin-bottom: 0; }
+	.glance-list li :global(p) { display: inline; }
 	.glance-working { background: #f0fdf4; border: 1px solid #bbf7d0; }
 	.glance-working .glance-card-icon { background: #dcfce7; color: #16a34a; }
 	.glance-working h3 { color: #15803d; }
