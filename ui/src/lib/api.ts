@@ -1,4 +1,4 @@
-import type { SessionRead, SessionDetail, StatsResponse } from './types';
+import type { SessionRead, SessionDetail, StatsResponse, DigestRead, DigestDetail } from './types';
 
 const BASE = '/api/sessions';
 
@@ -28,4 +28,13 @@ export async function triggerAnalysis(id: string): Promise<SessionDetail> {
 	const res = await fetch(`${BASE}/${id}/analyze`, { method: 'POST' });
 	if (!res.ok) throw new Error(`Analysis failed: ${res.status}`);
 	return res.json();
+}
+
+// Digest API
+export async function getDigests(): Promise<DigestRead[]> {
+	return fetchJSON('/api/digests/');
+}
+
+export async function getDigest(id: string): Promise<DigestDetail> {
+	return fetchJSON(`/api/digests/${id}`);
 }

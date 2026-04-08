@@ -57,6 +57,9 @@ class AnalysisResult(BaseModel):
     insights: list[InsightItem] = Field(
         description="List of insights extracted from the session analysis"
     )
+    # Populated after LLM call (not part of structured output)
+    usage_prompt_tokens: int = 0
+    usage_completion_tokens: int = 0
 
 
 # Tool schema for structured output via tool_use
@@ -173,7 +176,10 @@ class SessionAnalyzer:
             tool_choice={"type": "tool", "name": "record_analysis"},
         )
 
-        return self._parse_response(response)
+        result = self._parse_response(response)
+        result.usage_prompt_tokens = response.usage.input_tokens
+        result.usage_completion_tokens = response.usage.output_tokens
+        return result
 
     async def analyze_batch(
         self,

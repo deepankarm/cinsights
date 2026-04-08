@@ -1,0 +1,34 @@
+## Period: {{ period_start }} to {{ period_end }} ({{ session_count }} sessions, {{ total_duration_minutes | int }}min total)
+
+## Tool Distribution
+{% for name, count in tool_distribution.items() %}
+- {{ name }}: {{ count }}
+{% endfor %}
+
+## Languages
+{% for lang, count in language_distribution.items() %}
+- {{ lang }}: {{ count }}
+{% endfor %}
+
+## Multi-Session Overlap
+{% if overlapping_sessions %}
+{{ overlapping_sessions | length }} parallel session events detected.
+{% for o in overlapping_sessions %}
+- {{ o.overlap_minutes }}min overlap
+{% endfor %}
+{% else %}No parallel sessions detected.{% endif %}
+
+## Per-Session Summaries
+{% for s in session_summaries %}
+### Session {{ loop.index }} ({{ s.start_time[:10] }}, {{ s.duration_min }}min, {{ s.tool_count }} tools, {{ s.total_tokens }} tokens)
+{{ s.summary }}
+{% if s.wins %}
+**What went well:**
+{% for w in s.wins %}- {{ w }}
+{% endfor %}{% endif %}
+{% if s.frictions %}
+**Friction:**
+{% for f in s.frictions %}- {{ f }}
+{% endfor %}{% endif %}
+
+{% endfor %}

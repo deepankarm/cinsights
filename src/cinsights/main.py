@@ -6,7 +6,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from cinsights.api.digest import router as digest_router
 from cinsights.api.sessions import router as sessions_router
+from cinsights.api.stats import router as stats_router
 
 
 @asynccontextmanager
@@ -35,6 +37,8 @@ app.add_middleware(
 )
 
 app.include_router(sessions_router)
+app.include_router(digest_router)
+app.include_router(stats_router)
 
 # Mount static files last (catch-all for SvelteKit SPA)
 _static_dir = Path(__file__).parent.parent.parent / "ui" / "build"

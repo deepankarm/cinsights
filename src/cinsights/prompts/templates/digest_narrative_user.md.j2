@@ -1,0 +1,56 @@
+## Period: {{ period_start }} to {{ period_end }}
+- **Sessions**: {{ session_count }}
+- **Total tool calls**: {{ total_tool_calls }}
+- **Total tokens**: {{ total_tokens | int }}
+- **Total duration**: {{ total_duration_minutes | int }} minutes
+- **Active days**: {{ active_days }}
+
+## Tool Distribution
+{% for name, count in tool_distribution.items() %}
+- {{ name }}: {{ count }}
+{% endfor %}
+
+## Languages Used
+{% for lang, count in language_distribution.items() %}
+- {{ lang }}: {{ count }} file operations
+{% endfor %}
+
+## Time of Day (hours, UTC)
+{% for hour, count in time_of_day.items() %}
+- {{ hour }}:00: {{ count }} sessions
+{% endfor %}
+
+## Error Types
+{% for type, count in error_types.items() %}
+- {{ type }}: {{ count }}
+{% endfor %}
+{% if not error_types %}No errors recorded.{% endif %}
+
+## Multi-Session Overlap
+{% if overlapping_sessions %}
+{% for o in overlapping_sessions %}
+- {{ o.overlap_minutes }}min overlap between sessions
+{% endfor %}
+{% else %}No parallel sessions detected.{% endif %}
+
+## Permission Prompts: {{ permission_prompt_count }}
+
+## Session Health
+{% for h in session_health %}
+- {{ h.start_time.strftime('%m/%d %H:%M') }} | {{ h.duration_minutes }}min | {{ h.tool_count }} tools | {{ h.error_count }} errors | Grade {{ h.grade }}
+{% endfor %}
+
+## Per-Session Summaries
+{% for s in session_summaries %}
+### Session {{ loop.index }} ({{ s.start_time[:10] }}, {{ s.duration_min }}min, {{ s.tool_count }} tools, {{ s.total_tokens }} tokens)
+{{ s.summary }}
+{% if s.frictions %}
+**Friction:**
+{% for f in s.frictions %}- {{ f }}
+{% endfor %}{% endif %}
+{% if s.wins %}
+**Wins:**
+{% for w in s.wins %}- {{ w }}
+{% endfor %}{% endif %}
+
+{% endfor %}
