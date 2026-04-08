@@ -41,6 +41,7 @@ class CodingSession(SQLModel, table=True):
     completion_tokens: int = 0
     span_count: int = 0  # Track span count for change detection
     last_span_time: datetime | None = None  # Track latest span for change detection
+    context_growth_json: str | None = None  # [{turn, prompt_tokens, completion_tokens}]
     analysis_prompt_tokens: int = 0  # Tokens used by cinsights analysis
     analysis_completion_tokens: int = 0
     status: SessionStatus = SessionStatus.PENDING

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -66,6 +67,7 @@ class SessionDetail(BaseModel):
     total_tokens: int
     prompt_tokens: int
     completion_tokens: int
+    context_growth: list[dict] | None = None
     status: SessionStatus
     tool_calls: list[ToolCallRead]
     insights: list[InsightRead]
@@ -194,6 +196,9 @@ async def get_session_detail(session_id: str, db: Session = Depends(get_db)):
         total_tokens=session.total_tokens,
         prompt_tokens=session.prompt_tokens,
         completion_tokens=session.completion_tokens,
+        context_growth=(
+            json.loads(session.context_growth_json) if session.context_growth_json else None
+        ),
         status=session.status,
         tool_calls=[
             ToolCallRead(

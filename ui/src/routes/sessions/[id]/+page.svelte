@@ -200,6 +200,25 @@
 		</button>
 	</div>
 
+	<!-- Context Growth -->
+	{#if session.context_growth && session.context_growth.length > 1}
+		{@const maxPrompt = Math.max(...session.context_growth.map(t => t.prompt_tokens))}
+		<div class="section">
+			<h2>Context Growth</h2>
+			<div class="context-chart">
+				{#each session.context_growth as turn}
+					<div class="context-bar-row">
+						<span class="context-label">Turn {turn.turn}</span>
+						<div class="context-bar-track">
+							<div class="context-bar-fill" style="width: {(turn.prompt_tokens / maxPrompt * 100).toFixed(1)}%"></div>
+						</div>
+						<span class="context-value">{formatTokens(turn.prompt_tokens)}</span>
+					</div>
+				{/each}
+			</div>
+		</div>
+	{/if}
+
 	<!-- Insights -->
 	{#if session.insights.length > 0}
 		<div class="section">
@@ -472,6 +491,13 @@
 	.insight-content :global(a:hover) {
 		text-decoration: underline;
 	}
+
+	.context-chart { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; }
+	.context-bar-row { display: flex; align-items: center; margin-bottom: 4px; }
+	.context-label { width: 70px; font-size: 11px; color: #64748b; flex-shrink: 0; }
+	.context-bar-track { flex: 1; height: 8px; background: #f1f5f9; border-radius: 4px; margin: 0 8px; }
+	.context-bar-fill { height: 100%; background: linear-gradient(90deg, #3b82f6, #8b5cf6); border-radius: 4px; }
+	.context-value { width: 50px; font-size: 11px; font-weight: 500; color: #64748b; text-align: right; }
 
 	.collapse-btn {
 		background: none;

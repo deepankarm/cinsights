@@ -42,6 +42,7 @@ export interface SessionDetail {
 	total_tokens: number;
 	prompt_tokens: number;
 	completion_tokens: number;
+	context_growth: Array<{ turn: number; prompt_tokens: number; completion_tokens: number }> | null;
 	status: string;
 	tool_calls: ToolCallRead[];
 	insights: InsightRead[];

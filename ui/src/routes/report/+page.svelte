@@ -239,12 +239,13 @@
 				<div class="chart-title">Tokens per Session</div>
 				{#each stats.tokens_per_session as t, i}
 					{@const sessionNum = sessionIds.indexOf(t.session_id) + 1}
-					<div class="bar-row">
+					<a href="/sessions/{t.session_id}" class="bar-row bar-link">
 						<span class="bar-label">{sessionNum > 0 ? `Session ${sessionNum}` : t.session_id.slice(0, 8)}</span>
 						<div class="bar-track"><div class="bar-fill bar-blue" style="width:{barWidth(t.tokens, Math.max(...stats.tokens_per_session.map(x => x.tokens), 1))}"></div></div>
 						<span class="bar-value">{formatTokens(t.tokens)}</span>
-					</div>
+					</a>
 				{/each}
+				<div class="chart-hint">Click a session to see context growth per turn</div>
 			</div>
 			<div class="chart-card">
 				<div class="chart-title">Interaction Stats</div>
@@ -527,6 +528,9 @@
 	.bar-red { background: #dc2626; }
 	.bar-value { width: 32px; font-size: 11px; font-weight: 500; color: #64748b; text-align: right; }
 	.bar-empty { font-size: 12px; color: #94a3b8; }
+	.bar-link { text-decoration: none; color: inherit; }
+	.bar-link:hover { background: #f8fafc; border-radius: 3px; }
+	.chart-hint { font-size: 11px; color: #94a3b8; margin-top: 8px; }
 
 	/* Health Grid */
 	.health-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
