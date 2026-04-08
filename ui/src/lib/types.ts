@@ -116,4 +116,10 @@ export interface DigestStatsData {
 	overlapping_sessions: Array<{ session_ids: string[]; overlap_minutes: number }>;
 	permission_prompt_count: number;
 	analysis_tokens_used: number;
+	session_summaries: Array<{
+		session_id: string;
+		start_time: string;
+		duration_min: number;
+		summary: string;
+	}>;
 }

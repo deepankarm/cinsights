@@ -25,6 +25,26 @@
 		return digest?.sections.find((s) => s.section_type === type);
 	}
 
+	// Map "Session 1", "Session 3" etc. to clickable links using session_summaries order
+	let sessionIds = $derived(
+		(stats?.session_summaries ?? []).map((s: { session_id: string }) => s.session_id) as string[]
+	);
+
+	function linkifySessions(text: string): string {
+		if (!sessionIds.length) return text;
+		return text.replace(/Session (\d+)('s)?/gi, (match, num, possessive) => {
+			const idx = parseInt(num) - 1;
+			if (idx >= 0 && idx < sessionIds.length) {
+				return `[${match}](/sessions/${sessionIds[idx]})`;
+			}
+			return match;
+		});
+	}
+
+	function renderLinkedMarkdown(text: string): string {
+		return renderMarkdown(linkifySessions(text));
+	}
+
 	function formatTokens(n: number): string {
 		if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
 		if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
@@ -101,16 +121,16 @@
 			<h2 class="glance-title">At a Glance</h2>
 			<div class="glance-grid">
 				<div class="glance-item glance-working">
-					<strong>What's working:</strong> {atAGlance.whats_working}
+					<strong>What's working:</strong> {@html renderLinkedMarkdown(atAGlance.whats_working)}
 				</div>
 				<div class="glance-item glance-hindering">
-					<strong>What's hindering:</strong> {atAGlance.whats_hindering}
+					<strong>What's hindering:</strong> {@html renderLinkedMarkdown(atAGlance.whats_hindering)}
 				</div>
 				<div class="glance-item glance-wins">
-					<strong>Quick wins:</strong> {atAGlance.quick_wins}
+					<strong>Quick wins:</strong> {@html renderLinkedMarkdown(atAGlance.quick_wins)}
 				</div>
 				<div class="glance-item glance-ambitious">
-					<strong>Ambitious workflows:</strong> {atAGlance.ambitious_workflows}
+					<strong>Ambitious workflows:</strong> {@html renderLinkedMarkdown(atAGlance.ambitious_workflows)}
 				</div>
 			</div>
 		</div>
@@ -206,7 +226,7 @@
 							<span class="work-area-name">{area.name}</span>
 							<span class="work-area-count">~{area.session_count} sessions</span>
 						</div>
-						<p class="work-area-desc">{area.description}</p>
+						<p class="work-area-desc">{@html renderLinkedMarkdown(area.description)}</p>
 					</div>
 				{/each}
 			</div>
@@ -218,7 +238,7 @@
 		<div class="section">
 			<h2>How You Use Claude Code</h2>
 			<div class="persona-card markdown-body">
-				{@html renderMarkdown(persona.content)}
+				{@html renderLinkedMarkdown(persona.content)}
 			</div>
 		</div>
 	{/if}
@@ -231,8 +251,8 @@
 				{#each wins as win}
 					<div class="card card-green">
 						<h3>{win.title}</h3>
-						<p>{win.description}</p>
-						<div class="card-evidence">{win.evidence}</div>
+						<p>{@html renderLinkedMarkdown(win.description)}</p>
+						<div class="card-evidence">{@html renderLinkedMarkdown(win.evidence)}</div>
 					</div>
 				{/each}
 			</div>
@@ -254,7 +274,7 @@
 								<span class="severity-badge severity-warning">!</span>
 							{/if}
 						</div>
-						<p>{f.description}</p>
+						<p>{@html renderLinkedMarkdown(f.description)}</p>
 						{#if f.examples && f.examples.length > 0}
 							<ul class="friction-examples">
 								{#each f.examples as ex}
@@ -280,7 +300,7 @@
 						<div class="claude-md-actions">
 							<button class="copy-btn" onclick={(e) => copyText(suggestion.rule, e.currentTarget as HTMLButtonElement)}>Copy</button>
 						</div>
-						<div class="claude-md-why">{suggestion.why}</div>
+						<div class="claude-md-why">{@html renderLinkedMarkdown(suggestion.why)}</div>
 					</div>
 				{/each}
 			</div>
@@ -296,7 +316,7 @@
 					<div class="card card-blue">
 						<div class="feature-name">{feat.feature}</div>
 						<h3>{feat.title}</h3>
-						<p><strong>Why for you:</strong> {feat.why_for_you}</p>
+						<p><strong>Why for you:</strong> {@html renderLinkedMarkdown(feat.why_for_you)}</p>
 						{#if feat.setup_code}
 							<div class="code-block-wrap">
 								<pre class="code-block">{feat.setup_code}</pre>
@@ -317,8 +337,8 @@
 				{#each patterns as p}
 					<div class="card card-cyan">
 						<h3>{p.name}</h3>
-						<p>{p.description}</p>
-						<p class="card-rationale">{p.rationale}</p>
+						<p>{@html renderLinkedMarkdown(p.description)}</p>
+						<p class="card-rationale">{@html renderLinkedMarkdown(p.rationale)}</p>
 						<div class="code-block-wrap">
 							<div class="prompt-label">Paste into Claude Code:</div>
 							<pre class="code-block">{p.starter_prompt}</pre>
@@ -338,8 +358,8 @@
 				{#each ambitious as a}
 					<div class="card card-purple">
 						<h3>{a.name}</h3>
-						<p>{a.description}</p>
-						<p class="card-rationale">{a.rationale}</p>
+						<p>{@html renderLinkedMarkdown(a.description)}</p>
+						<p class="card-rationale">{@html renderLinkedMarkdown(a.rationale)}</p>
 						<div class="code-block-wrap">
 							<div class="prompt-label">Paste into Claude Code:</div>
 							<pre class="code-block">{a.starter_prompt}</pre>
@@ -354,7 +374,7 @@
 	<!-- Fun Ending -->
 	{#if funEnding}
 		<div class="fun-ending">
-			<p>{funEnding.content}</p>
+			<p>{@html renderLinkedMarkdown(funEnding.content)}</p>
 		</div>
 	{/if}
 
