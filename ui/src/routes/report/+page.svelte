@@ -9,7 +9,7 @@
 	let loading = $state(true);
 	let error: string | null = $state(null);
 	let showAllSessions = $state(false);
-	let expandedSections = $state({ features: false, patterns: false, ambitious: false });
+	let expandedCards: Record<string, boolean> = $state({});
 
 	const projectFilter = $derived(page.url.searchParams.get('project'));
 
@@ -444,20 +444,21 @@
 		</div>
 	{/if}
 
-	<!-- Feature Recommendations (collapsible) -->
+	<!-- Feature Recommendations -->
 	{#if features && features.length > 0}
 		<div class="section">
-			<button class="section-toggle" onclick={() => expandedSections.features = !expandedSections.features}>
-				<span class="toggle-arrow" class:open={expandedSections.features}>&#9654;</span>
-				<h2>CC Features to Try ({features.length})</h2>
-				<span class="section-preview">{features.map(f => f.feature).join(' · ')}</span>
-			</button>
-			{#if expandedSections.features}
-				<div class="cards-list">
-					{#each features as feat}
-						<div class="card card-blue">
-							<div class="feature-name">{feat.feature}</div>
-							<h3>{feat.title}</h3>
+			<h2>CC Features to Try</h2>
+			<div class="cards-list">
+				{#each features as feat, i}
+					<div class="card card-blue" class:card-collapsed={!expandedCards[`feat-${i}`]}>
+						<button class="card-top" onclick={() => expandedCards[`feat-${i}`] = !expandedCards[`feat-${i}`]}>
+							<div>
+								<div class="feature-name">{feat.feature}</div>
+								<h3>{feat.title}</h3>
+							</div>
+							<span class="card-toggle">{expandedCards[`feat-${i}`] ? '−' : '+'}</span>
+						</button>
+						{#if expandedCards[`feat-${i}`]}
 							<p><strong>Why for you:</strong> {@html renderLinkedMarkdown(feat.why_for_you)}</p>
 							{#if feat.setup_code}
 								<div class="code-block-wrap">
@@ -465,26 +466,25 @@
 									<button class="copy-btn" onclick={(e) => copyText(feat.setup_code ?? '', e.currentTarget as HTMLButtonElement)}>Copy</button>
 								</div>
 							{/if}
-						</div>
-					{/each}
-				</div>
-			{/if}
+						{/if}
+					</div>
+				{/each}
+			</div>
 		</div>
 	{/if}
 
-	<!-- Workflow Patterns (collapsible) -->
+	<!-- Workflow Patterns -->
 	{#if patterns && patterns.length > 0}
 		<div class="section">
-			<button class="section-toggle" onclick={() => expandedSections.patterns = !expandedSections.patterns}>
-				<span class="toggle-arrow" class:open={expandedSections.patterns}>&#9654;</span>
-				<h2>New Ways to Use Claude Code ({patterns.length})</h2>
-				<span class="section-preview">{patterns.map(p => p.name).join(' · ')}</span>
-			</button>
-			{#if expandedSections.patterns}
-				<div class="cards-list">
-					{#each patterns as p}
-						<div class="card card-cyan">
-							<h3>{p.name}</h3>
+			<h2>New Ways to Use Claude Code</h2>
+			<div class="cards-list">
+				{#each patterns as p, i}
+					<div class="card card-cyan" class:card-collapsed={!expandedCards[`pat-${i}`]}>
+						<button class="card-top" onclick={() => expandedCards[`pat-${i}`] = !expandedCards[`pat-${i}`]}>
+							<div><h3>{p.name}</h3></div>
+							<span class="card-toggle">{expandedCards[`pat-${i}`] ? '−' : '+'}</span>
+						</button>
+						{#if expandedCards[`pat-${i}`]}
 							<p>{@html renderLinkedMarkdown(p.description)}</p>
 							<p class="card-rationale">{@html renderLinkedMarkdown(p.rationale)}</p>
 							<div class="code-block-wrap">
@@ -492,26 +492,25 @@
 								<pre class="code-block">{p.starter_prompt}</pre>
 								<button class="copy-btn" onclick={(e) => copyText(p.starter_prompt, e.currentTarget as HTMLButtonElement)}>Copy</button>
 							</div>
-						</div>
-					{/each}
-				</div>
-			{/if}
+						{/if}
+					</div>
+				{/each}
+			</div>
 		</div>
 	{/if}
 
-	<!-- Ambitious Workflows (collapsible) -->
+	<!-- Ambitious Workflows -->
 	{#if ambitious && ambitious.length > 0}
 		<div class="section">
-			<button class="section-toggle" onclick={() => expandedSections.ambitious = !expandedSections.ambitious}>
-				<span class="toggle-arrow" class:open={expandedSections.ambitious}>&#9654;</span>
-				<h2>On the Horizon ({ambitious.length})</h2>
-				<span class="section-preview">{ambitious.map(a => a.name).join(' · ')}</span>
-			</button>
-			{#if expandedSections.ambitious}
-				<div class="cards-list">
-					{#each ambitious as a}
-						<div class="card card-purple">
-							<h3>{a.name}</h3>
+			<h2>On the Horizon</h2>
+			<div class="cards-list">
+				{#each ambitious as a, i}
+					<div class="card card-purple" class:card-collapsed={!expandedCards[`amb-${i}`]}>
+						<button class="card-top" onclick={() => expandedCards[`amb-${i}`] = !expandedCards[`amb-${i}`]}>
+							<div><h3>{a.name}</h3></div>
+							<span class="card-toggle">{expandedCards[`amb-${i}`] ? '−' : '+'}</span>
+						</button>
+						{#if expandedCards[`amb-${i}`]}
 							<p>{@html renderLinkedMarkdown(a.description)}</p>
 							<p class="card-rationale">{@html renderLinkedMarkdown(a.rationale)}</p>
 							<div class="code-block-wrap">
@@ -519,10 +518,10 @@
 								<pre class="code-block">{a.starter_prompt}</pre>
 								<button class="copy-btn" onclick={(e) => copyText(a.starter_prompt, e.currentTarget as HTMLButtonElement)}>Copy</button>
 							</div>
-						</div>
-					{/each}
-				</div>
-			{/if}
+						{/if}
+					</div>
+				{/each}
+			</div>
 		</div>
 	{/if}
 
@@ -566,19 +565,15 @@
 	.glance-working { background: #f0fdf4; border: 1px solid #bbf7d0; }
 	.glance-working .glance-card-icon { background: #dcfce7; color: #16a34a; }
 	.glance-working h3 { color: #15803d; }
-	.glance-working .glance-text { color: #166534; }
 	.glance-hindering { background: #fef2f2; border: 1px solid #fecaca; }
 	.glance-hindering .glance-card-icon { background: #fee2e2; color: #dc2626; }
 	.glance-hindering h3 { color: #991b1b; }
-	.glance-hindering .glance-text { color: #7f1d1d; }
 	.glance-wins { background: #eff6ff; border: 1px solid #bfdbfe; }
 	.glance-wins .glance-card-icon { background: #dbeafe; color: #2563eb; }
 	.glance-wins h3 { color: #1e40af; }
-	.glance-wins .glance-text { color: #1e3a5f; }
 	.glance-ambitious { background: #faf5ff; border: 1px solid #e9d5ff; }
 	.glance-ambitious .glance-card-icon { background: #f3e8ff; color: #7c3aed; }
 	.glance-ambitious h3 { color: #5b21b6; }
-	.glance-ambitious .glance-text { color: #4c1d95; }
 
 	/* Stats Pills */
 	.stats-pills { display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }
@@ -648,11 +643,10 @@
 	.card-cyan { background: #ecfeff; border-color: #67e8f9; }
 	.card-purple { background: linear-gradient(135deg, #faf5ff, #f5f3ff); border-color: #c4b5fd; }
 
-	.section-toggle { background: none; border: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 0; margin-bottom: 12px; width: 100%; text-align: left; }
-	.section-toggle h2 { margin: 0; white-space: nowrap; }
-	.section-preview { font-size: 13px; color: #94a3b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.toggle-arrow { font-size: 10px; color: #94a3b8; transition: transform 0.15s; flex-shrink: 0; }
-	.toggle-arrow.open { transform: rotate(90deg); }
+	.card-top { display: flex; justify-content: space-between; align-items: flex-start; cursor: pointer; background: none; border: none; padding: 0; width: 100%; text-align: left; font: inherit; color: inherit; }
+	.card-top h3 { margin: 0; }
+	.card-toggle { font-size: 18px; font-weight: 300; color: #94a3b8; flex-shrink: 0; line-height: 1; width: 24px; text-align: center; }
+	.card-collapsed { padding-bottom: 14px; }
 
 	.feature-name { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #2563eb; margin-bottom: 4px; }
 	.friction-examples { margin: 8px 0 0 20px; font-size: 13px; color: #334155; }
