@@ -158,6 +158,10 @@
 	<div class="meta-card">
 		<div class="meta-row">
 			<div class="meta-item">
+				<span class="meta-label">Session</span>
+				<span class="meta-value mono">{session.id.slice(0, 8)}</span>
+			</div>
+			<div class="meta-item">
 				<span class="meta-label">User</span>
 				<span class="meta-value mono">{session.user_id ?? '-'}</span>
 			</div>
