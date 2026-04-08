@@ -541,9 +541,8 @@
 	.glance-card-header { display: flex; align-items: center; gap: 8px; }
 	.glance-card-icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; flex-shrink: 0; }
 	.glance-card-header h3 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; margin: 0; }
-	.glance-list { font-size: 14px; line-height: 1.6; margin: 0; padding-left: 0; list-style: none; }
-	.glance-list li { margin-bottom: 6px; padding-left: 14px; position: relative; }
-	.glance-list li::before { content: "–"; position: absolute; left: 0; color: inherit; opacity: 0.4; }
+	.glance-list { font-size: 14px; line-height: 1.6; margin: 0; padding-left: 18px; }
+	.glance-list li { margin-bottom: 6px; }
 	.glance-list li:last-child { margin-bottom: 0; }
 	.glance-list li :global(p) { display: inline; }
 	.glance-working { background: #f0fdf4; border: 1px solid #bbf7d0; }
