@@ -138,48 +138,48 @@
 			<h2 class="glance-title">At a Glance</h2>
 			<div class="glance-cards">
 				<div class="glance-card glance-working">
-					<div class="glance-card-icon">✓</div>
-					<div class="glance-card-content">
+					<div class="glance-card-header">
+						<div class="glance-card-icon">✓</div>
 						<h3>What's working</h3>
+					</div>
 						<ul class="glance-list">
 							{#each atAGlance.whats_working as item}
 								<li>{@html renderLinkedMarkdown(item)}</li>
 							{/each}
 						</ul>
-					</div>
 				</div>
 				<div class="glance-card glance-hindering">
-					<div class="glance-card-icon">!</div>
-					<div class="glance-card-content">
+					<div class="glance-card-header">
+						<div class="glance-card-icon">!</div>
 						<h3>What's hindering</h3>
+					</div>
 						<ul class="glance-list">
 							{#each atAGlance.whats_hindering as item}
 								<li>{@html renderLinkedMarkdown(item)}</li>
 							{/each}
 						</ul>
-					</div>
 				</div>
 				<div class="glance-card glance-wins">
-					<div class="glance-card-icon">→</div>
-					<div class="glance-card-content">
+					<div class="glance-card-header">
+						<div class="glance-card-icon">→</div>
 						<h3>Quick wins</h3>
+					</div>
 						<ul class="glance-list">
 							{#each atAGlance.quick_wins as item}
 								<li>{@html renderLinkedMarkdown(item)}</li>
 							{/each}
 						</ul>
-					</div>
 				</div>
 				<div class="glance-card glance-ambitious">
-					<div class="glance-card-icon">★</div>
-					<div class="glance-card-content">
+					<div class="glance-card-header">
+						<div class="glance-card-icon">★</div>
 						<h3>Ambitious workflows</h3>
+					</div>
 						<ul class="glance-list">
 							{#each atAGlance.ambitious_workflows as item}
 								<li>{@html renderLinkedMarkdown(item)}</li>
 							{/each}
 						</ul>
-					</div>
 				</div>
 			</div>
 		</div>
@@ -537,11 +537,13 @@
 	.glance-banner { margin-bottom: 24px; }
 	.glance-title { font-size: 20px; font-weight: 700; color: #0f172a; margin-bottom: 16px; }
 	.glance-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-	.glance-card { border-radius: 10px; padding: 18px; display: flex; gap: 14px; }
-	.glance-card-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; flex-shrink: 0; }
-	.glance-card-content h3 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 6px; }
-	.glance-list { font-size: 14px; line-height: 1.6; margin: 0; padding-left: 16px; }
-	.glance-list li { margin-bottom: 4px; }
+	.glance-card { border-radius: 10px; padding: 18px; display: flex; flex-direction: column; gap: 10px; }
+	.glance-card-header { display: flex; align-items: center; gap: 8px; }
+	.glance-card-icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; flex-shrink: 0; }
+	.glance-card-header h3 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; margin: 0; }
+	.glance-list { font-size: 14px; line-height: 1.6; margin: 0; padding-left: 0; list-style: none; }
+	.glance-list li { margin-bottom: 6px; padding-left: 14px; position: relative; }
+	.glance-list li::before { content: "–"; position: absolute; left: 0; color: inherit; opacity: 0.4; }
 	.glance-list li:last-child { margin-bottom: 0; }
 	.glance-list li :global(p) { display: inline; }
 	.glance-working { background: #f0fdf4; border: 1px solid #bbf7d0; }
