@@ -44,6 +44,8 @@ class InsightRead(BaseModel):
 class SessionRead(BaseModel):
     id: str
     session_id: str | None
+    user_id: str | None
+    project_name: str | None
     start_time: datetime
     end_time: datetime | None
     model: str | None
@@ -56,6 +58,8 @@ class SessionRead(BaseModel):
 class SessionDetail(BaseModel):
     id: str
     session_id: str | None
+    user_id: str | None
+    project_name: str | None
     start_time: datetime
     end_time: datetime | None
     model: str | None
@@ -63,7 +67,6 @@ class SessionDetail(BaseModel):
     prompt_tokens: int
     completion_tokens: int
     status: SessionStatus
-    project_name: str | None
     tool_calls: list[ToolCallRead]
     insights: list[InsightRead]
 
@@ -84,12 +87,18 @@ async def list_sessions(
     skip: int = 0,
     limit: int = 20,
     status: SessionStatus | None = None,
+    user_id: str | None = None,
+    project_name: str | None = None,
     db: Session = Depends(get_db),
 ):
-    """List sessions with pagination and optional status filter."""
+    """List sessions with pagination and optional filters."""
     query = select(CodingSession).order_by(col(CodingSession.start_time).desc())
     if status:
         query = query.where(CodingSession.status == status)
+    if user_id:
+        query = query.where(CodingSession.user_id == user_id)
+    if project_name:
+        query = query.where(CodingSession.project_name == project_name)
     query = query.offset(skip).limit(limit)
 
     sessions = db.exec(query).all()
@@ -106,6 +115,8 @@ async def list_sessions(
             SessionRead(
                 id=s.id,
                 session_id=s.session_id,
+                user_id=s.user_id,
+                project_name=s.project_name,
                 start_time=s.start_time,
                 end_time=s.end_time,
                 model=s.model,
@@ -175,6 +186,8 @@ async def get_session_detail(session_id: str, db: Session = Depends(get_db)):
     return SessionDetail(
         id=session.id,
         session_id=session.session_id,
+        user_id=session.user_id,
+        project_name=session.project_name,
         start_time=session.start_time,
         end_time=session.end_time,
         model=session.model,
@@ -182,7 +195,6 @@ async def get_session_detail(session_id: str, db: Session = Depends(get_db)):
         prompt_tokens=session.prompt_tokens,
         completion_tokens=session.completion_tokens,
         status=session.status,
-        project_name=session.project_name,
         tool_calls=[
             ToolCallRead(
                 id=tc.id,

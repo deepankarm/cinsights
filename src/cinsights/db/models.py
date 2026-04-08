@@ -31,14 +31,17 @@ class CodingSession(SQLModel, table=True):
 
     id: str = Field(primary_key=True)  # Phoenix trace_id
     session_id: str | None = Field(default=None, index=True)  # Phoenix session.id
+    user_id: str | None = Field(default=None, index=True)  # user.id from spans
+    project_name: str | None = Field(default=None, index=True)  # project.name from spans
     start_time: datetime
     end_time: datetime | None = None
     model: str | None = None
     total_tokens: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    span_count: int = 0  # Track span count for change detection
+    last_span_time: datetime | None = None  # Track latest span for change detection
     status: SessionStatus = SessionStatus.PENDING
-    project_name: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     tool_calls: list["ToolCall"] = Relationship(back_populates="session")

@@ -102,6 +102,8 @@
 						<tr>
 							<th>Time</th>
 							<th>Model</th>
+							<th>User</th>
+							<th>Project</th>
 							<th>Duration</th>
 							<th>Tools</th>
 							<th>Tokens</th>
@@ -118,6 +120,8 @@
 									</a>
 								</td>
 								<td class="mono">{session.model ?? '-'}</td>
+								<td class="mono">{session.user_id ?? '-'}</td>
+								<td class="mono">{session.project_name ?? '-'}</td>
 								<td>{formatDuration(session.start_time, session.end_time)}</td>
 								<td>{session.tool_call_count}</td>
 								<td>{session.total_tokens.toLocaleString()}</td>

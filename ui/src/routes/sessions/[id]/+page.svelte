@@ -155,6 +155,14 @@
 	<div class="meta-card">
 		<div class="meta-row">
 			<div class="meta-item">
+				<span class="meta-label">User</span>
+				<span class="meta-value mono">{session.user_id ?? '-'}</span>
+			</div>
+			<div class="meta-item">
+				<span class="meta-label">Project</span>
+				<span class="meta-value mono">{session.project_name ?? '-'}</span>
+			</div>
+			<div class="meta-item">
 				<span class="meta-label">Model</span>
 				<span class="meta-value mono">{session.model ?? '-'}</span>
 			</div>
