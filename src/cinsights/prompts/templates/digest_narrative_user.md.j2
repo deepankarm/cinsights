@@ -5,6 +5,14 @@
 - **Total duration**: {{ total_duration_minutes | int }} minutes
 - **Active days**: {{ active_days }}
 
+{% if project_breakdown %}
+## Projects
+{% for p in project_breakdown %}
+- **{{ p.name }}**: {{ p.session_count }} sessions, {{ p.total_tokens }} tokens, top tools: {{ p.top_tools | join(', ') }}{% if not p.has_claude_md %} (NO CLAUDE.md){% endif %}
+
+{% endfor %}
+{% endif %}
+
 ## Tool Distribution
 {% for name, count in tool_distribution.items() %}
 - {{ name }}: {{ count }}

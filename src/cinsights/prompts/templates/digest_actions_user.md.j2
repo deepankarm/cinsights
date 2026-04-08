@@ -1,5 +1,13 @@
 ## Period: {{ period_start }} to {{ period_end }} ({{ session_count }} sessions)
 
+{% if project_breakdown %}
+## Projects
+{% for p in project_breakdown %}
+- **{{ p.name }}**: {{ p.session_count }} sessions{% if not p.has_claude_md %} (NO CLAUDE.md!){% endif %}
+
+{% endfor %}
+{% endif %}
+
 ## Tool Distribution
 {% for name, count in tool_distribution.items() %}
 - {{ name }}: {{ count }}
