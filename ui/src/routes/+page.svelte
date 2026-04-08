@@ -100,6 +100,7 @@
 				<table>
 					<thead>
 						<tr>
+							<th>Session</th>
 							<th>Time</th>
 							<th>Model</th>
 							<th>User</th>
@@ -114,11 +115,12 @@
 					<tbody>
 						{#each sessions as session}
 							<tr>
-								<td>
+								<td class="mono">
 									<a href="/sessions/{session.id}" class="session-link">
-										{formatDate(session.start_time)}
+										{session.id.slice(0, 8)}
 									</a>
 								</td>
+								<td>{formatDate(session.start_time)}</td>
 								<td class="mono">{session.model ?? '-'}</td>
 								<td class="mono">{session.user_id ?? '-'}</td>
 								<td class="mono">{session.project_name ?? '-'}</td>
