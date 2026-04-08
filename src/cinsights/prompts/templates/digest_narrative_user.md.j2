@@ -54,7 +54,7 @@
 
 ## Per-Session Summaries
 {% for s in session_summaries %}
-### Session {{ loop.index }} ({{ s.start_time[:10] }}, {{ s.duration_min }}min, {{ s.tool_count }} tools, {{ s.total_tokens }} tokens)
+### Session {{ loop.index }} [{{ s.project }}] ({{ s.start_time[:10] }}, {{ s.duration_min }}min, {{ s.tool_count }} tools, {{ s.total_tokens }} tokens)
 {{ s.summary }}
 {% if s.frictions %}
 **Friction:**
