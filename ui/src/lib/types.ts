@@ -54,3 +54,66 @@ export interface StatsResponse {
 	top_tools: Record<string, number>;
 	insight_counts: Record<string, number>;
 }
+
+export interface DigestRead {
+	id: string;
+	user_id: string | null;
+	project_name: string | null;
+	period_start: string;
+	period_end: string;
+	session_count: number;
+	status: string;
+	created_at: string;
+	completed_at: string | null;
+}
+
+export interface DigestSectionRead {
+	id: string;
+	section_type: string;
+	title: string;
+	content: string;
+	order: number;
+	metadata: unknown;
+}
+
+export interface DigestDetail {
+	id: string;
+	user_id: string | null;
+	project_name: string | null;
+	period_start: string;
+	period_end: string;
+	session_count: number;
+	status: string;
+	stats: DigestStatsData | null;
+	sections: DigestSectionRead[];
+	analysis_prompt_tokens: number;
+	analysis_completion_tokens: number;
+	created_at: string;
+	completed_at: string | null;
+}
+
+export interface DigestStatsData {
+	session_count: number;
+	total_tool_calls: number;
+	total_tokens: number;
+	total_duration_minutes: number;
+	active_days: number;
+	tool_distribution: Record<string, number>;
+	error_types: Record<string, number>;
+	error_breakdown: Record<string, number>;
+	language_distribution: Record<string, number>;
+	time_of_day: Record<string, number>;
+	session_health: Array<{
+		session_id: string;
+		start_time: string;
+		duration_minutes: number;
+		tool_count: number;
+		error_count: number;
+		grade: string;
+		model: string | null;
+	}>;
+	tokens_per_session: Array<{ session_id: string; tokens: number; start_time: string }>;
+	overlapping_sessions: Array<{ session_ids: string[]; overlap_minutes: number }>;
+	permission_prompt_count: number;
+	analysis_tokens_used: number;
+}

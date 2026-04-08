@@ -122,6 +122,8 @@ def _store_analysis(
         db.add(insight)
 
     coding_session.status = SessionStatus.ANALYZED
+    coding_session.analysis_prompt_tokens = result.usage_prompt_tokens
+    coding_session.analysis_completion_tokens = result.usage_completion_tokens
     return len(result.insights)
 
 
@@ -333,6 +335,191 @@ async def _analyze_async(
     table.add_row("Skipped", str(len(analysis_items) - analyzed - failed))
     table.add_row("Failed", str(failed))
     console.print(table)
+
+
+@app.command()
+def digest(
+    days: int = typer.Option(7, help="Analyze sessions from the last N days."),
+    user_id: str | None = typer.Option(None, help="Filter by user ID."),
+    project: str | None = typer.Option(None, help="Filter by project name."),
+    stats_only: bool = typer.Option(False, "--stats-only", help="Only compute stats (no LLM)."),
+    force: bool = typer.Option(False, help="Regenerate even if a recent digest exists."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
+):
+    """Generate a cross-session insights report."""
+    asyncio.run(
+        _digest_async(
+            days=days,
+            user_id=user_id,
+            project=project,
+            stats_only=stats_only,
+            force=force,
+            verbose=verbose,
+        )
+    )
+
+
+async def _digest_async(
+    days: int,
+    user_id: str | None,
+    project: str | None,
+    stats_only: bool,
+    force: bool,
+    verbose: bool,
+):
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+
+    settings = get_settings()
+
+    if not stats_only and not settings.anthropic_api_key:
+        console.print(
+            "[red]Error:[/red] ANTHROPIC_API_KEY not set. "
+            "Use --stats-only for free stats, or set the key."
+        )
+        raise typer.Exit(1)
+
+    from cinsights.db.engine import get_engine, init_db
+    from cinsights.db.models import (
+        Digest,
+        DigestStatus,
+    )
+    from cinsights.stats import compute_all
+
+    init_db()
+
+    end = datetime.now(UTC)
+    start = end - timedelta(days=days)
+
+    engine = get_engine()
+    with Session(engine) as db:
+        # Compute stats
+        console.print(f"[bold]Computing stats for last {days} days...[/bold]")
+        stats = compute_all(db, start, end)
+
+        if stats.session_count == 0:
+            console.print("[yellow]No analyzed sessions in this period.[/yellow]")
+            console.print("Run [bold]cinsights analyze[/bold] first.")
+            raise typer.Exit(0)
+
+        # Print stats summary
+        console.print()
+        period = f"{stats.period_start.strftime('%m/%d')} - {stats.period_end.strftime('%m/%d')}"
+        table = Table(title=f"Stats ({period})")
+        table.add_column("Metric", style="bold")
+        table.add_column("Value", justify="right")
+        table.add_row("Sessions", str(stats.session_count))
+        table.add_row("Tool calls", str(stats.total_tool_calls))
+        table.add_row("Tokens", f"{stats.total_tokens:,}")
+        table.add_row("Duration", f"{stats.total_duration_minutes:.0f}min")
+        table.add_row("Active days", str(stats.active_days))
+        table.add_row("Top tool", next(iter(stats.tool_distribution), "-"))
+        table.add_row("Languages", ", ".join(list(stats.language_distribution.keys())[:3]))
+        table.add_row("Permissions", str(stats.permission_prompt_count))
+        console.print(table)
+
+        if stats_only:
+            console.print("\n[dim]--stats-only mode, skipping LLM analysis.[/dim]")
+            raise typer.Exit(0)
+
+        # Create digest record
+        import json
+
+        digest_record = Digest(
+            user_id=user_id,
+            project_name=project,
+            period_start=start,
+            period_end=end,
+            session_count=stats.session_count,
+            stats_json=stats.model_dump_json(),
+            status=DigestStatus.ANALYZING,
+        )
+        db.add(digest_record)
+        db.commit()
+        db.refresh(digest_record)
+
+        # Run LLM analysis
+        console.print("\n[bold]Running digest analysis (3 concurrent LLM calls)...[/bold]")
+
+        extra_headers = None
+        if settings.anthropic_extra_headers:
+            extra_headers = json.loads(settings.anthropic_extra_headers)
+
+        from cinsights.analysis.digest import DigestAnalyzer
+
+        analyzer = DigestAnalyzer(
+            api_key=settings.anthropic_api_key,
+            model=settings.anthropic_model,
+            base_url=settings.anthropic_base_url,
+            extra_headers=extra_headers,
+        )
+
+        try:
+            result = await analyzer.analyze(stats)
+            _store_digest_sections(db, digest_record, result, json)
+            console.print("\n[green]✓[/green] Digest complete — 10 sections")
+            console.print(
+                f"  LLM usage: {result.total_prompt_tokens:,} prompt + "
+                f"{result.total_completion_tokens:,} completion tokens"
+            )
+            console.print(
+                f"\n  View at: [bold]http://localhost:{settings.port}/report[/bold]"
+            )
+        except Exception as e:
+            digest_record.status = DigestStatus.FAILED
+            digest_record.error_message = str(e)
+            db.commit()
+            console.print(f"\n[red]✗[/red] Digest failed: {e}")
+            raise typer.Exit(1) from None
+
+
+def _store_digest_sections(db, digest_record, result, json_mod):
+    """Store digest analysis results as DigestSection rows."""
+    from cinsights.db.models import DigestSection, DigestSectionType, DigestStatus
+
+    def _dump(items):
+        return json_mod.dumps([i.model_dump() for i in items])
+
+    sections = [
+        (DigestSectionType.AT_A_GLANCE, "At a Glance", "",
+         json_mod.dumps(result.narrative.at_a_glance.model_dump())),
+        (DigestSectionType.WORK_AREAS, "What You Work On", "",
+         _dump(result.narrative.work_areas)),
+        (DigestSectionType.DEVELOPER_PERSONA, "How You Use Claude Code",
+         result.narrative.developer_persona, None),
+        (DigestSectionType.IMPRESSIVE_WINS, "Impressive Things You Did", "",
+         _dump(result.forward.impressive_wins)),
+        (DigestSectionType.FRICTION_ANALYSIS, "Where Things Go Wrong", "",
+         _dump(result.actions.friction_analysis)),
+        (DigestSectionType.CLAUDE_MD_SUGGESTIONS, "Suggested CLAUDE.md Additions", "",
+         _dump(result.actions.claude_md_suggestions)),
+        (DigestSectionType.FEATURE_RECOMMENDATIONS, "CC Features to Try", "",
+         _dump(result.actions.feature_recommendations)),
+        (DigestSectionType.WORKFLOW_PATTERNS, "New Ways to Use Claude Code", "",
+         _dump(result.forward.workflow_patterns)),
+        (DigestSectionType.AMBITIOUS_WORKFLOWS, "On the Horizon", "",
+         _dump(result.forward.ambitious_workflows)),
+        (DigestSectionType.FUN_ENDING, "Fun Ending",
+         result.narrative.fun_ending, None),
+    ]
+
+    for i, (stype, title, content, meta) in enumerate(sections):
+        db.add(DigestSection(
+            digest_id=digest_record.id,
+            section_type=stype,
+            title=title,
+            content=content,
+            order=i,
+            metadata_json=meta,
+        ))
+
+    digest_record.status = DigestStatus.COMPLETE
+    digest_record.analysis_prompt_tokens = result.total_prompt_tokens
+    digest_record.analysis_completion_tokens = result.total_completion_tokens
+    digest_record.completed_at = datetime.now(UTC)
+    db.commit()
 
 
 @app.command()

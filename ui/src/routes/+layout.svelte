@@ -9,6 +9,10 @@
 		<nav>
 			<a href="/" class="logo">cinsights</a>
 			<span class="tagline">coding agent insights</span>
+			<div class="nav-links">
+				<a href="/" class="nav-link">Sessions</a>
+				<a href="/report" class="nav-link">Report</a>
+			</div>
 		</nav>
 	</header>
 
@@ -54,6 +58,24 @@
 		display: flex;
 		align-items: baseline;
 		gap: 12px;
+		width: 100%;
+	}
+
+	.nav-links {
+		margin-left: auto;
+		display: flex;
+		gap: 16px;
+	}
+
+	.nav-link {
+		color: #94a3b8;
+		text-decoration: none;
+		font-size: 14px;
+		font-weight: 500;
+	}
+
+	.nav-link:hover {
+		color: white;
 	}
 
 	.logo {

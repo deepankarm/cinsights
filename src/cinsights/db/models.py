@@ -41,6 +41,8 @@ class CodingSession(SQLModel, table=True):
     completion_tokens: int = 0
     span_count: int = 0  # Track span count for change detection
     last_span_time: datetime | None = None  # Track latest span for change detection
+    analysis_prompt_tokens: int = 0  # Tokens used by cinsights analysis
+    analysis_completion_tokens: int = 0
     status: SessionStatus = SessionStatus.PENDING
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -77,3 +79,62 @@ class Insight(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     session: CodingSession = Relationship(back_populates="insights")
+
+
+# --- Digest (cross-session analysis) ---
+
+
+class DigestStatus(StrEnum):
+    PENDING = "pending"
+    COMPUTING_STATS = "computing_stats"
+    ANALYZING = "analyzing"
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+class DigestSectionType(StrEnum):
+    AT_A_GLANCE = "at_a_glance"
+    WORK_AREAS = "work_areas"
+    DEVELOPER_PERSONA = "developer_persona"
+    IMPRESSIVE_WINS = "impressive_wins"
+    FRICTION_ANALYSIS = "friction_analysis"
+    CLAUDE_MD_SUGGESTIONS = "claude_md_suggestions"
+    FEATURE_RECOMMENDATIONS = "feature_recommendations"
+    WORKFLOW_PATTERNS = "workflow_patterns"
+    AMBITIOUS_WORKFLOWS = "ambitious_workflows"
+    FUN_ENDING = "fun_ending"
+
+
+class Digest(SQLModel, table=True):
+    __tablename__ = "digest"
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    user_id: str | None = Field(default=None, index=True)
+    project_name: str | None = Field(default=None, index=True)
+    period_start: datetime
+    period_end: datetime
+    session_count: int = 0
+    stats_json: str | None = None  # Full computed stats snapshot (JSON)
+    analysis_prompt_tokens: int = 0  # Tokens used by cinsights digest analysis
+    analysis_completion_tokens: int = 0
+    status: DigestStatus = DigestStatus.PENDING
+    error_message: str | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    completed_at: datetime | None = None
+
+    sections: list["DigestSection"] = Relationship(back_populates="digest")
+
+
+class DigestSection(SQLModel, table=True):
+    __tablename__ = "digest_section"
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    digest_id: str = Field(foreign_key="digest.id", index=True)
+    section_type: DigestSectionType
+    title: str
+    content: str  # Markdown
+    order: int = 0
+    metadata_json: str | None = None  # Section-specific structured data
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    digest: Digest = Relationship(back_populates="sections")
