@@ -10,8 +10,22 @@
 	let error: string | null = $state(null);
 	let analyzing = $state(false);
 	let toolsExpanded = $state(false);
+	let hoverIdx: number | null = $state(null);
 
 	const id = $derived(page.params.id);
+
+	const CHART_W = 720;
+	const CHART_H = 220;
+	const CHART_PAD = { l: 52, r: 16, t: 14, b: 28 };
+
+	function handleChartMove(e: MouseEvent & { currentTarget: SVGSVGElement }, len: number) {
+		const rect = e.currentTarget.getBoundingClientRect();
+		const xView = ((e.clientX - rect.left) / rect.width) * CHART_W;
+		const innerW = CHART_W - CHART_PAD.l - CHART_PAD.r;
+		const frac = (xView - CHART_PAD.l) / innerW;
+		const idx = Math.round(frac * (len - 1));
+		hoverIdx = Math.max(0, Math.min(len - 1, idx));
+	}
 
 	onMount(async () => {
 		try {
@@ -206,19 +220,143 @@
 
 	<!-- Context Growth -->
 	{#if session.context_growth && session.context_growth.length > 1}
-		{@const maxPrompt = Math.max(...session.context_growth.map(t => t.prompt_tokens))}
+		{@const pts = session.context_growth}
+		{@const n = pts.length}
+		{@const maxY = Math.max(...pts.map((p) => p.prompt_tokens), 1)}
+		{@const innerW = CHART_W - CHART_PAD.l - CHART_PAD.r}
+		{@const innerH = CHART_H - CHART_PAD.t - CHART_PAD.b}
+		{@const xOf = (i: number) => CHART_PAD.l + (i / (n - 1)) * innerW}
+		{@const yOf = (v: number) => CHART_PAD.t + innerH - (v / maxY) * innerH}
+		{@const step = Math.max(1, Math.ceil(n / 8))}
+		{@const tickIdxs = pts
+			.map((_, i) => i)
+			.filter((i) => i === 0 || i === n - 1 || i % step === 0)}
+		{@const linePath = pts
+			.map(
+				(p, i) =>
+					`${i === 0 ? 'M' : 'L'} ${xOf(i).toFixed(1)} ${yOf(p.prompt_tokens).toFixed(1)}`
+			)
+			.join(' ')}
+		{@const baselineY = (CHART_PAD.t + innerH).toFixed(1)}
+		{@const areaPath = `${linePath} L ${xOf(n - 1).toFixed(1)} ${baselineY} L ${xOf(0).toFixed(1)} ${baselineY} Z`}
+		{@const compactionIdxs = pts
+			.map((p, i) => (i > 0 && p.prompt_tokens < pts[i - 1].prompt_tokens * 0.85 ? i : -1))
+			.filter((i) => i >= 0)}
+		{@const hover = hoverIdx !== null ? pts[hoverIdx] : null}
 		<div class="section">
 			<h2>Context Growth</h2>
 			<div class="context-chart">
-				{#each session.context_growth as turn}
-					<div class="context-bar-row">
-						<span class="context-label">Turn {turn.turn}</span>
-						<div class="context-bar-track">
-							<div class="context-bar-fill" style="width: {(turn.prompt_tokens / maxPrompt * 100).toFixed(1)}%"></div>
+				<div class="chart-inner">
+					<svg
+						viewBox="0 0 {CHART_W} {CHART_H}"
+						class="context-svg"
+						role="img"
+						aria-label="Context growth over turns"
+						onmousemove={(e) => handleChartMove(e, n)}
+						onmouseleave={() => (hoverIdx = null)}
+					>
+						<defs>
+							<linearGradient id="ctxArea" x1="0" y1="0" x2="0" y2="1">
+								<stop offset="0%" stop-color="#6366f1" stop-opacity="0.35" />
+								<stop offset="100%" stop-color="#6366f1" stop-opacity="0" />
+							</linearGradient>
+						</defs>
+
+						<!-- Gridlines + Y labels -->
+						{#each [0, 0.5, 1] as frac}
+							{@const gy = CHART_PAD.t + innerH * (1 - frac)}
+							<line
+								x1={CHART_PAD.l}
+								x2={CHART_W - CHART_PAD.r}
+								y1={gy}
+								y2={gy}
+								stroke="#f1f5f9"
+								stroke-width="1"
+							/>
+							<text x={CHART_PAD.l - 6} y={gy + 3} text-anchor="end" class="axis-text">
+								{formatTokens(Math.round(maxY * frac))}
+							</text>
+						{/each}
+
+						<!-- Area + line -->
+						<path d={areaPath} fill="url(#ctxArea)" />
+						<path
+							d={linePath}
+							fill="none"
+							stroke="#6366f1"
+							stroke-width="1.5"
+							stroke-linejoin="round"
+						/>
+
+						<!-- Compaction markers -->
+						{#each compactionIdxs as i}
+							<circle
+								cx={xOf(i)}
+								cy={yOf(pts[i].prompt_tokens)}
+								r="3"
+								fill="#f59e0b"
+								stroke="white"
+								stroke-width="1"
+							/>
+						{/each}
+
+						<!-- X ticks -->
+						{#each tickIdxs as i}
+							<text x={xOf(i)} y={CHART_H - 10} text-anchor="middle" class="axis-text">
+								{pts[i].turn}
+							</text>
+						{/each}
+
+						<!-- Hover marker -->
+						{#if hover && hoverIdx !== null}
+							<line
+								x1={xOf(hoverIdx)}
+								x2={xOf(hoverIdx)}
+								y1={CHART_PAD.t}
+								y2={CHART_PAD.t + innerH}
+								stroke="#94a3b8"
+								stroke-width="1"
+								stroke-dasharray="2 2"
+							/>
+							<circle
+								cx={xOf(hoverIdx)}
+								cy={yOf(hover.prompt_tokens)}
+								r="3.5"
+								fill="#6366f1"
+								stroke="white"
+								stroke-width="1.5"
+							/>
+						{/if}
+
+						<!-- Invisible hit area covering full plot (ensures mousemove fires across gaps) -->
+						<rect
+							x={CHART_PAD.l}
+							y={CHART_PAD.t}
+							width={innerW}
+							height={innerH}
+							fill="transparent"
+						/>
+					</svg>
+
+					{#if hover && hoverIdx !== null}
+						{@const leftPct = (xOf(hoverIdx) / CHART_W) * 100}
+						{@const topPct = (yOf(hover.prompt_tokens) / CHART_H) * 100}
+						<div
+							class="chart-tooltip"
+							class:flip-left={leftPct < 15}
+							class:flip-right={leftPct > 85}
+							style="left: {leftPct}%; top: {topPct}%;"
+						>
+							<div class="tt-turn">Turn {hover.turn}</div>
+							<div class="tt-row">
+								<span class="tt-dot prompt"></span>{formatTokens(hover.prompt_tokens)} prompt
+							</div>
+							<div class="tt-row">
+								<span class="tt-dot completion"></span>{formatTokens(hover.completion_tokens)} completion
+							</div>
 						</div>
-						<span class="context-value">{formatTokens(turn.prompt_tokens)}</span>
-					</div>
-				{/each}
+					{/if}
+				</div>
 			</div>
 		</div>
 	{/if}
@@ -496,12 +634,68 @@
 		text-decoration: underline;
 	}
 
-	.context-chart { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; }
-	.context-bar-row { display: flex; align-items: center; margin-bottom: 4px; }
-	.context-label { width: 70px; font-size: 11px; color: #64748b; flex-shrink: 0; }
-	.context-bar-track { flex: 1; height: 8px; background: #f1f5f9; border-radius: 4px; margin: 0 8px; }
-	.context-bar-fill { height: 100%; background: linear-gradient(90deg, #3b82f6, #8b5cf6); border-radius: 4px; }
-	.context-value { width: 50px; font-size: 11px; font-weight: 500; color: #64748b; text-align: right; }
+	.context-chart {
+		background: white;
+		border: 1px solid #e2e8f0;
+		border-radius: 8px;
+		padding: 16px;
+	}
+	.chart-inner {
+		position: relative;
+		width: 100%;
+	}
+	.context-svg {
+		width: 100%;
+		height: auto;
+		display: block;
+	}
+	.axis-text {
+		font-size: 10px;
+		fill: #94a3b8;
+		font-family: inherit;
+	}
+	.chart-tooltip {
+		position: absolute;
+		transform: translate(-50%, calc(-100% - 10px));
+		background: #0f172a;
+		color: white;
+		padding: 6px 10px;
+		border-radius: 6px;
+		font-size: 11px;
+		pointer-events: none;
+		white-space: nowrap;
+		box-shadow: 0 4px 12px rgba(15, 23, 42, 0.18);
+		z-index: 2;
+	}
+	.chart-tooltip.flip-left {
+		transform: translate(-8px, calc(-100% - 10px));
+	}
+	.chart-tooltip.flip-right {
+		transform: translate(calc(-100% + 8px), calc(-100% - 10px));
+	}
+	.tt-turn {
+		font-weight: 600;
+		margin-bottom: 3px;
+	}
+	.tt-row {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		color: #cbd5e1;
+		line-height: 1.5;
+	}
+	.tt-dot {
+		width: 8px;
+		height: 2px;
+		border-radius: 1px;
+		flex-shrink: 0;
+	}
+	.tt-dot.prompt {
+		background: #6366f1;
+	}
+	.tt-dot.completion {
+		background: #f59e0b;
+	}
 
 	.collapse-btn {
 		background: none;
