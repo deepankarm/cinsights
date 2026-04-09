@@ -5,7 +5,8 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlmodel import Session, col, func, select
+from sqlmodel import col, func, select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from cinsights.db.engine import get_db
 from cinsights.db.models import (
@@ -83,8 +84,8 @@ async def list_sessions(
     status: SessionStatus | None = None,
     user_id: str | None = None,
     project_name: str | None = None,
-    db: Session = Depends(get_db),
-):
+    db: AsyncSession = Depends(get_db),
+) -> list[SessionRead]:
     """List sessions with pagination and optional filters."""
     query = select(CodingSession).order_by(col(CodingSession.start_time).desc())
     if status:
@@ -95,59 +96,74 @@ async def list_sessions(
         query = query.where(CodingSession.project_name == project_name)
     query = query.offset(skip).limit(limit)
 
-    sessions = db.exec(query).all()
+    result = await db.exec(query)
+    sessions = result.all()
+    if not sessions:
+        return []
 
-    results = []
-    for s in sessions:
-        tool_count = db.exec(
-            select(func.count()).where(ToolCall.session_id == s.id)
-        ).one()
-        insight_count = db.exec(
-            select(func.count()).where(Insight.session_id == s.id)
-        ).one()
-        results.append(
-            SessionRead(
-                id=s.id,
-                session_id=s.session_id,
-                user_id=s.user_id,
-                project_name=s.project_name,
-                start_time=s.start_time,
-                end_time=s.end_time,
-                model=s.model,
-                total_tokens=s.total_tokens,
-                status=s.status,
-                tool_call_count=tool_count,
-                insight_count=insight_count,
-            )
+    session_ids = [s.id for s in sessions]
+
+    # Batch counts: one query each for tool_calls and insights, grouped by session.
+    tc_result = await db.exec(
+        select(ToolCall.session_id, func.count())
+        .where(col(ToolCall.session_id).in_(session_ids))
+        .group_by(ToolCall.session_id)
+    )
+    tool_counts: dict[str, int] = {sid: cnt for sid, cnt in tc_result.all()}
+
+    ins_result = await db.exec(
+        select(Insight.session_id, func.count())
+        .where(col(Insight.session_id).in_(session_ids))
+        .group_by(Insight.session_id)
+    )
+    insight_counts: dict[str, int] = {sid: cnt for sid, cnt in ins_result.all()}
+
+    return [
+        SessionRead(
+            id=s.id,
+            session_id=s.session_id,
+            user_id=s.user_id,
+            project_name=s.project_name,
+            start_time=s.start_time,
+            end_time=s.end_time,
+            model=s.model,
+            total_tokens=s.total_tokens,
+            status=s.status,
+            tool_call_count=tool_counts.get(s.id, 0),
+            insight_count=insight_counts.get(s.id, 0),
         )
-    return results
+        for s in sessions
+    ]
 
 
 @router.get("/stats", response_model=StatsResponse)
-async def get_stats(db: Session = Depends(get_db)):
+async def get_stats(db: AsyncSession = Depends(get_db)) -> StatsResponse:
     """Aggregate stats across all sessions."""
-    total = db.exec(select(func.count()).select_from(CodingSession)).one()
-    analyzed = db.exec(
+    total_result = await db.exec(select(func.count()).select_from(CodingSession))
+    total = total_result.one()
+    analyzed_result = await db.exec(
         select(func.count())
         .select_from(CodingSession)
         .where(CodingSession.status == SessionStatus.ANALYZED)
-    ).one()
-    total_insights = db.exec(select(func.count()).select_from(Insight)).one()
+    )
+    analyzed = analyzed_result.one()
+    insights_result = await db.exec(select(func.count()).select_from(Insight))
+    total_insights = insights_result.one()
 
     # Top tools
-    tool_rows = db.exec(
+    tool_result = await db.exec(
         select(ToolCall.tool_name, func.count())
         .group_by(ToolCall.tool_name)
         .order_by(func.count().desc())
         .limit(10)
-    ).all()
-    top_tools = {name: count for name, count in tool_rows}
+    )
+    top_tools = {name: count for name, count in tool_result.all()}
 
     # Insight counts by category
-    insight_rows = db.exec(
+    insight_result = await db.exec(
         select(Insight.category, func.count()).group_by(Insight.category)
-    ).all()
-    insight_counts = {cat: count for cat, count in insight_rows}
+    )
+    insight_counts = {cat: count for cat, count in insight_result.all()}
 
     return StatsResponse(
         total_sessions=total,
@@ -159,23 +175,27 @@ async def get_stats(db: Session = Depends(get_db)):
 
 
 @router.get("/{session_id}", response_model=SessionDetail)
-async def get_session_detail(session_id: str, db: Session = Depends(get_db)):
+async def get_session_detail(
+    session_id: str, db: AsyncSession = Depends(get_db)
+) -> SessionDetail:
     """Get session detail with tool calls and insights."""
-    session = db.get(CodingSession, session_id)
+    session = await db.get(CodingSession, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    tool_calls = db.exec(
+    tc_result = await db.exec(
         select(ToolCall)
         .where(ToolCall.session_id == session_id)
         .order_by(ToolCall.timestamp)
-    ).all()
+    )
+    tool_calls = tc_result.all()
 
-    insights = db.exec(
+    ins_result = await db.exec(
         select(Insight)
         .where(Insight.session_id == session_id)
         .order_by(Insight.created_at)
-    ).all()
+    )
+    insights = ins_result.all()
 
     return SessionDetail(
         id=session.id,
@@ -226,29 +246,33 @@ class SessionUpdate(BaseModel):
 async def update_session(
     session_id: str,
     body: SessionUpdate,
-    db: Session = Depends(get_db),
-):
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, bool]:
     """Update session metadata (e.g., manual project tagging)."""
-    session = db.get(CodingSession, session_id)
+    session = await db.get(CodingSession, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
     if body.project_name is not None:
         session.project_name = body.project_name
 
-    db.commit()
+    await db.commit()
     return {"ok": True}
 
 
 @router.post("/{session_id}/analyze", response_model=SessionDetail)
-async def trigger_analysis(session_id: str, db: Session = Depends(get_db)):
+async def trigger_analysis(
+    session_id: str, db: AsyncSession = Depends(get_db)
+) -> SessionDetail:
     """Manually trigger LLM analysis for a session."""
+    import asyncio
+
     from cinsights.analysis.session import SessionAnalyzer
     from cinsights.config import get_settings
     from cinsights.sources.base import TraceData
     from cinsights.sources.phoenix import PhoenixSource
 
-    session = db.get(CodingSession, session_id)
+    session = await db.get(CodingSession, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -256,8 +280,10 @@ async def trigger_analysis(session_id: str, db: Session = Depends(get_db)):
     if not settings.anthropic_api_key:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
 
+    # PhoenixSource is sync (HTTP via the phoenix client), so we run its blocking
+    # call in a thread to keep the event loop free.
     source = PhoenixSource(base_url=settings.phoenix_endpoint)
-    spans = source.get_spans(session_id)
+    spans = await asyncio.to_thread(source.get_spans, session_id)
     if not spans:
         raise HTTPException(status_code=404, detail="No spans found for session")
 
@@ -269,14 +295,12 @@ async def trigger_analysis(session_id: str, db: Session = Depends(get_db)):
     )
 
     # Clear existing insights
-    existing_insights = db.exec(
+    existing_result = await db.exec(
         select(Insight).where(Insight.session_id == session_id)
-    ).all()
-    for ins in existing_insights:
-        db.delete(ins)
-    db.flush()
-
-    import json
+    )
+    for ins in existing_result.all():
+        await db.delete(ins)
+    await db.flush()
 
     extra_headers = None
     if settings.anthropic_extra_headers:
@@ -310,7 +334,7 @@ async def trigger_analysis(session_id: str, db: Session = Depends(get_db)):
         db.add(insight)
 
     session.status = SessionStatus.ANALYZED
-    db.commit()
-    db.refresh(session)
+    await db.commit()
+    await db.refresh(session)
 
     return await get_session_detail(session_id, db)

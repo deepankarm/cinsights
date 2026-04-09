@@ -18,6 +18,19 @@ class Settings(BaseSettings):
     phoenix_project: str = "claude-code"
     database_url: str = _DEFAULT_DB
 
+    # Multi-tenant boundary. CINSIGHTS_TENANT_ID env var picks the tenant for
+    # the running process; multiple machines/users can write to the same DB
+    # under different tenant_ids.
+    tenant_id: str = "default"
+    # Default coding agent + observability source for new sessions. Both can be
+    # overridden per-row later when we add multi-agent / multi-source ingestion.
+    agent_type: str = "claude-code"
+    source: str = "phoenix"
+    # Prompt versions stamped on insights/digests so we can iterate prompts
+    # without orphaning historical analyses.
+    prompt_version_session: str = "session-v1"
+    prompt_version_digest: str = "digest-v1"
+
     anthropic_api_key: str = ""
     anthropic_base_url: str | None = None
     anthropic_model: str = "claude-sonnet-4-20250514"

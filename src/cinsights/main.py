@@ -15,9 +15,10 @@ from cinsights.api.stats import router as stats_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    from cinsights.db.engine import init_db
+    from cinsights.db.engine import get_engine
 
-    init_db()
+    # Force engine creation so SQLModel.metadata.create_all runs at startup.
+    get_engine()
     yield
 
 

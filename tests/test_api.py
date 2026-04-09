@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
-from sqlmodel import Session
+from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from cinsights.db.models import (
     CodingSession,
@@ -12,8 +13,11 @@ from cinsights.db.models import (
 )
 
 
-def _seed_data(db_engine):
-    with Session(db_engine) as db:
+async def _seed_data(db_engine) -> None:
+    sessionmaker = async_sessionmaker(
+        db_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with sessionmaker() as db:
         session = CodingSession(
             id="trace-100",
             session_id="session-100",
@@ -43,18 +47,18 @@ def _seed_data(db_engine):
             severity=InsightSeverity.INFO,
         )
         db.add(insight)
-        db.commit()
+        await db.commit()
 
 
-def test_list_sessions_empty(client):
-    r = client.get("/api/sessions/")
+async def test_list_sessions_empty(client):
+    r = await client.get("/api/sessions/")
     assert r.status_code == 200
     assert r.json() == []
 
 
-def test_list_sessions(client, db_engine):
-    _seed_data(db_engine)
-    r = client.get("/api/sessions/")
+async def test_list_sessions(client, db_engine):
+    await _seed_data(db_engine)
+    r = await client.get("/api/sessions/")
     assert r.status_code == 200
     data = r.json()
     assert len(data) == 1
@@ -63,9 +67,9 @@ def test_list_sessions(client, db_engine):
     assert data[0]["insight_count"] == 1
 
 
-def test_get_session_detail(client, db_engine):
-    _seed_data(db_engine)
-    r = client.get("/api/sessions/trace-100")
+async def test_get_session_detail(client, db_engine):
+    await _seed_data(db_engine)
+    r = await client.get("/api/sessions/trace-100")
     assert r.status_code == 200
     data = r.json()
     assert data["model"] == "claude-sonnet-4-20250514"
@@ -75,14 +79,14 @@ def test_get_session_detail(client, db_engine):
     assert data["insights"][0]["category"] == "summary"
 
 
-def test_get_session_not_found(client):
-    r = client.get("/api/sessions/nonexistent")
+async def test_get_session_not_found(client):
+    r = await client.get("/api/sessions/nonexistent")
     assert r.status_code == 404
 
 
-def test_get_stats(client, db_engine):
-    _seed_data(db_engine)
-    r = client.get("/api/sessions/stats")
+async def test_get_stats(client, db_engine):
+    await _seed_data(db_engine)
+    r = await client.get("/api/sessions/stats")
     assert r.status_code == 200
     data = r.json()
     assert data["total_sessions"] == 1
@@ -91,12 +95,12 @@ def test_get_stats(client, db_engine):
     assert "Read" in data["top_tools"]
 
 
-def test_list_sessions_filter_status(client, db_engine):
-    _seed_data(db_engine)
-    r = client.get("/api/sessions/?status=pending")
+async def test_list_sessions_filter_status(client, db_engine):
+    await _seed_data(db_engine)
+    r = await client.get("/api/sessions/?status=pending")
     assert r.status_code == 200
     assert len(r.json()) == 0
 
-    r = client.get("/api/sessions/?status=analyzed")
+    r = await client.get("/api/sessions/?status=analyzed")
     assert r.status_code == 200
     assert len(r.json()) == 1

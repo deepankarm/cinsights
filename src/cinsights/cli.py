@@ -2,23 +2,139 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 import typer
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
-from sqlmodel import Session
+from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlmodel import col
 from sqlmodel import select as select_fn
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from cinsights.config import get_settings
+
+if TYPE_CHECKING:
+    from cinsights.analysis.digest import DigestAnalyzer
 
 app = typer.Typer(name="cinsights", help="LLM-powered insights from coding agent sessions.")
 console = Console()
 
 
-def _store_analysis(
-    db: Session,
+def _content_hash(stats_json: str) -> str:
+    """SHA-256 of digest stats with timestamp fields removed.
+
+    `period_start` / `period_end` are set to now() on every digest run, so a
+    naive hash of the full JSON would never match. We strip those fields (plus
+    any other inherently-runtime fields) before hashing so reruns within the
+    same data window collapse to a single hash and skip the LLM step.
+    """
+    import hashlib
+    import json as json_mod
+
+    payload = json_mod.loads(stats_json)
+    # Remove fields that change every run regardless of underlying data.
+    for noise in ("period_start", "period_end"):
+        payload.pop(noise, None)
+    canonical = json_mod.dumps(payload, sort_keys=True, default=str)
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+class _RunHandle:
+    """Mutable counters the body of a tracked run updates as it works.
+
+    The context manager creates one of these, yields it to the caller, and
+    persists its final values to the refresh_run row on exit.
+    """
+
+    __slots__ = (
+        "digests_generated",
+        "id",
+        "sessions_analyzed",
+        "total_completion_tokens",
+        "total_prompt_tokens",
+    )
+
+    def __init__(self, run_id: str):
+        self.id = run_id
+        self.sessions_analyzed = 0
+        self.digests_generated = 0
+        self.total_prompt_tokens = 0
+        self.total_completion_tokens = 0
+
+
+@asynccontextmanager
+async def _track_run(command: str) -> AsyncIterator[_RunHandle]:
+    """Persist a refresh_run row for self-observability.
+
+    Wrap analyze/digest/refresh bodies with ``async with _track_run("refresh")
+    as run:`` and mutate the yielded handle's counters. On exit, the row is
+    updated with wall time, status, DB size, and the final counter values.
+    """
+    from cinsights.db.engine import get_sessionmaker
+    from cinsights.db.models import RefreshRun, RefreshRunCommand, RefreshRunStatus
+
+    settings = get_settings()
+    sessionmaker = get_sessionmaker()
+    started = datetime.now(UTC)
+    started_perf = time.perf_counter()
+
+    async with sessionmaker() as db:
+        run = RefreshRun(
+            tenant_id=settings.tenant_id,
+            command=RefreshRunCommand(command),
+            started_at=started,
+            status=RefreshRunStatus.RUNNING,
+        )
+        db.add(run)
+        await db.commit()
+        await db.refresh(run)
+        run_id = run.id
+
+    handle = _RunHandle(run_id)
+    error: str | None = None
+    try:
+        yield handle
+    except BaseException as exc:
+        error = str(exc)
+        raise
+    finally:
+        wall = time.perf_counter() - started_perf
+        db_size = None
+        if settings.database_url.startswith("sqlite"):
+            db_path = settings.database_url.replace("sqlite:///", "", 1)
+            try:
+                db_size = os.path.getsize(db_path)
+            except OSError:
+                db_size = None
+
+        async with sessionmaker() as db:
+            run = await db.get(RefreshRun, run_id)
+            if run is not None:
+                run.completed_at = datetime.now(UTC)
+                run.wall_seconds = wall
+                run.status = (
+                    RefreshRunStatus.FAILED if error else RefreshRunStatus.SUCCESS
+                )
+                run.db_size_bytes = db_size
+                run.sessions_analyzed = handle.sessions_analyzed
+                run.digests_generated = handle.digests_generated
+                run.total_prompt_tokens = handle.total_prompt_tokens
+                run.total_completion_tokens = handle.total_completion_tokens
+                if error:
+                    run.error_message = error[:2000]
+                db.add(run)
+                await db.commit()
+
+
+async def _store_analysis(
+    db: AsyncSession,
     trace_id: str,
     session_id: str,
     trace,
@@ -27,8 +143,14 @@ def _store_analysis(
     source,
     force: bool,
     existing,
-):
-    """Store trace data and analysis results in the database."""
+) -> int:
+    """Store trace data and analysis results in the database.
+
+    Returns the number of insights persisted. On re-analyze (existing row or
+    --force), all prior tool_calls and insights for this session are deleted
+    via explicit queries — we never touch lazy relationship attributes because
+    AsyncSession does not support implicit lazy loads.
+    """
     from cinsights.db.models import (
         CodingSession,
         Insight,
@@ -81,9 +203,14 @@ def _store_analysis(
         for s in turn_spans
     ])
 
+    settings = get_settings()
+    tenant_id = settings.tenant_id
     if not existing:
         coding_session = CodingSession(
             id=trace_id,
+            tenant_id=tenant_id,
+            source=settings.source,
+            agent_type=settings.agent_type,
             session_id=session_id,
             user_id=user_id,
             project_name=project_name,
@@ -110,14 +237,23 @@ def _store_analysis(
         coding_session.context_growth_json = context_growth
         coding_session.span_count = len(spans)
         coding_session.last_span_time = last_span_time
+        # tenant/source/agent are intentionally NOT overwritten on re-analyze —
+        # they reflect where the row was first ingested.
 
-    # Clear old data if re-analyzing
+    # Clear old data if re-analyzing. Use explicit FK queries — AsyncSession
+    # doesn't support implicit lazy relationship loads.
     if force or existing:
-        for tc in list(coding_session.tool_calls):
-            db.delete(tc)
-        for ins in list(coding_session.insights):
-            db.delete(ins)
-        db.flush()
+        old_tcs_result = await db.exec(
+            select_fn(ToolCall).where(ToolCall.session_id == trace_id)
+        )
+        for tc in old_tcs_result.all():
+            await db.delete(tc)
+        old_ins_result = await db.exec(
+            select_fn(Insight).where(Insight.session_id == trace_id)
+        )
+        for ins in old_ins_result.all():
+            await db.delete(ins)
+        await db.flush()
 
     for span in tool_spans:
         # Only store output for failed calls (error classification) to save DB space
@@ -126,6 +262,7 @@ def _store_analysis(
             output = span.output_value[:2000]
 
         tc = ToolCall(
+            tenant_id=tenant_id,
             session_id=trace_id,
             span_id=span.span_id,
             tool_name=span.tool_name or span.name,
@@ -148,11 +285,13 @@ def _store_analysis(
             sev = InsightSeverity.INFO
 
         insight = Insight(
+            tenant_id=tenant_id,
             session_id=trace_id,
             category=cat,
             title=item.title,
             content=item.content,
             severity=sev,
+            prompt_version=settings.prompt_version_session,
         )
         db.add(insight)
 
@@ -174,16 +313,20 @@ def analyze(
     ),
 ):
     """Pull sessions from Phoenix, run LLM analysis, store insights."""
-    asyncio.run(
-        _analyze_async(
-            hours=hours,
-            limit=limit,
-            force=force,
-            concurrency=concurrency,
-            verbose=verbose,
-            trace_ids=trace_ids,
-        )
-    )
+
+    async def _entry() -> None:
+        async with _track_run("analyze") as run:
+            await _analyze_async(
+                hours=hours,
+                limit=limit,
+                force=force,
+                concurrency=concurrency,
+                verbose=verbose,
+                trace_ids=trace_ids,
+                run=run,
+            )
+
+    asyncio.run(_entry())
 
 
 async def _analyze_async(
@@ -193,6 +336,7 @@ async def _analyze_async(
     concurrency: int,
     verbose: bool,
     trace_ids: list[str] | None,
+    run: _RunHandle | None = None,
 ):
     if verbose:
         logging.basicConfig(level=logging.DEBUG)
@@ -209,15 +353,14 @@ async def _analyze_async(
         raise typer.Exit(1)
 
     from cinsights.analysis.session import SessionAnalyzer
-    from cinsights.db.engine import get_engine, init_db
+    from cinsights.db.engine import get_sessionmaker
     from cinsights.db.models import CodingSession, SessionStatus
     from cinsights.sources.phoenix import PhoenixSource
-
-    init_db()
 
     source = PhoenixSource(
         base_url=settings.phoenix_endpoint, project=settings.phoenix_project
     )
+    sessionmaker = get_sessionmaker()
     import json
 
     extra_headers = None
@@ -235,8 +378,9 @@ async def _analyze_async(
     # Each work item: (trace_id, session_id, TraceData, spans)
     work_items: list[tuple[str, str, object, list]] = []
 
+    # PhoenixSource is sync (HTTP via the phoenix client). Push every blocking
+    # call into a thread so the event loop stays free for the LLM analyzer.
     if trace_ids:
-        # IDs can be session IDs or trace IDs — try both
         from cinsights.sources.base import TraceData
 
         with Progress(
@@ -249,7 +393,7 @@ async def _analyze_async(
             )
             for tid in trace_ids:
                 # Try as session ID first (fetches all spans across traces)
-                spans = source.get_spans_by_session(tid)
+                spans = await asyncio.to_thread(source.get_spans_by_session, tid)
                 if spans:
                     trace = TraceData(
                         trace_id=tid,
@@ -260,7 +404,7 @@ async def _analyze_async(
                     work_items.append((tid, tid, trace, spans))
                 else:
                     # Try as trace ID
-                    spans = source.get_spans(tid)
+                    spans = await asyncio.to_thread(source.get_spans, tid)
                     if spans:
                         trace = TraceData(
                             trace_id=tid,
@@ -284,31 +428,54 @@ async def _analyze_async(
             console=console,
         ) as progress:
             task = progress.add_task("Discovering sessions from Phoenix...", total=None)
-            discovered = source.discover_sessions(start_time=start_time)
+            discovered = await asyncio.to_thread(
+                source.discover_sessions, start_time=start_time
+            )
             progress.update(task, description=f"Found {len(discovered)} sessions")
 
         if not discovered:
             console.print(f"[yellow]No sessions found in the last {hours} hours.[/yellow]")
-            raise typer.Exit(0)
+            return
 
-        # Filter to sessions needing analysis (new or changed)
+        # Filter to sessions needing analysis. We re-analyze ANALYZED sessions only
+        # when both conditions hold:
+        #   1) the session has grown by at least 20% in span count, AND
+        #   2) the last new span is at least 60s old
+        # The first condition ignores trivial growth (1-2 new spans during a long
+        # session). The second condition lets sessions "settle" before we burn
+        # tokens re-analyzing them — a session that's actively being appended to
+        # right now will probably grow more in the next minute.
+        REANALYZE_GROWTH_RATIO = 0.20
+        REANALYZE_QUIET_SECONDS = 60.0
+        now = datetime.now(UTC)
+
         skipped = 0
-        engine = get_engine()
-        with Session(engine) as db:
+        async with sessionmaker() as db:
             for d in discovered[:limit]:
-                existing = db.get(CodingSession, d.session_id)
+                existing = await db.get(CodingSession, d.session_id)
                 if existing and existing.status == SessionStatus.ANALYZED and not force:
-                    # Check if session has changed (more spans or newer span)
-                    changed = existing.span_count != d.span_count
-                    if not changed:
-                        skipped += 1
-                        continue
-                    console.print(
-                        f"  [cyan]↻[/cyan] {d.session_id[:16]}... changed "
-                        f"({existing.span_count}→{d.span_count} spans)"
+                    prior = max(existing.span_count, 1)
+                    growth = (d.span_count - existing.span_count) / prior
+                    last_seen = existing.last_span_time
+                    if last_seen is not None and last_seen.tzinfo is None:
+                        last_seen = last_seen.replace(tzinfo=UTC)
+                    quiet_for = (
+                        (now - last_seen).total_seconds()
+                        if last_seen is not None
+                        else float("inf")
                     )
 
-                spans = source.get_spans_by_session(d.session_id)
+                    if growth < REANALYZE_GROWTH_RATIO or quiet_for < REANALYZE_QUIET_SECONDS:
+                        skipped += 1
+                        continue
+
+                    console.print(
+                        f"  [cyan]↻[/cyan] {d.session_id[:16]}... grew "
+                        f"{existing.span_count}→{d.span_count} "
+                        f"(+{growth:.0%}, quiet {quiet_for:.0f}s)"
+                    )
+
+                spans = await asyncio.to_thread(source.get_spans_by_session, d.session_id)
                 if spans:
                     from cinsights.sources.base import TraceData
 
@@ -321,11 +488,11 @@ async def _analyze_async(
                     work_items.append((d.session_id, d.session_id, trace, spans))
 
         if skipped:
-            console.print(f"  [dim]{skipped} session(s) unchanged, skipped[/dim]")
+            console.print(f"  [dim]{skipped} session(s) unchanged or still active, skipped[/dim]")
 
     if not work_items:
         console.print("[yellow]No traces to analyze (all already analyzed).[/yellow]")
-        raise typer.Exit(0)
+        return
 
     console.print(
         f"\n[bold]Analyzing {len(work_items)} trace(s) "
@@ -341,23 +508,26 @@ async def _analyze_async(
     # Store results in DB
     analyzed = 0
     failed = 0
-    engine = get_engine()
-    with Session(engine) as db:
+    async with sessionmaker() as db:
         for (trace_id, session_id, trace, spans), result in zip(
             work_items, results, strict=True
         ):
             try:
-                existing = db.get(CodingSession, trace_id)
-                n_insights = _store_analysis(
+                existing = await db.get(CodingSession, trace_id)
+                n_insights = await _store_analysis(
                     db, trace_id, session_id, trace, spans, result, source, force, existing
                 )
-                db.commit()
+                await db.commit()
                 analyzed += 1
+                if run is not None:
+                    run.sessions_analyzed += 1
+                    run.total_prompt_tokens += result.usage_prompt_tokens
+                    run.total_completion_tokens += result.usage_completion_tokens
                 console.print(
                     f"  [green]✓[/green] {trace_id[:12]} — {n_insights} insights"
                 )
             except Exception as e:
-                db.rollback()
+                await db.rollback()
                 failed += 1
                 console.print(f"  [red]✗[/red] {trace_id[:12]} — {e}")
 
@@ -378,20 +548,22 @@ def digest(
     user_id: str | None = typer.Option(None, help="Filter by user ID."),
     project: str | None = typer.Option(None, help="Filter by project name."),
     stats_only: bool = typer.Option(False, "--stats-only", help="Only compute stats (no LLM)."),
-    force: bool = typer.Option(False, help="Regenerate even if a recent digest exists."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
 ):
     """Generate a cross-session insights report."""
-    asyncio.run(
-        _digest_async(
-            days=days,
-            user_id=user_id,
-            project=project,
-            stats_only=stats_only,
-            force=force,
-            verbose=verbose,
-        )
-    )
+
+    async def _entry() -> None:
+        async with _track_run("digest") as run:
+            await _digest_async(
+                days=days,
+                user_id=user_id,
+                project=project,
+                stats_only=stats_only,
+                verbose=verbose,
+                run=run,
+            )
+
+    asyncio.run(_entry())
 
 
 async def _digest_async(
@@ -399,8 +571,8 @@ async def _digest_async(
     user_id: str | None,
     project: str | None,
     stats_only: bool,
-    force: bool,
     verbose: bool,
+    run: _RunHandle | None = None,
 ):
     if verbose:
         logging.basicConfig(level=logging.DEBUG)
@@ -416,92 +588,36 @@ async def _digest_async(
         )
         raise typer.Exit(1)
 
-    from cinsights.db.engine import get_engine, init_db
-    from cinsights.db.models import (
-        Digest,
-        DigestStatus,
-    )
-    from cinsights.stats import compute_all
+    import json
 
-    init_db()
+    from cinsights.db.engine import get_sessionmaker
+    from cinsights.db.models import CodingSession, SessionStatus
 
     end = datetime.now(UTC)
     start = end - timedelta(days=days)
+    sessionmaker = get_sessionmaker()
 
-    engine = get_engine()
-    with Session(engine) as db:
-        # Compute stats
-        console.print(f"[bold]Computing stats for last {days} days...[/bold]")
-        stats = compute_all(db, start, end, project_name=project)
+    # Build scope list. Explicit --project always wins; otherwise we run a global
+    # digest *and* one per detected project, in parallel.
+    if project:
+        scopes: list[str | None] = [project]
+    else:
+        async with sessionmaker() as db:
+            project_rows_result = await db.exec(
+                select_fn(CodingSession.project_name)
+                .where(CodingSession.project_name.is_not(None))
+                .where(CodingSession.start_time >= start)
+                .where(CodingSession.start_time <= end)
+                .where(CodingSession.status == SessionStatus.ANALYZED)
+                .group_by(CodingSession.project_name)
+            )
+            project_rows = project_rows_result.all()
+        # Global first, then projects in stable order
+        scopes = [None, *sorted(p for p in project_rows if p)]
 
-        if stats.session_count == 0:
-            console.print("[yellow]No analyzed sessions in this period.[/yellow]")
-            console.print("Run [bold]cinsights analyze[/bold] first.")
-            raise typer.Exit(0)
-
-        # Print stats summary
-        console.print()
-        period = f"{stats.period_start.strftime('%m/%d')} - {stats.period_end.strftime('%m/%d')}"
-        table = Table(title=f"Stats ({period})")
-        table.add_column("Metric", style="bold")
-        table.add_column("Value", justify="right")
-        table.add_row("Sessions", str(stats.session_count))
-        table.add_row("Tool calls", str(stats.total_tool_calls))
-        table.add_row("Tokens", f"{stats.total_tokens:,}")
-        table.add_row("Duration", f"{stats.total_duration_minutes:.0f}min")
-        table.add_row("Active days", str(stats.active_days))
-        table.add_row("Top tool", next(iter(stats.tool_distribution), "-"))
-        table.add_row("Languages", ", ".join(list(stats.language_distribution.keys())[:3]))
-        table.add_row("Permissions", str(stats.permission_stats.count))
-        console.print(table)
-
-        if stats_only:
-            console.print("\n[dim]--stats-only mode, skipping LLM analysis.[/dim]")
-            raise typer.Exit(0)
-
-        import json
-
-        from cinsights.db.models import DigestSection
-
-        # Delete existing digest for same scope (user + project)
-        scope_q = select_fn(Digest)
-        if user_id:
-            scope_q = scope_q.where(Digest.user_id == user_id)
-        else:
-            scope_q = scope_q.where(Digest.user_id.is_(None))
-        if project:
-            scope_q = scope_q.where(Digest.project_name == project)
-        else:
-            scope_q = scope_q.where(Digest.project_name.is_(None))
-
-        existing_digests = db.exec(scope_q).all()
-        for old in existing_digests:
-            for sec in db.exec(
-                select_fn(DigestSection).where(DigestSection.digest_id == old.id)
-            ).all():
-                db.delete(sec)
-            db.delete(old)
-        if existing_digests:
-            db.flush()
-            console.print(f"  [dim]Replaced {len(existing_digests)} previous digest(s)[/dim]")
-
-        # Create digest record
-        digest_record = Digest(
-            user_id=user_id,
-            project_name=project,
-            period_start=start,
-            period_end=end,
-            session_count=stats.session_count,
-            stats_json=stats.model_dump_json(),
-            status=DigestStatus.ANALYZING,
-        )
-        db.add(digest_record)
-        db.commit()
-        db.refresh(digest_record)
-
-        # Run LLM analysis
-        console.print("\n[bold]Running digest analysis (3 concurrent LLM calls)...[/bold]")
-
+    # Build the analyzer once and share it across scopes (just an HTTP client).
+    analyzer = None
+    if not stats_only:
         extra_headers = None
         if settings.anthropic_extra_headers:
             extra_headers = json.loads(settings.anthropic_extra_headers)
@@ -515,30 +631,252 @@ async def _digest_async(
             extra_headers=extra_headers,
         )
 
+    console.print(
+        f"[bold]Running {len(scopes)} digest(s) for last {days} days "
+        f"(concurrent)...[/bold]\n"
+    )
+
+    tasks = [
+        _run_one_digest(
+            sessionmaker=sessionmaker,
+            analyzer=analyzer,
+            scope_project=scope,
+            user_id=user_id,
+            start=start,
+            end=end,
+            stats_only=stats_only,
+        )
+        for scope in scopes
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Summarize. Each non-exception result is (status, prompt_tokens, completion_tokens).
+    def _status_of(r):
+        return r[0] if isinstance(r, tuple) else r
+
+    succeeded = sum(1 for r in results if _status_of(r) is True)
+    skipped = sum(
+        1 for r in results if _status_of(r) in ("empty", "stats_only", "unchanged")
+    )
+    failed = [
+        (scope, r)
+        for scope, r in zip(scopes, results, strict=True)
+        if isinstance(r, Exception)
+    ]
+
+    if run is not None:
+        for r in results:
+            if isinstance(r, tuple) and r[0] is True:
+                run.digests_generated += 1
+                run.total_prompt_tokens += r[1]
+                run.total_completion_tokens += r[2]
+
+    console.print()
+    table = Table(title="Digest Summary")
+    table.add_column("Scope", style="bold")
+    table.add_column("Result")
+    for scope, result in zip(scopes, results, strict=True):
+        label = scope or "global"
+        status = _status_of(result)
+        if status is True:
+            table.add_row(label, "[green]✓ done[/green]")
+        elif status == "empty":
+            table.add_row(label, "[yellow]no sessions[/yellow]")
+        elif status == "stats_only":
+            table.add_row(label, "[cyan]· stats only[/cyan]")
+        elif status == "unchanged":
+            table.add_row(label, "[dim]· unchanged, reused[/dim]")
+        elif isinstance(result, Exception):
+            table.add_row(label, f"[red]✗ {result}[/red]")
+    console.print(table)
+
+    if not stats_only and succeeded:
+        console.print(
+            f"\n  View at: [bold]http://localhost:{settings.port}/report[/bold]"
+        )
+
+    if failed and not succeeded and not skipped:
+        raise typer.Exit(1)
+
+
+async def _run_one_digest(
+    *,
+    sessionmaker: async_sessionmaker[AsyncSession],
+    analyzer: DigestAnalyzer | None,
+    scope_project: str | None,
+    user_id: str | None,
+    start: datetime,
+    end: datetime,
+    stats_only: bool,
+) -> tuple[bool | str, int, int]:
+    """Compute + (optionally) LLM-analyze + persist a single digest scope.
+
+    Returns ``(status, prompt_tokens, completion_tokens)`` where ``status`` is:
+
+    - ``True`` — a new digest was generated and persisted
+    - ``"empty"`` — no sessions in scope
+    - ``"stats_only"`` — LLM step was skipped (--stats-only mode)
+    - ``"unchanged"`` — stats hash matched a recently completed digest, so we
+      reused it instead of paying for fresh LLM calls
+
+    Tokens are zero in every non-True path. Raises on failure.
+
+    Each call opens its own AsyncSession from the shared sessionmaker, so
+    concurrent scopes (via ``asyncio.gather`` in ``_digest_async``) get
+    independent sessions and don't violate AsyncSession's "no concurrent use
+    on a single session" rule.
+    """
+    import json as json_mod
+
+    from cinsights.db.models import Digest, DigestSection, DigestStatus
+    from cinsights.stats import compute_all
+
+    label = scope_project or "global"
+
+    async with sessionmaker() as db:
+        stats = await compute_all(db, start, end, project_name=scope_project)
+
+        if stats.session_count == 0:
+            console.print(f"  [yellow]·[/yellow] {label} — no sessions, skipped")
+            return ("empty", 0, 0)
+
+        if stats_only:
+            console.print(
+                f"  [cyan]·[/cyan] {label} — {stats.session_count} sessions, "
+                f"{stats.total_tokens:,} tokens (stats only)"
+            )
+            return ("stats_only", 0, 0)
+
+        # Find the most recent COMPLETE digest for this scope. If its stats hash
+        # matches what we'd compute now, reuse it — no LLM cost. This makes
+        # repeated `cinsights refresh` calls idempotent and cuts test/dev cost.
+        scope_q = select_fn(Digest)
+        if user_id:
+            scope_q = scope_q.where(Digest.user_id == user_id)
+        else:
+            scope_q = scope_q.where(Digest.user_id.is_(None))
+        if scope_project:
+            scope_q = scope_q.where(Digest.project_name == scope_project)
+        else:
+            scope_q = scope_q.where(Digest.project_name.is_(None))
+
+        completed_q = (
+            scope_q.where(Digest.status == DigestStatus.COMPLETE)
+            .order_by(col(Digest.completed_at).desc())
+            .limit(1)
+        )
+        latest_complete_result = await db.exec(completed_q)
+        latest_complete = latest_complete_result.first()
+
+        # Hash on stats CONTENT — exclude period_start/period_end since they're
+        # set to now() on every run and would prevent any skip from firing.
+        new_stats_json = stats.model_dump_json()
+        new_hash = _content_hash(new_stats_json)
+        if latest_complete and latest_complete.stats_json:
+            old_hash = _content_hash(latest_complete.stats_json)
+            if old_hash == new_hash:
+                console.print(
+                    f"  [dim]·[/dim] {label} — stats unchanged since "
+                    f"{latest_complete.completed_at:%Y-%m-%d %H:%M}, reused"
+                )
+                return ("unchanged", 0, 0)
+
+        # Stats changed (or no prior digest). Delete every existing digest in this
+        # scope (running, failed, or stale-complete) before creating a new one.
+        existing_result = await db.exec(scope_q)
+        existing_digests = existing_result.all()
+        for old in existing_digests:
+            sec_result = await db.exec(
+                select_fn(DigestSection).where(DigestSection.digest_id == old.id)
+            )
+            for sec in sec_result.all():
+                await db.delete(sec)
+            await db.delete(old)
+        if existing_digests:
+            await db.flush()
+
+        settings = get_settings()
+        digest_record = Digest(
+            tenant_id=settings.tenant_id,
+            user_id=user_id,
+            project_name=scope_project,
+            period_start=start,
+            period_end=end,
+            session_count=stats.session_count,
+            stats_json=stats.model_dump_json(),
+            status=DigestStatus.ANALYZING,
+        )
+        db.add(digest_record)
+        await db.commit()
+        await db.refresh(digest_record)
+
         try:
+            assert analyzer is not None  # not stats_only path
             result = await analyzer.analyze(stats)
-            _store_digest_sections(db, digest_record, result, json)
-            console.print("\n[green]✓[/green] Digest complete — 10 sections")
+            await _store_digest_sections(db, digest_record, result, json_mod)
             console.print(
-                f"  LLM usage: {result.total_prompt_tokens:,} prompt + "
-                f"{result.total_completion_tokens:,} completion tokens"
+                f"  [green]✓[/green] {label} — {stats.session_count} sessions, "
+                f"{result.total_prompt_tokens + result.total_completion_tokens:,} LLM tokens"
             )
-            console.print(
-                f"\n  View at: [bold]http://localhost:{settings.port}/report[/bold]"
-            )
+            return (True, result.total_prompt_tokens, result.total_completion_tokens)
         except Exception as e:
             digest_record.status = DigestStatus.FAILED
             digest_record.error_message = str(e)
-            db.commit()
-            console.print(f"\n[red]✗[/red] Digest failed: {e}")
-            raise typer.Exit(1) from None
+            await db.commit()
+            console.print(f"  [red]✗[/red] {label} — {e}")
+            raise
 
 
-def _store_digest_sections(db, digest_record, result, json_mod):
+@app.command()
+def refresh(
+    hours: int = typer.Option(24, help="Analyze sessions from the last N hours."),
+    days: int = typer.Option(7, help="Digest window in days."),
+    limit: int = typer.Option(50, help="Max sessions to analyze."),
+    force: bool = typer.Option(False, help="Re-analyze already-analyzed sessions."),
+    concurrency: int = typer.Option(5, help="Max concurrent LLM analysis requests."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
+):
+    """Refresh everything: pull + analyze new sessions, then regenerate all digests.
+
+    This is the standard entrypoint for cron / scheduled jobs. It runs `analyze`
+    followed by `digest` (global + per-project, concurrent) so dashboards always
+    reflect the latest Phoenix data.
+    """
+
+    async def _entry() -> None:
+        async with _track_run("refresh") as run:
+            await _analyze_async(
+                hours=hours,
+                limit=limit,
+                force=force,
+                concurrency=concurrency,
+                verbose=verbose,
+                trace_ids=None,
+                run=run,
+            )
+            console.print()
+            await _digest_async(
+                days=days,
+                user_id=None,
+                project=None,
+                stats_only=False,
+                verbose=verbose,
+                run=run,
+            )
+
+    asyncio.run(_entry())
+
+
+async def _store_digest_sections(
+    db: AsyncSession,
+    digest_record,
+    result,
+    json_mod,
+) -> None:
     """Store digest analysis results as DigestSection rows."""
     from cinsights.db.models import DigestSection, DigestSectionType, DigestStatus
 
-    def _dump(items):
+    def _dump(items: list) -> str:
         return json_mod.dumps([i.model_dump() for i in items])
 
     sections = [
@@ -562,6 +900,7 @@ def _store_digest_sections(db, digest_record, result, json_mod):
          _dump(result.forward.ambitious_workflows)),
     ]
 
+    settings = get_settings()
     for i, (stype, title, content, meta) in enumerate(sections):
         db.add(DigestSection(
             digest_id=digest_record.id,
@@ -570,13 +909,14 @@ def _store_digest_sections(db, digest_record, result, json_mod):
             content=content,
             order=i,
             metadata_json=meta,
+            prompt_version=settings.prompt_version_digest,
         ))
 
     digest_record.status = DigestStatus.COMPLETE
     digest_record.analysis_prompt_tokens = result.total_prompt_tokens
     digest_record.analysis_completion_tokens = result.total_completion_tokens
     digest_record.completed_at = datetime.now(UTC)
-    db.commit()
+    await db.commit()
 
 
 @app.command()
@@ -587,29 +927,12 @@ def serve(
     """Start the cinsights web server."""
     import uvicorn
 
-    from cinsights.db.engine import init_db
-
-    init_db()
-
     settings = get_settings()
     uvicorn.run(
         "cinsights.main:app",
         host=host or settings.host,
         port=port or settings.port,
     )
-
-
-@app.command()
-def init_db_cmd():
-    """Initialize the database (create tables)."""
-    from cinsights.db.engine import init_db
-
-    init_db()
-    console.print("[green]✓[/green] Database initialized.")
-
-
-# Register as "init-db" command name
-app.registered_commands[-1].name = "init-db"
 
 
 if __name__ == "__main__":
