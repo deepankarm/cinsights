@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic import BaseModel
 from sqlalchemy import case
@@ -22,9 +22,6 @@ from cinsights.db.models import (
     SessionStatus,
     ToolCall,
 )
-
-if TYPE_CHECKING:
-    from cinsights.sources.base import SpanData
 
 _EXT_TO_LANG: dict[str, str] = {
     ".py": "Python", ".go": "Go", ".js": "JavaScript", ".ts": "TypeScript",
@@ -119,52 +116,6 @@ class DigestStats(BaseModel):
     project_breakdown: list[ProjectBreakdown]
 
     analysis_tokens_used: int
-
-def detect_project_from_tool_calls(tool_calls: list[SpanData]) -> str | None:
-    """Extract project name from file paths in tool call inputs.
-
-    Extracts directory paths from file_path JSON fields, finds the deepest
-    common directory for each file, and returns the most frequent one.
-    Correctly identifies subdirectory projects (e.g., gnagents inside
-    repos/GoodNotes/gnai/gnagents/).
-    """
-    file_path_re = re.compile(r'"file_path":\s*"(/[^"]+)"')
-    # Directories that indicate "this is inside a project, go up one level"
-    src_markers = {"internal", "src", "cmd", "lib", "pkg", "app", "tests", "test"}
-
-    dir_counts: dict[str, int] = {}
-    for tc in tool_calls:
-        input_val = tc.input_value
-        if not input_val:
-            continue
-        for match in file_path_re.finditer(input_val):
-            parts = [p for p in match.group(1).split("/") if p]
-            # Walk backwards from the file to find the project directory
-            # It's the directory just before internal/, src/, etc.
-            # Or the deepest non-system directory if no marker found
-            found = False
-            for i in range(len(parts) - 1, 0, -1):
-                if parts[i] in src_markers:
-                    project = parts[i - 1]
-                    # Skip system/user dirs
-                    if project not in ("Users", "home", "root", "var", "tmp"):
-                        dir_counts[project] = dir_counts.get(project, 0) + 1
-                        found = True
-                        break
-            if not found and len(parts) >= 3:
-                # Fallback: use the directory 2 levels before the file
-                # e.g., /Users/X/repos/Y/Z/file.py → Z
-                    candidate = parts[-2]
-                    if candidate not in ("Users", "home", "root", ".claude-personal",
-                                         ".claude-work", ".claude"):
-                        dir_counts[candidate] = dir_counts.get(candidate, 0) + 1
-
-    if not dir_counts:
-        return None
-
-    winner, count = max(dir_counts.items(), key=lambda x: x[1])
-    total = sum(dir_counts.values())
-    return winner if count / total > 0.5 else None
 
 def _session_filter(
     start: datetime, end: datetime, project_name: str | None = None

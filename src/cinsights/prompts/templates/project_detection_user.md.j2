@@ -1,0 +1,37 @@
+## File paths touched (top, deduped, sorted by frequency)
+{% if file_paths %}
+{% for fp, count in file_paths %}
+- {{ fp }}{% if count > 1 %}  (x{{ count }}){% endif %}
+{% endfor %}
+{% else %}
+(no file operations)
+{% endif %}
+
+## Bash commands of interest (cd / pwd / git / ls / build tools)
+{% if bash_commands %}
+{% for cmd in bash_commands %}
+$ {{ cmd }}
+{% endfor %}
+{% else %}
+(none matched)
+{% endif %}
+
+## Tool-call distribution
+{% for name, count in tool_counts %}
+- {{ name }}: {{ count }}
+{% endfor %}
+
+## Projects already known to this database
+{% if known_projects %}
+{% for p in known_projects %}
+- {{ p }}
+{% endfor %}
+{% else %}
+(none yet)
+{% endif %}
+
+## Previous tag stored for this session (advisory)
+- {{ previous_guess if previous_guess else "(none)" }}
+
+---
+Identify the project this session was working on.

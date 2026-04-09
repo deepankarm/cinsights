@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     # JSON string of extra headers, e.g. '{"x-aig-user-id":"foo"}'
     anthropic_extra_headers: str = ""
 
+    # Lightweight model for the per-session project-detection LLM call.
+    # Cheap and cost-sensitive — defaults to Haiku 4.5. Reuses the
+    # anthropic_api_key / base_url / extra_headers above.
+    project_detection_model: str = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+
     host: str = "127.0.0.1"
     port: int = 8100
     static_dir: str = "ui/build"
