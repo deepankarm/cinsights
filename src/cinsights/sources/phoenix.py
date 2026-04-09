@@ -80,7 +80,9 @@ class DiscoveredSession:
 class PhoenixSource:
     """Fetch trace data from a local Arize Phoenix instance."""
 
-    def __init__(self, base_url: str = "http://localhost:6006", project: str = "claude-code"):
+    def __init__(
+        self, base_url: str = "http://localhost:6006", project: str = "claude-code"
+    ) -> None:
         self.client = Client(base_url=base_url)
         self.project = project
         self._all_spans_df: pd.DataFrame | None = None  # Cache within a run
