@@ -410,6 +410,7 @@ name = "cinsights"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "aiosqlite" },
     { name = "alembic" },
     { name = "anthropic" },
     { name = "arize-phoenix" },
@@ -433,6 +434,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiosqlite", specifier = ">=0.22.1" },
     { name = "alembic", specifier = ">=1.15,<2.0" },
     { name = "anthropic", specifier = ">=0.52,<1.0" },
     { name = "arize-phoenix", specifier = ">=8.0" },

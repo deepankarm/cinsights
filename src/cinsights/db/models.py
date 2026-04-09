@@ -30,6 +30,9 @@ class CodingSession(SQLModel, table=True):
     __tablename__ = "coding_session"
 
     id: str = Field(primary_key=True)  # Phoenix trace_id
+    tenant_id: str = Field(default="default", index=True)  # multi-tenant boundary
+    source: str = Field(default="phoenix")  # observability backend
+    agent_type: str = Field(default="claude-code")  # coding agent identity
     session_id: str | None = Field(default=None, index=True)  # Phoenix session.id
     user_id: str | None = Field(default=None, index=True)  # user.id from spans
     project_name: str | None = Field(default=None, index=True)  # project.name from spans
@@ -55,6 +58,7 @@ class ToolCall(SQLModel, table=True):
     __tablename__ = "tool_call"
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    tenant_id: str = Field(default="default", index=True)  # denormalized from session
     session_id: str = Field(foreign_key="coding_session.id", index=True)
     span_id: str
     tool_name: str = Field(index=True)
@@ -71,11 +75,13 @@ class Insight(SQLModel, table=True):
     __tablename__ = "insight"
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    tenant_id: str = Field(default="default", index=True)  # denormalized from session
     session_id: str = Field(foreign_key="coding_session.id", index=True)
     category: InsightCategory
     title: str
     content: str  # Markdown
     severity: InsightSeverity = InsightSeverity.INFO
+    prompt_version: str | None = None  # set when written; lets us iterate prompts safely
     metadata_json: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -99,6 +105,9 @@ class DigestSectionType(StrEnum):
     FEATURE_RECOMMENDATIONS = "feature_recommendations"
     WORKFLOW_PATTERNS = "workflow_patterns"
     AMBITIOUS_WORKFLOWS = "ambitious_workflows"
+    # FUN_ENDING is dead — the field was removed from the LLM output. Kept here so
+    # the SQLite enum CHECK constraint stays valid for legacy rows; drop in a
+    # later migration once we recreate the column.
     FUN_ENDING = "fun_ending"
 
 
@@ -106,6 +115,7 @@ class Digest(SQLModel, table=True):
     __tablename__ = "digest"
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    tenant_id: str = Field(default="default", index=True)  # multi-tenant boundary
     user_id: str | None = Field(default=None, index=True)
     project_name: str | None = Field(default=None, index=True)
     period_start: datetime
@@ -131,7 +141,46 @@ class DigestSection(SQLModel, table=True):
     title: str
     content: str  # Markdown
     order: int = 0
+    prompt_version: str | None = None  # set when written; lets us iterate prompts safely
     metadata_json: str | None = None  # Section-specific structured data
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     digest: Digest = Relationship(back_populates="sections")
+
+
+class RefreshRunStatus(StrEnum):
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED = "failed"
+
+
+class RefreshRunCommand(StrEnum):
+    REFRESH = "refresh"
+    ANALYZE = "analyze"
+    DIGEST = "digest"
+
+
+class RefreshRun(SQLModel, table=True):
+    """Self-observability for cinsights itself.
+
+    One row per analyze/digest/refresh invocation. Captures wall-clock duration,
+    LLM token spend, and DB size so we can detect when migration triggers fire
+    (rollups, Postgres) without guessing.
+    """
+
+    __tablename__ = "refresh_run"
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    tenant_id: str = Field(default="default", index=True)
+    command: RefreshRunCommand
+    started_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    completed_at: datetime | None = None
+    status: RefreshRunStatus = RefreshRunStatus.RUNNING
+    sessions_analyzed: int = 0
+    digests_generated: int = 0
+    total_prompt_tokens: int = 0
+    total_completion_tokens: int = 0
+    db_size_bytes: int | None = None
+    wall_seconds: float | None = None
+    error_message: str | None = None
+    metadata_json: str | None = None

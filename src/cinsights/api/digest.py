@@ -5,7 +5,8 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlmodel import Session, col, select
+from sqlmodel import col, select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from cinsights.db.engine import get_db
 from cinsights.db.models import Digest, DigestSection
@@ -57,15 +58,16 @@ async def list_digests(
     limit: int = 10,
     project: str | None = None,
     global_only: bool = False,
-    db: Session = Depends(get_db),
-):
+    db: AsyncSession = Depends(get_db),
+) -> list[DigestRead]:
     """List digests, newest first. Filter by project or global scope."""
     q = select(Digest).order_by(col(Digest.created_at).desc())
     if project:
         q = q.where(Digest.project_name == project)
     elif global_only:
         q = q.where(Digest.project_name.is_(None))
-    digests = db.exec(q.limit(limit)).all()
+    result = await db.exec(q.limit(limit))
+    digests = result.all()
 
     return [
         DigestRead(
@@ -86,17 +88,20 @@ async def list_digests(
 
 
 @router.get("/{digest_id}", response_model=DigestDetail)
-async def get_digest(digest_id: str, db: Session = Depends(get_db)):
+async def get_digest(
+    digest_id: str, db: AsyncSession = Depends(get_db)
+) -> DigestDetail:
     """Get a digest with all sections and stats."""
-    digest = db.get(Digest, digest_id)
+    digest = await db.get(Digest, digest_id)
     if not digest:
         raise HTTPException(status_code=404, detail="Digest not found")
 
-    sections = db.exec(
+    sections_result = await db.exec(
         select(DigestSection)
         .where(DigestSection.digest_id == digest_id)
         .order_by(DigestSection.order)
-    ).all()
+    )
+    sections = sections_result.all()
 
     stats = None
     if digest.stats_json:

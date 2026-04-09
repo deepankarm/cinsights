@@ -12,7 +12,9 @@
 {% endfor %}
 
 ## Timeline
-{% for span in spans %}
+{% if truncation_notice %}**{{ truncation_notice }}**
+
+{% endif %}{% for span in spans %}
 {{ span.start_time.strftime('%H:%M:%S') }} | {{ span.tool_name or span.span_kind }}{% if span.tool_description %} — "{{ span.tool_description }}"{% endif %} | {{ "%.0f" | format(span.duration_ms) }}ms | {{ "OK" if span.is_success else "ERROR" }}
 {% if span.input_value %}    INPUT: {{ span.input_display }}
 {% endif %}{% if span.output_value %}    OUTPUT: {{ span.output_display }}

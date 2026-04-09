@@ -4,7 +4,8 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlmodel import Session, func, select
+from sqlmodel import func, select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from cinsights.db.engine import get_db
 from cinsights.db.models import CodingSession, Digest, ToolCall
@@ -24,9 +25,9 @@ class ProjectRead(BaseModel):
 
 
 @router.get("/", response_model=list[ProjectRead])
-async def list_projects(db: Session = Depends(get_db)):
+async def list_projects(db: AsyncSession = Depends(get_db)) -> list[ProjectRead]:
     """List all detected projects with summary stats."""
-    rows = db.exec(
+    rows_result = await db.exec(
         select(
             CodingSession.project_name,
             func.count(),
@@ -36,30 +37,30 @@ async def list_projects(db: Session = Depends(get_db)):
         .where(CodingSession.project_name.isnot(None))
         .group_by(CodingSession.project_name)
         .order_by(func.max(CodingSession.start_time).desc())
-    ).all()
+    )
+    rows = rows_result.all()
 
-    results = []
+    results: list[ProjectRead] = []
     for project_name, session_count, total_tokens, latest in rows:
         # Top tools for this project
-        tool_rows = db.exec(
+        tool_result = await db.exec(
             select(ToolCall.tool_name, func.count())
             .join(CodingSession, ToolCall.session_id == CodingSession.id)
             .where(CodingSession.project_name == project_name)
             .group_by(ToolCall.tool_name)
             .order_by(func.count().desc())
             .limit(3)
-        ).all()
+        )
+        tool_rows = tool_result.all()
 
         # Check if a digest exists for this project
-        has_digest = (
-            db.exec(
-                select(func.count())
-                .select_from(Digest)
-                .where(Digest.project_name == project_name)
-                .where(Digest.status == "complete")
-            ).one()
-            > 0
+        digest_count_result = await db.exec(
+            select(func.count())
+            .select_from(Digest)
+            .where(Digest.project_name == project_name)
+            .where(Digest.status == "complete")
         )
+        has_digest = digest_count_result.one() > 0
 
         results.append(
             ProjectRead(

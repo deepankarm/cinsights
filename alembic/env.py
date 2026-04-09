@@ -5,7 +5,15 @@ from sqlalchemy import engine_from_config, pool
 from sqlmodel import SQLModel
 
 from cinsights.config import get_settings
-from cinsights.db.models import CodingSession, Insight, ToolCall  # noqa: F401
+from cinsights.db.engine import _sync_url
+from cinsights.db.models import (  # noqa: F401
+    CodingSession,
+    Digest,
+    DigestSection,
+    Insight,
+    RefreshRun,
+    ToolCall,
+)
 
 config = context.config
 
@@ -14,9 +22,11 @@ if config.config_file_name is not None:
 
 target_metadata = SQLModel.metadata
 
-# Override URL from app settings
+# Alembic stays on a sync engine even though the application uses async — it's
+# a one-shot CLI and doesn't need concurrency. Translate the URL in case the
+# user set CINSIGHTS_DATABASE_URL to the async form.
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.database_url)
+config.set_main_option("sqlalchemy.url", _sync_url(settings.database_url))
 
 
 def run_migrations_offline() -> None:
