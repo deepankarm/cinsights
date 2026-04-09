@@ -33,13 +33,25 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from cinsights.config import get_settings
 from cinsights.runtime import _content_hash, _RunHandle, console
 
+logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     from types import ModuleType
 
     from cinsights.analysis.digest import DigestAnalysisResult, DigestAnalyzer
+    from cinsights.analysis.project_detection import ProjectGuess
     from cinsights.analysis.session import AnalysisResult
     from cinsights.db.models import CodingSession, Digest
     from cinsights.sources.base import SpanData, TraceData, TraceSource
+
+
+def _filter_tool_spans(spans: list[SpanData]) -> list[SpanData]:
+    """Tool calls + CC permission/notification spans."""
+    return [
+        s for s in spans
+        if s.parent_id is not None
+        and (s.tool_name or "Permission" in s.name or "Notification" in s.name)
+    ]
 
 
 async def _store_analysis(
@@ -52,6 +64,7 @@ async def _store_analysis(
     source: TraceSource,
     force: bool,
     existing: CodingSession | None,
+    project_guess: ProjectGuess,
 ) -> int:
     """Store trace data and analysis results in the database.
 
@@ -70,12 +83,7 @@ async def _store_analysis(
     )
 
     root = next((s for s in spans if s.parent_id is None), None)
-    # CC traces: tool calls have tool.name, permission/notification use span name
-    tool_spans = [
-        s for s in spans
-        if s.parent_id is not None
-        and (s.tool_name or "Permission" in s.name or "Notification" in s.name)
-    ]
+    tool_spans = _filter_tool_spans(spans)
 
     # Extract user.id from span attributes
     user_id = None
@@ -85,29 +93,14 @@ async def _store_analysis(
         if user_id:
             break
 
-    # Detect project from file paths in tool calls (heuristic)
-    from cinsights.stats import detect_project_from_tool_calls
-
-    project_name = detect_project_from_tool_calls(tool_spans)
+    project_name = project_guess.project_name
 
     last_span_time = max(s.end_time for s in spans) if spans else None
 
-    # Aggregate tokens from all Turn spans + build context growth data.
-    #
-    # IMPORTANT: a CC session can have many Turn spans (one per LLM round-trip)
-    # and the prompt_tokens reported by each turn is the FULL context sent at
-    # that turn. To get the total input tokens billed across the session, we
-    # MUST sum prompt_tokens across all turns — not just take the last turn's.
-    # Compaction also resets the turn counter, so multiple "Turn 1" spans can
-    # exist in one session and we still want every one of them counted.
-    #
-    # Earlier versions of this code stored last_turn_prompt + sum(completion),
-    # which is "size of the largest single context window + total LLM output".
-    # That undercounted long sessions by ~185x (see ticket T-001).
-    #
-    # Note: this is RAW input tokens (no cache discount). Anthropic billing
-    # with prompt caching is typically 10-20% of this number, but the raw
-    # figure is the right "how much did the LLM actually think" metric.
+    # Sum prompt_tokens across ALL Turn spans, not just the last. Each Turn's
+    # prompt_tokens is the full context sent at that turn; compaction resets
+    # the turn counter so the same session can have multiple "Turn 1" spans.
+    # The stored value is RAW input tokens (no cache discount).
     import json as json_mod
 
     turn_spans = sorted(
@@ -439,6 +432,7 @@ async def _analyze_async(
         )
         raise typer.Exit(1)
 
+    from cinsights.analysis.project_detection import ProjectDetector
     from cinsights.analysis.session import SessionAnalyzer
     from cinsights.db.engine import get_sessionmaker
     from cinsights.db.models import CodingSession, SessionStatus
@@ -460,6 +454,21 @@ async def _analyze_async(
         base_url=settings.anthropic_base_url,
         extra_headers=extra_headers,
     )
+
+    project_detector = ProjectDetector(
+        api_key=settings.anthropic_api_key,
+        model=settings.project_detection_model,
+        base_url=settings.anthropic_base_url,
+        extra_headers=extra_headers,
+    )
+
+    async with sessionmaker() as _kp_db:
+        kp_result = await _kp_db.exec(
+            select_fn(CodingSession.project_name)
+            .where(CodingSession.project_name.is_not(None))
+            .distinct()
+        )
+        known_projects = sorted({p for p in kp_result.all() if p})
 
     # Collect traces to analyze
     # Each work item: (trace_id, session_id, TraceData, spans)
@@ -586,30 +595,63 @@ async def _analyze_async(
         f"(concurrency={concurrency})...[/bold]\n"
     )
 
-    # Run LLM analysis concurrently
+    async with sessionmaker() as _prev_db:
+        previous_tags: dict[str, str | None] = {}
+        for trace_id, _, _, _ in work_items:
+            existing_row = await _prev_db.get(CodingSession, trace_id)
+            previous_tags[trace_id] = (
+                existing_row.project_name if existing_row else None
+            )
+
     analysis_items = [(trace, spans) for _, _, trace, spans in work_items]
-    results = await analyzer.analyze_batch(analysis_items, max_concurrency=concurrency)
+    detect_items: list[tuple[str | None, list[SpanData]]] = [
+        (previous_tags[trace_id], _filter_tool_spans(spans))
+        for trace_id, _, _, spans in work_items
+    ]
+
+    analysis_results, project_guesses = await asyncio.gather(
+        analyzer.analyze_batch(analysis_items, max_concurrency=concurrency),
+        project_detector.detect_batch(
+            detect_items, known_projects, max_concurrency=concurrency
+        ),
+    )
 
     # Store results in DB
     analyzed = 0
     failed = 0
     async with sessionmaker() as db:
-        for (trace_id, session_id, trace, spans), result in zip(
-            work_items, results, strict=True
+        for (trace_id, session_id, trace, spans), result, project_guess in zip(
+            work_items, analysis_results, project_guesses, strict=True
         ):
             try:
                 existing = await db.get(CodingSession, trace_id)
                 n_insights = await _store_analysis(
-                    db, trace_id, session_id, trace, spans, result, source, force, existing
+                    db,
+                    trace_id,
+                    session_id,
+                    trace,
+                    spans,
+                    result,
+                    source,
+                    force,
+                    existing,
+                    project_guess=project_guess,
                 )
                 await db.commit()
                 analyzed += 1
                 if run is not None:
                     run.sessions_analyzed += 1
-                    run.total_prompt_tokens += result.usage_prompt_tokens
-                    run.total_completion_tokens += result.usage_completion_tokens
+                    run.total_prompt_tokens += (
+                        result.usage_prompt_tokens
+                        + project_guess.usage_prompt_tokens
+                    )
+                    run.total_completion_tokens += (
+                        result.usage_completion_tokens
+                        + project_guess.usage_completion_tokens
+                    )
                 console.print(
-                    f"  [green]✓[/green] {trace_id[:12]} — {n_insights} insights"
+                    f"  [green]✓[/green] {trace_id[:12]} — {n_insights} insights, "
+                    f"project={project_guess.project_name or 'unknown'}"
                 )
             except Exception as e:
                 await db.rollback()
