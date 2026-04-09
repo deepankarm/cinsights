@@ -92,16 +92,31 @@ async def _store_analysis(
 
     last_span_time = max(s.end_time for s in spans) if spans else None
 
-    # Aggregate tokens from all Turn spans + build context growth data
+    # Aggregate tokens from all Turn spans + build context growth data.
+    #
+    # IMPORTANT: a CC session can have many Turn spans (one per LLM round-trip)
+    # and the prompt_tokens reported by each turn is the FULL context sent at
+    # that turn. To get the total input tokens billed across the session, we
+    # MUST sum prompt_tokens across all turns — not just take the last turn's.
+    # Compaction also resets the turn counter, so multiple "Turn 1" spans can
+    # exist in one session and we still want every one of them counted.
+    #
+    # Earlier versions of this code stored last_turn_prompt + sum(completion),
+    # which is "size of the largest single context window + total LLM output".
+    # That undercounted long sessions by ~185x (see ticket T-001).
+    #
+    # Note: this is RAW input tokens (no cache discount). Anthropic billing
+    # with prompt caching is typically 10-20% of this number, but the raw
+    # figure is the right "how much did the LLM actually think" metric.
     import json as json_mod
 
     turn_spans = sorted(
         [s for s in spans if s.name.startswith("Turn ")],
         key=lambda s: s.start_time,
     )
+    total_prompt = sum(s.prompt_tokens for s in turn_spans)
     total_completion = sum(s.completion_tokens for s in turn_spans)
-    last_turn_prompt = turn_spans[-1].prompt_tokens if turn_spans else 0
-    total_tokens = last_turn_prompt + total_completion
+    total_tokens = total_prompt + total_completion
 
     context_growth = json_mod.dumps([
         {
@@ -127,7 +142,7 @@ async def _store_analysis(
             end_time=trace.end_time,
             model=root.model_name if root else None,
             total_tokens=total_tokens,
-            prompt_tokens=last_turn_prompt,
+            prompt_tokens=total_prompt,
             completion_tokens=total_completion,
             context_growth_json=context_growth,
             span_count=len(spans),
@@ -141,7 +156,7 @@ async def _store_analysis(
         coding_session.user_id = user_id or existing.user_id
         coding_session.project_name = project_name or existing.project_name
         coding_session.total_tokens = total_tokens
-        coding_session.prompt_tokens = last_turn_prompt
+        coding_session.prompt_tokens = total_prompt
         coding_session.completion_tokens = total_completion
         coding_session.context_growth_json = context_growth
         coding_session.span_count = len(spans)
