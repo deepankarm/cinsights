@@ -15,6 +15,11 @@ build/
 .env
 .env.local
 
+# Local-only directory: notes, tickets, dogfood logs, scratch — anything
+# that should never be committed. Drop new files here without editing
+# .gitignore.
+.local/
+
 # Tools
 .ruff_cache/
 .mypy_cache/
