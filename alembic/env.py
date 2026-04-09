@@ -1,9 +1,9 @@
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
 from sqlmodel import SQLModel
 
+from alembic import context
 from cinsights.config import get_settings
 from cinsights.db.engine import _sync_url
 from cinsights.db.models import (  # noqa: F401

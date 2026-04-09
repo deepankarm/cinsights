@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 from sqlalchemy import case
@@ -22,6 +22,9 @@ from cinsights.db.models import (
     SessionStatus,
     ToolCall,
 )
+
+if TYPE_CHECKING:
+    from cinsights.sources.base import SpanData
 
 _EXT_TO_LANG: dict[str, str] = {
     ".py": "Python", ".go": "Go", ".js": "JavaScript", ".ts": "TypeScript",
@@ -117,7 +120,7 @@ class DigestStats(BaseModel):
 
     analysis_tokens_used: int
 
-def detect_project_from_tool_calls(tool_calls: list) -> str | None:
+def detect_project_from_tool_calls(tool_calls: list[SpanData]) -> str | None:
     """Extract project name from file paths in tool call inputs.
 
     Extracts directory paths from file_path JSON fields, finds the deepest
@@ -131,7 +134,7 @@ def detect_project_from_tool_calls(tool_calls: list) -> str | None:
 
     dir_counts: dict[str, int] = {}
     for tc in tool_calls:
-        input_val = tc.input_value if hasattr(tc, "input_value") else tc.get("input_value")
+        input_val = tc.input_value
         if not input_val:
             continue
         for match in file_path_re.finditer(input_val):
