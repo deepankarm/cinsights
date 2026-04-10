@@ -117,6 +117,11 @@ async def get_digest(
             for t in stats["tokens_per_session"]:
                 if t["session_id"] in live:
                     t["tokens"] = live[t["session_id"]]
+            # Patch the aggregate total and per-session health entries too
+            stats["total_tokens"] = sum(live.values())
+            for h in stats.get("session_health", []):
+                if h.get("session_id") in live:
+                    h["total_tokens"] = live[h["session_id"]]
 
     return DigestDetail(
         id=digest.id,
