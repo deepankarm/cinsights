@@ -74,6 +74,8 @@ class StatsResponse(BaseModel):
     total_sessions: int
     analyzed_sessions: int
     total_insights: int
+    total_tool_calls: int
+    distinct_tool_count: int
     top_tools: dict[str, int]
     insight_counts: dict[str, int]
 
@@ -150,6 +152,14 @@ async def get_stats(db: AsyncSession = Depends(get_db)) -> StatsResponse:
     insights_result = await db.exec(select(func.count()).select_from(Insight))
     total_insights = insights_result.one()
 
+    # Total and distinct tool counts
+    total_tc_result = await db.exec(select(func.count()).select_from(ToolCall))
+    total_tool_calls = total_tc_result.one()
+    distinct_tc_result = await db.exec(
+        select(func.count(ToolCall.tool_name.distinct()))
+    )
+    distinct_tool_count = distinct_tc_result.one()
+
     # Top tools
     tool_result = await db.exec(
         select(ToolCall.tool_name, func.count())
@@ -169,6 +179,8 @@ async def get_stats(db: AsyncSession = Depends(get_db)) -> StatsResponse:
         total_sessions=total,
         analyzed_sessions=analyzed,
         total_insights=total_insights,
+        total_tool_calls=total_tool_calls,
+        distinct_tool_count=distinct_tool_count,
         top_tools=top_tools,
         insight_counts=insight_counts,
     )
