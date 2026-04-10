@@ -87,6 +87,7 @@ class Insight(SQLModel, table=True):
 
     session: CodingSession = Relationship(back_populates="insights")
 
+
 class DigestStatus(StrEnum):
     PENDING = "pending"
     COMPUTING_STATS = "computing_stats"

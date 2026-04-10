@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -80,12 +80,9 @@ def test_span_data_properties():
 
 @pytest.mark.asyncio
 async def test_analyze_structured_output():
-    """Test that analyzer correctly parses tool_use structured output."""
-    tool_use_block = MagicMock()
-    tool_use_block.type = "tool_use"
-    tool_use_block.name = "record_analysis"
-    tool_use_block.input = {
-        "insights": [
+    """Test that analyzer correctly handles pydantic-ai structured output."""
+    expected_output = AnalysisResult(
+        insights=[
             {
                 "category": "summary",
                 "title": "Test Summary",
@@ -101,17 +98,12 @@ async def test_analyze_structured_output():
                 "evidence": ["Read on missing.go"],
             },
         ]
-    }
+    )
 
-    mock_response = MagicMock()
-    mock_response.content = [tool_use_block]
+    mock_run_llm = AsyncMock(return_value=(expected_output, 100, 50))
 
-    with patch("anthropic.AsyncAnthropic") as mock_cls:
-        mock_client = AsyncMock()
-        mock_cls.return_value = mock_client
-        mock_client.messages.create.return_value = mock_response
-
-        analyzer = SessionAnalyzer(api_key="test-key")
+    with patch.object(SessionAnalyzer, "_run_llm", mock_run_llm):
+        analyzer = SessionAnalyzer(model="test-model")
         trace = TraceData(
             trace_id="trace-1",
             start_time=datetime(2026, 4, 1, 10, 0, tzinfo=UTC),
@@ -127,16 +119,15 @@ async def test_analyze_structured_output():
         assert result.insights[0].evidence == ["the Apply migration Bash call", "Read on file.py"]
         assert result.insights[1].category == InsightCategoryEnum.FRICTION
         assert result.insights[1].severity == "warning"
+        assert result.usage_prompt_tokens == 100
+        assert result.usage_completion_tokens == 50
 
 
 @pytest.mark.asyncio
 async def test_analyze_batch():
     """Test concurrent batch analysis."""
-    tool_use_block = MagicMock()
-    tool_use_block.type = "tool_use"
-    tool_use_block.name = "record_analysis"
-    tool_use_block.input = {
-        "insights": [
+    expected_output = AnalysisResult(
+        insights=[
             {
                 "category": "summary",
                 "title": "Summary",
@@ -144,17 +135,12 @@ async def test_analyze_batch():
                 "severity": "info",
             }
         ]
-    }
+    )
 
-    mock_response = MagicMock()
-    mock_response.content = [tool_use_block]
+    mock_run_llm = AsyncMock(return_value=(expected_output, 100, 50))
 
-    with patch("anthropic.AsyncAnthropic") as mock_cls:
-        mock_client = AsyncMock()
-        mock_cls.return_value = mock_client
-        mock_client.messages.create.return_value = mock_response
-
-        analyzer = SessionAnalyzer(api_key="test-key")
+    with patch.object(SessionAnalyzer, "_run_llm", mock_run_llm):
+        analyzer = SessionAnalyzer(model="test-model")
         trace1 = TraceData(
             trace_id="t1",
             start_time=datetime(2026, 4, 1, 10, 0, tzinfo=UTC),

@@ -4,10 +4,11 @@ import asyncio
 import logging
 from enum import StrEnum
 
-import anthropic
 from pydantic import BaseModel, Field
 
+from cinsights.analysis import LLMAnalyzer
 from cinsights.prompts import render
+from cinsights.settings import PromptTemplates
 from cinsights.sources.base import SpanData, TraceData
 
 logger = logging.getLogger(__name__)
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 MAX_IO_CHARS = 500  # Truncate tool I/O to keep prompt manageable
 MAX_TIMELINE_SPANS = 200  # Cap spans in the analysis timeline (stratified sample)
 TIMELINE_HEAD_TAIL = 30  # Keep this many spans from the start and end
+
 
 class InsightCategoryEnum(StrEnum):
     SUMMARY = "summary"
@@ -35,9 +37,7 @@ class InsightItem(BaseModel):
     category: InsightCategoryEnum = Field(
         description="The type of insight: summary, friction, win, recommendation, pattern, or skill_proposal"
     )
-    title: str = Field(
-        description="Short descriptive title for this insight (5-15 words)"
-    )
+    title: str = Field(description="Short descriptive title for this insight (5-15 words)")
     content: str = Field(
         description="Detailed markdown content explaining the insight with evidence from the timeline"
     )
@@ -59,13 +59,6 @@ class AnalysisResult(BaseModel):
     usage_prompt_tokens: int = 0
     usage_completion_tokens: int = 0
 
-
-# Tool schema for structured output via tool_use
-_ANALYSIS_TOOL = {
-    "name": "record_analysis",
-    "description": "Record the structured analysis results for a coding agent session.",
-    "input_schema": AnalysisResult.model_json_schema(),
-}
 
 def _truncate(text: str | None, max_chars: int = MAX_IO_CHARS) -> str:
     if not text:
@@ -141,19 +134,14 @@ def _sample_timeline_spans(spans: list[SpanData]) -> tuple[list[SpanData], str |
     keep: set[int] = error_idxs | head_idxs | tail_idxs
 
     # Fill the rest with a uniform sample from the successful middle spans.
-    middle_candidates = [
-        i for i, s in indexed
-        if i not in keep and s.is_success
-    ]
+    middle_candidates = [i for i, s in indexed if i not in keep and s.is_success]
     remaining_budget = MAX_TIMELINE_SPANS - len(keep)
     if remaining_budget > 0 and middle_candidates:
         if remaining_budget >= len(middle_candidates):
             keep.update(middle_candidates)
         else:
             stride = len(middle_candidates) / remaining_budget
-            keep.update(
-                middle_candidates[int(k * stride)] for k in range(remaining_budget)
-            )
+            keep.update(middle_candidates[int(k * stride)] for k in range(remaining_budget))
 
     sampled = [s for i, s in indexed if i in keep]
     notice = (
@@ -179,14 +167,19 @@ def _build_prompts(trace: TraceData, spans: list[SpanData]) -> tuple[str, str]:
     # Tool spans in Claude Code traces are CHAIN kind with tool-like names,
     # not span_kind == "TOOL". Match the pipeline's _filter_tool_spans logic.
     tool_spans = [
-        s for s in spans
+        s
+        for s in spans
         if s.parent_id is not None
         and (s.tool_name or "Permission" in s.name or "Notification" in s.name)
     ]
     error_count = sum(1 for s in tool_spans if not s.is_success)
 
     # Total tokens from turn spans, not the root span (which only has one turn's count).
-    total_tokens = sum(s.prompt_tokens + s.completion_tokens for s in turn_spans) if turn_spans else (root.total_tokens if root else 0)
+    total_tokens = (
+        sum(s.prompt_tokens + s.completion_tokens for s in turn_spans)
+        if turn_spans
+        else (root.total_tokens if root else 0)
+    )
 
     # Tool call counts sorted by frequency. We compute this from the FULL span
     # list — even when the timeline is sampled below, the aggregates stay honest.
@@ -204,14 +197,16 @@ def _build_prompts(trace: TraceData, spans: list[SpanData]) -> tuple[str, str]:
         query = ts.input_value
         if query and query.strip():
             turn_num = ts.name.replace("Turn ", "")
-            user_queries.append({
-                "turn": turn_num,
-                "query": query.strip()[:200],
-            })
+            user_queries.append(
+                {
+                    "turn": turn_num,
+                    "query": query.strip()[:200],
+                }
+            )
 
-    system_prompt = render("session_analysis_system.md.j2")
+    system_prompt = render(PromptTemplates.SESSION_SYSTEM)
     user_prompt = render(
-        "session_analysis_user.md.j2",
+        PromptTemplates.SESSION_USER,
         model=root.model_name if root else "unknown",
         duration_s=duration_s,
         duration_min=duration_s / 60,
@@ -227,23 +222,9 @@ def _build_prompts(trace: TraceData, spans: list[SpanData]) -> tuple[str, str]:
     )
     return system_prompt, user_prompt
 
-class SessionAnalyzer:
-    """Analyze coding agent sessions using Claude API with structured output."""
 
-    def __init__(
-        self,
-        api_key: str,
-        model: str = "claude-sonnet-4-20250514",
-        base_url: str | None = None,
-        extra_headers: dict[str, str] | None = None,
-    ):
-        kwargs: dict = {"api_key": api_key}
-        if base_url:
-            kwargs["base_url"] = base_url
-        if extra_headers:
-            kwargs["default_headers"] = extra_headers
-        self.async_client = anthropic.AsyncAnthropic(**kwargs)
-        self.model = model
+class SessionAnalyzer(LLMAnalyzer):
+    """Analyze coding agent sessions using pydantic-ai with structured output."""
 
     async def analyze(self, trace: TraceData, spans: list[SpanData]) -> AnalysisResult:
         """Analyze a session's spans and produce structured insights."""
@@ -256,18 +237,13 @@ class SessionAnalyzer:
             len(user_prompt),
         )
 
-        response = await self.async_client.messages.create(
-            model=self.model,
-            max_tokens=4096,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-            tools=[_ANALYSIS_TOOL],
-            tool_choice={"type": "tool", "name": "record_analysis"},
+        result, prompt_tokens, completion_tokens = await self._run_llm(
+            AnalysisResult,
+            system_prompt,
+            user_prompt,
         )
-
-        result = self._parse_response(response)
-        result.usage_prompt_tokens = response.usage.input_tokens
-        result.usage_completion_tokens = response.usage.output_tokens
+        result.usage_prompt_tokens = prompt_tokens
+        result.usage_completion_tokens = completion_tokens
         return result
 
     async def analyze_batch(
@@ -284,29 +260,3 @@ class SessionAnalyzer:
 
         tasks = [_bounded(trace, spans) for trace, spans in items]
         return await asyncio.gather(*tasks)
-
-    def _parse_response(self, response: anthropic.types.Message) -> AnalysisResult:
-        """Parse structured output from tool_use response."""
-        for block in response.content:
-            if block.type == "tool_use" and block.name == "record_analysis":
-                data = block.input
-                # Drop malformed insights that the LLM occasionally produces.
-                if "insights" in data and isinstance(data["insights"], list):
-                    data["insights"] = [
-                        i for i in data["insights"]
-                        if isinstance(i, dict) and "category" in i
-                    ]
-                return AnalysisResult.model_validate(data)
-
-        # Fallback if no tool_use block found (shouldn't happen with tool_choice)
-        logger.error("No tool_use block in response, falling back to text parse")
-        return AnalysisResult(
-            insights=[
-                InsightItem(
-                    category=InsightCategoryEnum.SUMMARY,
-                    title="Analysis Failed",
-                    content="No structured output received from the model.",
-                    severity=InsightSeverityEnum.WARNING,
-                )
-            ]
-        )

@@ -24,15 +24,40 @@ from cinsights.db.models import (
 )
 
 _EXT_TO_LANG: dict[str, str] = {
-    ".py": "Python", ".go": "Go", ".js": "JavaScript", ".ts": "TypeScript",
-    ".tsx": "TypeScript", ".jsx": "JavaScript", ".rs": "Rust", ".java": "Java",
-    ".rb": "Ruby", ".php": "PHP", ".c": "C", ".cpp": "C++", ".h": "C/C++",
-    ".cs": "C#", ".swift": "Swift", ".kt": "Kotlin", ".scala": "Scala",
-    ".json": "JSON", ".yaml": "YAML", ".yml": "YAML", ".toml": "TOML",
-    ".xml": "XML", ".html": "HTML", ".css": "CSS", ".scss": "CSS",
-    ".md": "Markdown", ".sql": "SQL", ".sh": "Shell", ".bash": "Shell",
-    ".zsh": "Shell", ".dockerfile": "Docker", ".tf": "Terraform",
-    ".svelte": "Svelte", ".vue": "Vue",
+    ".py": "Python",
+    ".go": "Go",
+    ".js": "JavaScript",
+    ".ts": "TypeScript",
+    ".tsx": "TypeScript",
+    ".jsx": "JavaScript",
+    ".rs": "Rust",
+    ".java": "Java",
+    ".rb": "Ruby",
+    ".php": "PHP",
+    ".c": "C",
+    ".cpp": "C++",
+    ".h": "C/C++",
+    ".cs": "C#",
+    ".swift": "Swift",
+    ".kt": "Kotlin",
+    ".scala": "Scala",
+    ".json": "JSON",
+    ".yaml": "YAML",
+    ".yml": "YAML",
+    ".toml": "TOML",
+    ".xml": "XML",
+    ".html": "HTML",
+    ".css": "CSS",
+    ".scss": "CSS",
+    ".md": "Markdown",
+    ".sql": "SQL",
+    ".sh": "Shell",
+    ".bash": "Shell",
+    ".zsh": "Shell",
+    ".dockerfile": "Docker",
+    ".tf": "Terraform",
+    ".svelte": "Svelte",
+    ".vue": "Vue",
 }
 
 _FILE_TOOLS = {"Read", "Edit", "Write", "Glob", "Grep", "NotebookEdit"}
@@ -47,6 +72,7 @@ _ERROR_PATTERNS = [
     ("File Too Large", re.compile(r"too large|file size|exceeds", re.I)),
     ("Timeout", re.compile(r"timeout|timed out|deadline exceeded", re.I)),
 ]
+
 
 class SessionHealthScore(BaseModel):
     session_id: str
@@ -117,9 +143,8 @@ class DigestStats(BaseModel):
 
     analysis_tokens_used: int
 
-def _session_filter(
-    start: datetime, end: datetime, project_name: str | None = None
-) -> list[Any]:
+
+def _session_filter(start: datetime, end: datetime, project_name: str | None = None) -> list[Any]:
     """Build the standard WHERE clauses for selecting analyzed sessions in a window.
 
     Returns a list of SQLAlchemy expressions to be ``AND``-ed via repeated
@@ -176,9 +201,9 @@ async def compute_tool_distribution(
     project_name: str | None = None,
 ) -> dict[str, int]:
     result = await db.exec(
-        _tc_agg_query(
-            (ToolCall.tool_name, func.count()), start, end, project_name
-        ).group_by(ToolCall.tool_name).order_by(func.count().desc())
+        _tc_agg_query((ToolCall.tool_name, func.count()), start, end, project_name)
+        .group_by(ToolCall.tool_name)
+        .order_by(func.count().desc())
     )
     return {name: count for name, count in result.all()}
 
@@ -190,17 +215,17 @@ async def compute_error_breakdown(
     project_name: str | None = None,
 ) -> tuple[dict[str, int], dict[str, int]]:
     tool_errors_result = await db.exec(
-        _tc_agg_query(
-            (ToolCall.tool_name, func.count()), start, end, project_name
-        ).where(ToolCall.success == False)  # noqa: E712
-        .group_by(ToolCall.tool_name).order_by(func.count().desc())
+        _tc_agg_query((ToolCall.tool_name, func.count()), start, end, project_name)
+        .where(ToolCall.success == False)  # noqa: E712
+        .group_by(ToolCall.tool_name)
+        .order_by(func.count().desc())
     )
     tool_errors = tool_errors_result.all()
 
     failed_result = await db.exec(
-        _tc_agg_query(
-            (ToolCall.output_value,), start, end, project_name
-        ).where(ToolCall.success == False)  # noqa: E712
+        _tc_agg_query((ToolCall.output_value,), start, end, project_name).where(
+            ToolCall.success == False
+        )  # noqa: E712
     )
     failed_calls = failed_result.all()
 
@@ -230,11 +255,11 @@ async def compute_language_distribution(
     end: datetime,
     project_name: str | None = None,
 ) -> dict[str, int]:
-    q = _tc_agg_query(
-        (ToolCall.input_value,), start, end, project_name
-    ).where(
-        col(ToolCall.tool_name).in_(list(_FILE_TOOLS))
-    ).where(ToolCall.input_value.isnot(None))
+    q = (
+        _tc_agg_query((ToolCall.input_value,), start, end, project_name)
+        .where(col(ToolCall.tool_name).in_(list(_FILE_TOOLS)))
+        .where(ToolCall.input_value.isnot(None))
+    )
 
     result = await db.exec(q)
     inputs = result.all()
@@ -272,8 +297,7 @@ async def compute_session_health(
     project_name: str | None = None,
 ) -> list[SessionHealthScore]:
     result = await db.exec(
-        _base_query(start, end, project_name)
-        .order_by(col(CodingSession.start_time).desc())
+        _base_query(start, end, project_name).order_by(col(CodingSession.start_time).desc())
     )
     sessions = result.all()
     if not sessions:
@@ -319,13 +343,19 @@ async def compute_session_health(
         else:
             grade = "F"
 
-        scores.append(SessionHealthScore(
-            session_id=s.id, start_time=s.start_time,
-            duration_minutes=round(duration, 1),
-            tool_count=tool_count, error_count=error_count,
-            error_rate=round(error_rate, 3), total_tokens=s.total_tokens,
-            grade=grade, model=s.model,
-        ))
+        scores.append(
+            SessionHealthScore(
+                session_id=s.id,
+                start_time=s.start_time,
+                duration_minutes=round(duration, 1),
+                tool_count=tool_count,
+                error_count=error_count,
+                error_rate=round(error_rate, 3),
+                total_tokens=s.total_tokens,
+                grade=grade,
+                model=s.model,
+            )
+        )
     return scores
 
 
@@ -390,8 +420,10 @@ async def compute_plan_mode_stats(
 
     if not session_ids:
         return PlanModeStats(
-            entries=0, total_duration_seconds=0,
-            plan_agent_count=0, plan_agent_tokens=0,
+            entries=0,
+            total_duration_seconds=0,
+            plan_agent_count=0,
+            plan_agent_tokens=0,
         )
 
     plan_result = await db.exec(
@@ -410,6 +442,7 @@ async def compute_plan_mode_stats(
     for tc in plan_agents:
         if tc.input_value:
             import json
+
             try:
                 data = json.loads(tc.input_value)
                 plan_tokens += data.get("llm.token_count.total", 0) if isinstance(data, dict) else 0
@@ -431,11 +464,11 @@ async def detect_claude_md(
     project_name: str | None = None,
 ) -> bool:
     """Check if any session reads or edits a CLAUDE.md file."""
-    q = _tc_agg_query(
-        (ToolCall.input_value,), start, end, project_name
-    ).where(
-        col(ToolCall.tool_name).in_(["Read", "Edit", "Write"])
-    ).where(ToolCall.input_value.isnot(None))
+    q = (
+        _tc_agg_query((ToolCall.input_value,), start, end, project_name)
+        .where(col(ToolCall.tool_name).in_(["Read", "Edit", "Write"]))
+        .where(ToolCall.input_value.isnot(None))
+    )
 
     result = await db.exec(q)
     for input_val in result.all():
@@ -471,14 +504,14 @@ async def detect_overlapping_sessions(
     for i, s1 in enumerate(sessions):
         for s2 in sessions[i + 1 :]:
             if s2.start_time < s1.end_time:
-                overlap_sec = (
-                    min(s1.end_time, s2.end_time) - s2.start_time
-                ).total_seconds()
+                overlap_sec = (min(s1.end_time, s2.end_time) - s2.start_time).total_seconds()
                 if overlap_sec > 60:
-                    overlaps.append({
-                        "session_ids": [s1.id, s2.id],
-                        "overlap_minutes": round(overlap_sec / 60, 1),
-                    })
+                    overlaps.append(
+                        {
+                            "session_ids": [s1.id, s2.id],
+                            "overlap_minutes": round(overlap_sec / 60, 1),
+                        }
+                    )
     return overlaps
 
 
@@ -523,7 +556,8 @@ async def collect_session_summaries(
     for ins in insights_result.all():
         insights_by_session.setdefault(ins.session_id, []).append(ins)
 
-    from cinsights.config import get_settings
+    from cinsights.settings import get_settings
+
     min_tools = get_settings().min_session_tool_count
 
     summaries = []
@@ -558,15 +592,22 @@ async def collect_session_summaries(
         else:
             size = "MINOR"
 
-        summaries.append({
-            "session_id": s.id, "start_time": s.start_time.isoformat(),
-            "duration_min": round(duration, 1), "model": s.model,
-            "project": s.project_name or "unknown",
-            "tool_count": tool_count, "error_count": error_count,
-            "total_tokens": s.total_tokens, "summary": summary_text,
-            "frictions": friction_texts, "wins": win_texts,
-            "size": size,
-        })
+        summaries.append(
+            {
+                "session_id": s.id,
+                "start_time": s.start_time.isoformat(),
+                "duration_min": round(duration, 1),
+                "model": s.model,
+                "project": s.project_name or "unknown",
+                "tool_count": tool_count,
+                "error_count": error_count,
+                "total_tokens": s.total_tokens,
+                "summary": summary_text,
+                "frictions": friction_texts,
+                "wins": win_texts,
+                "size": size,
+            }
+        )
 
     # Sort by tool_count desc so the LLM sees the most substantial sessions first.
     summaries.sort(key=lambda x: x["tool_count"], reverse=True)
@@ -594,8 +635,7 @@ async def compute_all(
     total_prompt = sum(s.prompt_tokens for s in sessions)
     total_completion = sum(s.completion_tokens for s in sessions)
     total_duration = sum(
-        (s.end_time - s.start_time).total_seconds() / 60
-        for s in sessions if s.end_time
+        (s.end_time - s.start_time).total_seconds() / 60 for s in sessions if s.end_time
     )
     active_days = len({s.start_time.date() for s in sessions})
 
@@ -609,9 +649,7 @@ async def compute_all(
     tc_count_result = await db.exec(tc_count_q)
     total_tool_calls = tc_count_result.one()
 
-    analysis_tokens = sum(
-        s.analysis_prompt_tokens + s.analysis_completion_tokens for s in sessions
-    )
+    analysis_tokens = sum(s.analysis_prompt_tokens + s.analysis_completion_tokens for s in sessions)
 
     p = project_name
     tool_dist = await compute_tool_distribution(db, start, end, p)
@@ -619,17 +657,25 @@ async def compute_all(
     lang_dist = await compute_language_distribution(db, start, end, p)
     time_of_day = await compute_time_of_day(db, start, end, p)
 
-    session_durations = [{
-        "session_id": s.id,
-        "duration_min": round((s.end_time - s.start_time).total_seconds() / 60, 1)
-        if s.end_time else 0,
-        "start_time": s.start_time.isoformat(),
-    } for s in sessions]
+    session_durations = [
+        {
+            "session_id": s.id,
+            "duration_min": round((s.end_time - s.start_time).total_seconds() / 60, 1)
+            if s.end_time
+            else 0,
+            "start_time": s.start_time.isoformat(),
+        }
+        for s in sessions
+    ]
 
-    tokens_per_session = [{
-        "session_id": s.id, "tokens": s.total_tokens,
-        "start_time": s.start_time.isoformat(),
-    } for s in sessions]
+    tokens_per_session = [
+        {
+            "session_id": s.id,
+            "tokens": s.total_tokens,
+            "start_time": s.start_time.isoformat(),
+        }
+        for s in sessions
+    ]
 
     # Per-project breakdown (only for global digests)
     proj_breakdown: list[ProjectBreakdown] = []
@@ -639,9 +685,7 @@ async def compute_all(
             pn = s.project_name or "unknown"
             proj_groups.setdefault(pn, []).append(s)
 
-        for pn, proj_sessions in sorted(
-            proj_groups.items(), key=lambda x: -len(x[1])
-        ):
+        for pn, proj_sessions in sorted(proj_groups.items(), key=lambda x: -len(x[1])):
             proj_ids = [s.id for s in proj_sessions]
             proj_tc_result = await db.exec(
                 select(ToolCall.tool_name, func.count())
@@ -651,24 +695,34 @@ async def compute_all(
                 .limit(3)
             )
             proj_tc = proj_tc_result.all()
-            proj_breakdown.append(ProjectBreakdown(
-                name=pn,
-                session_count=len(proj_sessions),
-                total_tokens=sum(s.total_tokens for s in proj_sessions),
-                total_tool_calls=sum(c for _, c in proj_tc),
-                top_tools=[name for name, _ in proj_tc],
-                has_claude_md=await detect_claude_md(db, start, end, pn),
-            ))
+            proj_breakdown.append(
+                ProjectBreakdown(
+                    name=pn,
+                    session_count=len(proj_sessions),
+                    total_tokens=sum(s.total_tokens for s in proj_sessions),
+                    total_tool_calls=sum(c for _, c in proj_tc),
+                    top_tools=[name for name, _ in proj_tc],
+                    has_claude_md=await detect_claude_md(db, start, end, pn),
+                )
+            )
 
     return DigestStats(
-        period_start=start, period_end=end,
-        session_count=len(sessions), analyzed_count=len(sessions),
-        total_tool_calls=total_tool_calls, total_tokens=total_tokens,
-        total_prompt_tokens=total_prompt, total_completion_tokens=total_completion,
-        total_duration_minutes=round(total_duration, 1), active_days=active_days,
-        tool_distribution=tool_dist, error_breakdown=error_breakdown,
-        error_types=error_types, language_distribution=lang_dist,
-        time_of_day=time_of_day, session_durations=session_durations,
+        period_start=start,
+        period_end=end,
+        session_count=len(sessions),
+        analyzed_count=len(sessions),
+        total_tool_calls=total_tool_calls,
+        total_tokens=total_tokens,
+        total_prompt_tokens=total_prompt,
+        total_completion_tokens=total_completion,
+        total_duration_minutes=round(total_duration, 1),
+        active_days=active_days,
+        tool_distribution=tool_dist,
+        error_breakdown=error_breakdown,
+        error_types=error_types,
+        language_distribution=lang_dist,
+        time_of_day=time_of_day,
+        session_durations=session_durations,
         session_health=await compute_session_health(db, start, end, p),
         tokens_per_session=tokens_per_session,
         overlapping_sessions=await detect_overlapping_sessions(db, start, end, p),

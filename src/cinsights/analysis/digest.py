@@ -5,13 +5,15 @@ from __future__ import annotations
 import asyncio
 import logging
 
-import anthropic
 from pydantic import BaseModel, Field
 
+from cinsights.analysis import LLMAnalyzer
 from cinsights.prompts import render
+from cinsights.settings import PromptTemplates
 from cinsights.stats import DigestStats
 
 logger = logging.getLogger(__name__)
+
 
 class AtAGlance(BaseModel):
     whats_working: list[str] = Field(
@@ -56,9 +58,7 @@ class FeatureRecommendation(BaseModel):
     feature: str = Field(description="Feature name: Custom Skills, Hooks, Headless Mode, etc.")
     title: str = Field(description="One-line recommendation title")
     why_for_you: str = Field(description="Personalized explanation citing evidence")
-    setup_code: str | None = Field(
-        default=None, description="Optional setup code block"
-    )
+    setup_code: str | None = Field(default=None, description="Optional setup code block")
 
 
 class ActionsResult(BaseModel):
@@ -84,23 +84,6 @@ class ForwardResult(BaseModel):
     impressive_wins: list[WinItem]
     workflow_patterns: list[WorkflowPattern]
     ambitious_workflows: list[WorkflowPattern]
-_NARRATIVE_TOOL = {
-    "name": "record_narrative",
-    "description": "Record the narrative analysis sections of the digest.",
-    "input_schema": NarrativeResult.model_json_schema(),
-}
-
-_ACTIONS_TOOL = {
-    "name": "record_actions",
-    "description": "Record friction analysis, CLAUDE.md suggestions, and feature recommendations.",
-    "input_schema": ActionsResult.model_json_schema(),
-}
-
-_FORWARD_TOOL = {
-    "name": "record_forward",
-    "description": "Record wins, workflow patterns, and ambitious workflow ideas.",
-    "input_schema": ForwardResult.model_json_schema(),
-}
 
 
 class DigestAnalysisResult(BaseModel):
@@ -113,23 +96,8 @@ class DigestAnalysisResult(BaseModel):
     total_completion_tokens: int = 0
 
 
-class DigestAnalyzer:
+class DigestAnalyzer(LLMAnalyzer):
     """Analyze cross-session patterns using 3 concurrent LLM calls."""
-
-    def __init__(
-        self,
-        api_key: str,
-        model: str = "claude-sonnet-4-20250514",
-        base_url: str | None = None,
-        extra_headers: dict[str, str] | None = None,
-    ):
-        kwargs: dict = {"api_key": api_key}
-        if base_url:
-            kwargs["base_url"] = base_url
-        if extra_headers:
-            kwargs["default_headers"] = extra_headers
-        self.async_client = anthropic.AsyncAnthropic(**kwargs)
-        self.model = model
 
     async def analyze(self, stats: DigestStats) -> DigestAnalysisResult:
         """Run 3 concurrent LLM calls and combine results."""
@@ -137,26 +105,20 @@ class DigestAnalyzer:
 
         # Run all 3 analyses concurrently
         narrative_task = self._call_llm(
-            system_template="digest_narrative_system.md.j2",
-            user_template="digest_narrative_user.md.j2",
-            tool=_NARRATIVE_TOOL,
-            tool_name="record_narrative",
+            system_template=PromptTemplates.DIGEST_NARRATIVE_SYSTEM,
+            user_template=PromptTemplates.DIGEST_NARRATIVE_USER,
             result_cls=NarrativeResult,
             template_vars=stats_dict,
         )
         actions_task = self._call_llm(
-            system_template="digest_actions_system.md.j2",
-            user_template="digest_actions_user.md.j2",
-            tool=_ACTIONS_TOOL,
-            tool_name="record_actions",
+            system_template=PromptTemplates.DIGEST_ACTIONS_SYSTEM,
+            user_template=PromptTemplates.DIGEST_ACTIONS_USER,
             result_cls=ActionsResult,
             template_vars=stats_dict,
         )
         forward_task = self._call_llm(
-            system_template="digest_forward_system.md.j2",
-            user_template="digest_forward_user.md.j2",
-            tool=_FORWARD_TOOL,
-            tool_name="record_forward",
+            system_template=PromptTemplates.DIGEST_FORWARD_SYSTEM,
+            user_template=PromptTemplates.DIGEST_FORWARD_USER,
             result_cls=ForwardResult,
             template_vars=stats_dict,
         )
@@ -167,9 +129,7 @@ class DigestAnalyzer:
         forward, forward_usage = results[2]
 
         total_prompt = sum(u[0] for u in [narrative_usage, actions_usage, forward_usage])
-        total_completion = sum(
-            u[1] for u in [narrative_usage, actions_usage, forward_usage]
-        )
+        total_completion = sum(u[1] for u in [narrative_usage, actions_usage, forward_usage])
 
         logger.info(
             "Digest analysis complete: %d prompt + %d completion tokens",
@@ -189,8 +149,6 @@ class DigestAnalyzer:
         self,
         system_template: str,
         user_template: str,
-        tool: dict,
-        tool_name: str,
         result_cls: type[BaseModel],
         template_vars: dict,
     ) -> tuple[BaseModel, tuple[int, int]]:
@@ -198,22 +156,11 @@ class DigestAnalyzer:
         system_prompt = render(system_template)
         user_prompt = render(user_template, **template_vars)
 
-        logger.info("Digest LLM call: %s (~%d chars)", tool_name, len(user_prompt))
+        logger.info("Digest LLM call: %s (~%d chars)", result_cls.__name__, len(user_prompt))
 
-        response = await self.async_client.messages.create(
-            model=self.model,
-            max_tokens=4096,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-            tools=[tool],
-            tool_choice={"type": "tool", "name": tool_name},
+        output, prompt_tokens, completion_tokens = await self._run_llm(
+            result_cls,
+            system_prompt,
+            user_prompt,
         )
-
-        usage = (response.usage.input_tokens, response.usage.output_tokens)
-
-        for block in response.content:
-            if block.type == "tool_use" and block.name == tool_name:
-                return result_cls.model_validate(block.input), usage
-
-        logger.error("No tool_use block for %s", tool_name)
-        raise ValueError(f"No structured output from {tool_name}")
+        return output, (prompt_tokens, completion_tokens)

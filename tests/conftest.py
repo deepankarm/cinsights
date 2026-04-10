@@ -37,9 +37,7 @@ async def db_engine():
 
 @pytest_asyncio.fixture
 async def db(db_engine) -> AsyncIterator[AsyncSession]:
-    sessionmaker = async_sessionmaker(
-        db_engine, class_=AsyncSession, expire_on_commit=False
-    )
+    sessionmaker = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
     async with sessionmaker() as session:
         yield session
 
@@ -62,9 +60,7 @@ async def client(db_engine) -> AsyncIterator[AsyncClient]:
     test_app = FastAPI(lifespan=noop_lifespan)
     test_app.include_router(sessions_router)
 
-    sessionmaker = async_sessionmaker(
-        db_engine, class_=AsyncSession, expire_on_commit=False
-    )
+    sessionmaker = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
 
     async def override_get_db() -> AsyncIterator[AsyncSession]:
         async with sessionmaker() as session:

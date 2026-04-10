@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 from sqlmodel import create_engine
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from cinsights.config import get_settings
+from cinsights.settings import get_settings
 
 
 class SchemaOutdatedError(RuntimeError):

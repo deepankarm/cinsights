@@ -88,9 +88,7 @@ async def list_digests(
 
 
 @router.get("/{digest_id}", response_model=DigestDetail)
-async def get_digest(
-    digest_id: str, db: AsyncSession = Depends(get_db)
-) -> DigestDetail:
+async def get_digest(digest_id: str, db: AsyncSession = Depends(get_db)) -> DigestDetail:
     """Get a digest with all sections and stats."""
     digest = await db.get(Digest, digest_id)
     if not digest:
@@ -107,11 +105,12 @@ async def get_digest(
     if digest.stats_json:
         stats = json.loads(digest.stats_json)
         # Overlay live token counts so stale snapshots don't show wrong values
-        if "tokens_per_session" in stats and stats["tokens_per_session"]:
+        if stats.get("tokens_per_session"):
             sids = [t["session_id"] for t in stats["tokens_per_session"]]
             live_result = await db.exec(
-                select(CodingSession.id, CodingSession.total_tokens)
-                .where(col(CodingSession.id).in_(sids))
+                select(CodingSession.id, CodingSession.total_tokens).where(
+                    col(CodingSession.id).in_(sids)
+                )
             )
             live = {sid: tok for sid, tok in live_result.all()}
             for t in stats["tokens_per_session"]:

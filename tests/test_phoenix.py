@@ -58,15 +58,11 @@ def test_discover_sessions_time_filter():
     with patch("cinsights.sources.phoenix.Client") as mock_cls:
         mock_client = MagicMock()
         mock_cls.return_value = mock_client
-        mock_client.spans.get_spans_dataframe.return_value = _mock_spans_df(
-            {"old-session": 2}
-        )
+        mock_client.spans.get_spans_dataframe.return_value = _mock_spans_df({"old-session": 2})
 
         source = PhoenixSource(base_url="http://localhost:6006")
         # Filter to only sessions after April 2
-        discovered = source.discover_sessions(
-            start_time=datetime(2026, 4, 2, tzinfo=UTC)
-        )
+        discovered = source.discover_sessions(start_time=datetime(2026, 4, 2, tzinfo=UTC))
         assert len(discovered) == 0
 
 
@@ -74,9 +70,7 @@ def test_get_sessions_returns_data():
     with patch("cinsights.sources.phoenix.Client") as mock_cls:
         mock_client = MagicMock()
         mock_cls.return_value = mock_client
-        mock_client.spans.get_spans_dataframe.return_value = _mock_spans_df(
-            {"sess-1": 3}
-        )
+        mock_client.spans.get_spans_dataframe.return_value = _mock_spans_df({"sess-1": 3})
 
         source = PhoenixSource(base_url="http://localhost:6006")
         sessions = source.get_sessions()
