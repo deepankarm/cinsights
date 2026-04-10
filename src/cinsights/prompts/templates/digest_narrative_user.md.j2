@@ -61,8 +61,9 @@
 {% endfor %}
 
 ## Per-Session Summaries
+Sessions are sorted by size (most substantial first). Weight evidence from MAJOR sessions more heavily than MINOR ones.
 {% for s in session_summaries %}
-### Session {{ loop.index }} [{{ s.project }}] ({{ s.start_time[:10] }}, {{ s.duration_min }}min, {{ s.tool_count }} tools, {{ s.total_tokens }} tokens)
+### Session {{ loop.index }} [{{ s.size }}] [{{ s.project }}] ({{ s.start_time[:10] }}, {{ s.duration_min }}min, {{ s.tool_count }} tools, {{ s.total_tokens }} tokens)
 {{ s.summary }}
 {% if s.frictions %}
 **Friction:**

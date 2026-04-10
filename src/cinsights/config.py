@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     # anthropic_api_key / base_url / extra_headers above.
     project_detection_model: str = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
+    # Sessions with fewer tool calls than this are excluded from the
+    # per-session evidence list in digest prompts (they still count toward
+    # aggregate stats like tool distribution and token totals).
+    min_session_tool_count: int = 10
+
     host: str = "127.0.0.1"
     port: int = 8100
     static_dir: str = "ui/build"
