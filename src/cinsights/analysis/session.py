@@ -167,9 +167,26 @@ def _sample_timeline_spans(spans: list[SpanData]) -> tuple[list[SpanData], str |
 def _build_prompts(trace: TraceData, spans: list[SpanData]) -> tuple[str, str]:
     """Build system and user prompts from Jinja templates."""
     root = trace.root_span
-    duration_s = (trace.end_time - trace.start_time).total_seconds()
-    tool_spans = [s for s in spans if s.span_kind == "TOOL"]
-    error_count = sum(1 for s in spans if not s.is_success)
+    wall_duration_s = (trace.end_time - trace.start_time).total_seconds()
+
+    # Active duration = sum of Turn span durations. A session left open for
+    # 46 hours but with 50 minutes of actual turns should report ~50 minutes,
+    # not 46 hours. Fall back to wall-clock if no turns exist.
+    turn_spans = [s for s in spans if s.name.startswith("Turn ")]
+    active_duration_ms = sum(s.duration_ms for s in turn_spans) if turn_spans else 0
+    duration_s = active_duration_ms / 1000 if active_duration_ms > 0 else wall_duration_s
+
+    # Tool spans in Claude Code traces are CHAIN kind with tool-like names,
+    # not span_kind == "TOOL". Match the pipeline's _filter_tool_spans logic.
+    tool_spans = [
+        s for s in spans
+        if s.parent_id is not None
+        and (s.tool_name or "Permission" in s.name or "Notification" in s.name)
+    ]
+    error_count = sum(1 for s in tool_spans if not s.is_success)
+
+    # Total tokens from turn spans, not the root span (which only has one turn's count).
+    total_tokens = sum(s.prompt_tokens + s.completion_tokens for s in turn_spans) if turn_spans else (root.total_tokens if root else 0)
 
     # Tool call counts sorted by frequency. We compute this from the FULL span
     # list — even when the timeline is sampled below, the aggregates stay honest.
@@ -190,7 +207,7 @@ def _build_prompts(trace: TraceData, spans: list[SpanData]) -> tuple[str, str]:
         total_spans=len(spans),
         tool_call_count=len(tool_spans),
         error_count=error_count,
-        total_tokens=root.total_tokens if root else 0,
+        total_tokens=total_tokens,
         start_time=trace.start_time.isoformat(),
         tool_counts=sorted_counts,
         spans=[_SpanView(s) for s in timeline_spans],
