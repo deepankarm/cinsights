@@ -30,7 +30,6 @@
 		return digest?.sections.find((s) => s.section_type === type);
 	}
 
-	// Map "Session 1", "Session 3" etc. to clickable links using session_summaries order
 	let sessionIds = $derived(
 		(stats?.session_summaries ?? []).map((s: { session_id: string }) => s.session_id) as string[]
 	);
@@ -56,8 +55,8 @@
 		return n.toString();
 	}
 
-	function barWidth(value: number, max: number): string {
-		return `${Math.max(2, (value / max) * 100)}%`;
+	function barPct(value: number, max: number): number {
+		return Math.max(3, (value / max) * 100);
 	}
 
 	function maxVal(obj: Record<string, number>): number {
@@ -66,12 +65,23 @@
 
 	function gradeColor(grade: string): string {
 		switch (grade) {
-			case 'A': return '#16a34a';
-			case 'B': return '#65a30d';
+			case 'A': return '#10b981';
+			case 'B': return '#84cc16';
 			case 'C': return '#eab308';
 			case 'D': return '#f97316';
-			case 'F': return '#dc2626';
-			default: return '#64748b';
+			case 'F': return '#ef4444';
+			default: return '#a1a1aa';
+		}
+	}
+
+	function gradeBg(grade: string): string {
+		switch (grade) {
+			case 'A': return '#ecfdf5';
+			case 'B': return '#f7fee7';
+			case 'C': return '#fefce8';
+			case 'D': return '#fff7ed';
+			case 'F': return '#fef2f2';
+			default: return '#f4f4f5';
 		}
 	}
 
@@ -97,323 +107,335 @@
 
 <svelte:head>
 	<title>Insights Report - cinsights</title>
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css" />
 </svelte:head>
 
 {#if loading}
-	<div class="loading">Loading report...</div>
+	<div class="loading">
+		<div class="loading-dot"></div>
+		<div class="loading-dot"></div>
+		<div class="loading-dot"></div>
+	</div>
 {:else if error}
-	<div class="error">{error}</div>
+	<div class="error-state">{error}</div>
 {:else if !digest}
 	<div class="empty-state">
-		<h2>No Report Yet</h2>
+		<div class="empty-icon">
+			<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+		</div>
+		<h2>No report yet</h2>
 		{#if projectFilter}
-			<p>Run <code>cinsights digest --days 30 --project {projectFilter}</code> to generate a report for this project.</p>
+			<p>Run <code>cinsights digest --days 30 --project {projectFilter}</code> to generate one.</p>
 			<a href="/projects" class="back-link">&larr; Back to Projects</a>
 		{:else}
-			<p>Run <code>cinsights digest --days 30</code> to generate your insights report.</p>
+			<p>Run <code>cinsights digest --days 30</code> to generate your first report.</p>
 		{/if}
 	</div>
 {:else}
-	<!-- Header -->
-	<div class="report-header">
+
+	<!-- Hero -->
+	<div class="hero">
 		{#if projectFilter}
 			<a href="/projects" class="back-link">&larr; All Projects</a>
 		{/if}
-		<h1>
-			{#if digest.project_name}
-				<span class="project-label">{digest.project_name}</span>
-			{/if}
-			Insights Report
-		</h1>
-		<p class="subtitle">
-			{new Date(digest.period_start).toLocaleDateString()} - {new Date(digest.period_end).toLocaleDateString()}
-			| {digest.session_count} sessions
-		</p>
+		<div class="hero-top">
+			<div>
+				<h1>
+					{#if digest.project_name}<span class="project-tag">{digest.project_name}</span>{/if}
+					Insights Report
+				</h1>
+				<p class="hero-date">
+					{new Date(digest.period_start).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} &ndash;
+					{new Date(digest.period_end).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+				</p>
+			</div>
+		</div>
+
+		<!-- Stats strip -->
+		{#if stats}
+			<div class="stats-strip">
+				<div class="ss-item">
+					<span class="ss-num ss-indigo">{stats.session_count}</span>
+					<span class="ss-label">sessions</span>
+				</div>
+				<div class="ss-dot"></div>
+				<div class="ss-item">
+					<span class="ss-num ss-violet">{formatTokens(stats.total_tokens)}</span>
+					<span class="ss-label">tokens</span>
+				</div>
+				<div class="ss-dot"></div>
+				<div class="ss-item">
+					<span class="ss-num ss-blue">{stats.total_tool_calls.toLocaleString()}</span>
+					<span class="ss-label">tool calls</span>
+				</div>
+				<div class="ss-dot"></div>
+				<div class="ss-item">
+					<span class="ss-num ss-teal">{stats.total_duration_minutes.toFixed(0)}m</span>
+					<span class="ss-label">duration</span>
+				</div>
+				<div class="ss-dot"></div>
+				<div class="ss-item">
+					<span class="ss-num ss-emerald">{stats.active_days}</span>
+					<span class="ss-label">active days</span>
+				</div>
+				{#if stats.permission_stats.count > 0}
+					<div class="ss-dot"></div>
+					<div class="ss-item">
+						<span class="ss-num ss-amber">{stats.permission_stats.count}</span>
+						<span class="ss-label">permission prompts</span>
+					</div>
+				{/if}
+				{#if !stats.has_claude_md}
+					<div class="ss-dot"></div>
+					<div class="ss-item">
+						<span class="ss-num ss-rose">Missing</span>
+						<span class="ss-label">CLAUDE.md</span>
+					</div>
+				{/if}
+			</div>
+		{/if}
 	</div>
 
-	<!-- At a Glance -->
-	{#if atAGlance}
-		<div class="glance-banner">
-			<h2 class="glance-title">At a Glance</h2>
-			<div class="glance-cards">
-				<div class="glance-card glance-working">
-					<div class="glance-card-header">
-						<div class="glance-card-icon">✓</div>
-						<h3>What's working</h3>
-					</div>
-						<ul class="glance-list">
-							{#each atAGlance.whats_working as item}
-								<li>{@html renderLinkedMarkdown(item)}</li>
-							{/each}
-						</ul>
-				</div>
-				<div class="glance-card glance-hindering">
-					<div class="glance-card-header">
-						<div class="glance-card-icon">!</div>
-						<h3>What's hindering</h3>
-					</div>
-						<ul class="glance-list">
-							{#each atAGlance.whats_hindering as item}
-								<li>{@html renderLinkedMarkdown(item)}</li>
-							{/each}
-						</ul>
-				</div>
-				<div class="glance-card glance-wins">
-					<div class="glance-card-header">
-						<div class="glance-card-icon">→</div>
-						<h3>Quick wins</h3>
-					</div>
-						<ul class="glance-list">
-							{#each atAGlance.quick_wins as item}
-								<li>{@html renderLinkedMarkdown(item)}</li>
-							{/each}
-						</ul>
-				</div>
-				<div class="glance-card glance-ambitious">
-					<div class="glance-card-header">
-						<div class="glance-card-icon">★</div>
-						<h3>Ambitious workflows</h3>
-					</div>
-						<ul class="glance-list">
-							{#each atAGlance.ambitious_workflows as item}
-								<li>{@html renderLinkedMarkdown(item)}</li>
-							{/each}
-						</ul>
-				</div>
-			</div>
+	<!-- Permission callout -->
+	{#if stats && stats.permission_stats.total_wait_seconds > 30}
+		<div class="callout">
+			<strong>{(stats.permission_stats.total_wait_seconds / 60).toFixed(1)}min</strong> spent waiting on permission prompts.
+			Consider pre-approving common tools.
 		</div>
 	{/if}
 
-	<!-- Stats Pills -->
+	<!-- At a Glance -->
+	{#if atAGlance}
+		<section class="sect">
+			<div class="glance-grid">
+				<div class="glance-card gc-green">
+					<div class="gc-icon">
+						<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+					</div>
+					<h3>What's working</h3>
+					<ul>
+						{#each atAGlance.whats_working as item}
+							<li>{@html renderLinkedMarkdown(item)}</li>
+						{/each}
+					</ul>
+				</div>
+				<div class="glance-card gc-amber">
+					<div class="gc-icon">
+						<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+					</div>
+					<h3>What's hindering</h3>
+					<ul>
+						{#each atAGlance.whats_hindering as item}
+							<li>{@html renderLinkedMarkdown(item)}</li>
+						{/each}
+					</ul>
+				</div>
+				<div class="glance-card gc-blue">
+					<div class="gc-icon">
+						<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+					</div>
+					<h3>Quick wins</h3>
+					<ul>
+						{#each atAGlance.quick_wins as item}
+							<li>{@html renderLinkedMarkdown(item)}</li>
+						{/each}
+					</ul>
+				</div>
+				<div class="glance-card gc-violet">
+					<div class="gc-icon">
+						<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+					</div>
+					<h3>Ambitious ideas</h3>
+					<ul>
+						{#each atAGlance.ambitious_workflows as item}
+							<li>{@html renderLinkedMarkdown(item)}</li>
+						{/each}
+					</ul>
+				</div>
+			</div>
+		</section>
+	{/if}
+
+	<!-- Charts — bento style -->
 	{#if stats}
-		<div class="stats-pills">
-			<div class="pill"><span class="pill-value">{stats.session_count}</span><span class="pill-label">Sessions</span></div>
-			<div class="pill"><span class="pill-value">{formatTokens(stats.total_tokens)}</span><span class="pill-label">Tokens</span></div>
-			<div class="pill"><span class="pill-value">{stats.total_tool_calls}</span><span class="pill-label">Tool Calls</span></div>
-			<div class="pill"><span class="pill-value">{stats.total_duration_minutes.toFixed(0)}m</span><span class="pill-label">Duration</span></div>
-			<div class="pill"><span class="pill-value">{stats.active_days}</span><span class="pill-label">Active Days</span></div>
-			<div class="pill"><span class="pill-value">{stats.plan_mode_stats.entries}</span><span class="pill-label">Plan Mode</span></div>
-			{#if stats.permission_stats.count > 0}
-				<div class="pill pill-warn"><span class="pill-value">{stats.permission_stats.count}</span><span class="pill-label">Permission Prompts</span></div>
-			{/if}
-			{#if !stats.has_claude_md}
-				<div class="pill pill-alert"><span class="pill-value">Missing</span><span class="pill-label">CLAUDE.md</span></div>
-			{/if}
-		</div>
-
-		<!-- Permission wait time callout -->
-		{#if stats.permission_stats.total_wait_seconds > 30}
-			<div class="callout callout-warn">
-				You spent <strong>{(stats.permission_stats.total_wait_seconds / 60).toFixed(1)} minutes</strong> waiting on permission prompts
-				({stats.permission_stats.count} prompts, avg {stats.permission_stats.avg_wait_seconds.toFixed(0)}s, max {stats.permission_stats.max_wait_seconds.toFixed(0)}s).
-				Consider pre-approving common tools in your settings.
-			</div>
-		{/if}
-
-		<!-- Charts Row 1: Tools + Errors -->
-		<div class="charts-row">
-			<div class="chart-card">
-				<div class="chart-title">Tool Distribution</div>
-				{#each Object.entries(stats.tool_distribution).slice(0, 8) as [name, count]}
-					<div class="bar-row">
-						<span class="bar-label">{name}</span>
-						<div class="bar-track"><div class="bar-fill bar-blue" style="width:{barWidth(count, maxVal(stats.tool_distribution))}"></div></div>
-						<span class="bar-value">{count}</span>
+		<section class="sect">
+			<h2 class="sect-title">Activity</h2>
+			<div class="chart-bento">
+				<div class="chart-box chart-wide">
+					<h3>Tools</h3>
+					<div class="hbars">
+						{#each Object.entries(stats.tool_distribution).slice(0, 8) as [name, count]}
+							{@const pct = barPct(count, maxVal(stats.tool_distribution))}
+							<div class="hbar">
+								<span class="hbar-name">{name}</span>
+								<div class="hbar-track">
+									<div class="hbar-fill hbar-c1" style="width:{pct}%"></div>
+								</div>
+								<span class="hbar-val">{count}</span>
+							</div>
+						{/each}
 					</div>
-				{/each}
-			</div>
-			<div class="chart-card">
-				<div class="chart-title">Languages</div>
-				{#each Object.entries(stats.language_distribution).slice(0, 8) as [lang, count]}
-					<div class="bar-row">
-						<span class="bar-label">{lang}</span>
-						<div class="bar-track"><div class="bar-fill bar-green" style="width:{barWidth(count, maxVal(stats.language_distribution))}"></div></div>
-						<span class="bar-value">{count}</span>
+				</div>
+				<div class="chart-box">
+					<h3>Languages</h3>
+					<div class="hbars">
+						{#each Object.entries(stats.language_distribution).slice(0, 6) as [lang, count]}
+							{@const pct = barPct(count, maxVal(stats.language_distribution))}
+							<div class="hbar">
+								<span class="hbar-name">{lang}</span>
+								<div class="hbar-track">
+									<div class="hbar-fill hbar-c2" style="width:{pct}%"></div>
+								</div>
+								<span class="hbar-val">{count}</span>
+							</div>
+						{/each}
+						{#if Object.keys(stats.language_distribution).length === 0}
+							<span class="chart-empty">No data</span>
+						{/if}
 					</div>
-				{/each}
-				{#if Object.keys(stats.language_distribution).length === 0}
-					<div class="bar-empty">No language data</div>
-				{/if}
-			</div>
-		</div>
-
-		<!-- Charts Row 2: Time of Day + Errors -->
-		<div class="charts-row">
-			<div class="chart-card">
-				<div class="chart-title">Time of Day</div>
-				{#each Object.entries(stats.time_of_day) as [hour, count]}
-					<div class="bar-row">
-						<span class="bar-label">{hour}:00</span>
-						<div class="bar-track"><div class="bar-fill bar-purple" style="width:{barWidth(count, maxVal(stats.time_of_day))}"></div></div>
-						<span class="bar-value">{count}</span>
+				</div>
+				<div class="chart-box">
+					<h3>Coding hours</h3>
+					<div class="hour-bars">
+						{#each Object.entries(stats.time_of_day) as [hour, count]}
+							{@const pct = barPct(count, maxVal(stats.time_of_day))}
+							<div class="hour-col" title="{hour}:00 — {count} sessions">
+								<div class="hour-fill" style="height:{pct}%"></div>
+								<span class="hour-label">{hour}</span>
+							</div>
+						{/each}
 					</div>
-				{/each}
-			</div>
-			<div class="chart-card">
-				<div class="chart-title">Error Types</div>
-				{#each Object.entries(stats.error_types).slice(0, 6) as [type, count]}
-					<div class="bar-row">
-						<span class="bar-label">{type}</span>
-						<div class="bar-track"><div class="bar-fill bar-red" style="width:{barWidth(count, maxVal(stats.error_types))}"></div></div>
-						<span class="bar-value">{count}</span>
+				</div>
+				<div class="chart-box">
+					<h3>Errors</h3>
+					<div class="hbars">
+						{#each Object.entries(stats.error_types).slice(0, 5) as [type, count]}
+							{@const pct = barPct(count, maxVal(stats.error_types))}
+							<div class="hbar">
+								<span class="hbar-name">{type}</span>
+								<div class="hbar-track">
+									<div class="hbar-fill hbar-c4" style="width:{pct}%"></div>
+								</div>
+								<span class="hbar-val">{count}</span>
+							</div>
+						{/each}
+						{#if Object.keys(stats.error_types).length === 0}
+							<span class="chart-empty">No errors</span>
+						{/if}
 					</div>
-				{/each}
-				{#if Object.keys(stats.error_types).length === 0}
-					<div class="bar-empty">No errors recorded</div>
-				{/if}
-			</div>
-		</div>
-
-		<!-- Charts Row 3: Tokens per Session + Interaction Stats -->
-		<div class="charts-row">
-			<div class="chart-card">
-				<div class="chart-title">Tokens per Session</div>
-				{#each stats.tokens_per_session as t, i}
-					{@const sessionNum = sessionIds.indexOf(t.session_id) + 1}
-					<a href="/sessions/{t.session_id}" class="bar-row bar-link">
-						<span class="bar-label">{sessionNum > 0 ? `Session ${sessionNum}` : t.session_id.slice(0, 8)}</span>
-						<div class="bar-track"><div class="bar-fill bar-blue" style="width:{barWidth(t.tokens, Math.max(...stats.tokens_per_session.map(x => x.tokens), 1))}"></div></div>
-						<span class="bar-value">{formatTokens(t.tokens)}</span>
-					</a>
-				{/each}
-				<div class="chart-hint">Click a session to see context growth per turn</div>
-			</div>
-			<div class="chart-card">
-				<div class="chart-title">Interaction Stats</div>
-				<div class="interaction-stats">
-					<div class="istat">
-						<span class="istat-label">Permission Prompts</span>
-						<span class="istat-value">{stats.permission_stats.count}</span>
-					</div>
-					{#if stats.permission_stats.count > 0}
-						<div class="istat">
-							<span class="istat-label">Total Wait Time</span>
-							<span class="istat-value">{(stats.permission_stats.total_wait_seconds / 60).toFixed(1)}m</span>
-						</div>
-						<div class="istat">
-							<span class="istat-label">Avg Wait</span>
-							<span class="istat-value">{stats.permission_stats.avg_wait_seconds.toFixed(0)}s</span>
-						</div>
-						<div class="istat">
-							<span class="istat-label">Max Wait</span>
-							<span class="istat-value">{stats.permission_stats.max_wait_seconds.toFixed(0)}s</span>
-						</div>
-					{/if}
-					<div class="istat-divider"></div>
-					<div class="istat">
-						<span class="istat-label">Plan Mode Entries</span>
-						<span class="istat-value">{stats.plan_mode_stats.entries}</span>
-					</div>
-					{#if stats.plan_mode_stats.entries > 0}
-						<div class="istat">
-							<span class="istat-label">Planning Duration</span>
-							<span class="istat-value">{(stats.plan_mode_stats.total_duration_seconds / 60).toFixed(1)}m</span>
-						</div>
-						<div class="istat">
-							<span class="istat-label">Plan Agents</span>
-							<span class="istat-value">{stats.plan_mode_stats.plan_agent_count}</span>
-						</div>
-					{/if}
-					<div class="istat-divider"></div>
-					<div class="istat">
-						<span class="istat-label">CLAUDE.md</span>
-						<span class="istat-value" style="color: {stats.has_claude_md ? '#16a34a' : '#dc2626'}">{stats.has_claude_md ? 'Present' : 'Missing'}</span>
+				</div>
+				<div class="chart-box chart-wide">
+					<h3>Tokens by session</h3>
+					<div class="hbars">
+						{#each stats.tokens_per_session as t}
+							{@const sessionNum = sessionIds.indexOf(t.session_id) + 1}
+							<a href="/sessions/{t.session_id}" class="hbar hbar-link">
+								<span class="hbar-name">{sessionNum > 0 ? `Session ${sessionNum}` : t.session_id.slice(0, 8)}</span>
+								<div class="hbar-track">
+									<div class="hbar-fill hbar-c1" style="width:{barPct(t.tokens, Math.max(...stats.tokens_per_session.map(x => x.tokens), 1))}%"></div>
+								</div>
+								<span class="hbar-val">{formatTokens(t.tokens)}</span>
+							</a>
+						{/each}
 					</div>
 				</div>
 			</div>
-		</div>
+		</section>
 
-		<!-- Session Health Grid -->
+		<!-- Session Health -->
 		{@const healthLimit = 20}
 		{@const healthItems = showAllSessions ? stats.session_health : stats.session_health.slice(0, healthLimit)}
-		<div class="section">
-			<h2>Session Health ({stats.session_health.length})</h2>
+		<section class="sect">
+			<h2 class="sect-title">Session health <span class="count-badge">{stats.session_health.length}</span></h2>
 			<div class="health-grid">
 				{#each healthItems as h}
 					{@const sessionNum = sessionIds.indexOf(h.session_id) + 1}
-					<a href="/sessions/{h.session_id}" class="health-card" style="border-left: 3px solid {gradeColor(h.grade)}">
-						<div class="health-top">
-							<span class="health-grade" style="color:{gradeColor(h.grade)}">{h.grade}</span>
-							{#if sessionNum > 0}
-								<span class="health-session-num">Session {sessionNum}</span>
-							{/if}
+					<a href="/sessions/{h.session_id}" class="health-pill" style="background:{gradeBg(h.grade)}">
+						<span class="health-grade" style="color:{gradeColor(h.grade)}">{h.grade}</span>
+						<div class="health-info">
+							{#if sessionNum > 0}<span class="health-name">Session {sessionNum}</span>{/if}
+							<span class="health-meta">{h.duration_minutes}m &middot; {h.tool_count} tools &middot; {formatTokens(h.total_tokens ?? 0)}</span>
 						</div>
-						<span class="health-date">{new Date(h.start_time).toLocaleDateString()}</span>
-						<span class="health-meta">{h.duration_minutes}m | {h.tool_count} tools | {formatTokens(h.total_tokens ?? 0)}</span>
 					</a>
 				{/each}
 			</div>
 			{#if stats.session_health.length > healthLimit}
-				<button class="show-more-btn" onclick={() => showAllSessions = !showAllSessions}>
-					{showAllSessions ? 'Show fewer' : `Show all ${stats.session_health.length} sessions`}
+				<button class="show-more" onclick={() => showAllSessions = !showAllSessions}>
+					{showAllSessions ? 'Show fewer' : `Show all ${stats.session_health.length}`}
 				</button>
 			{/if}
-		</div>
+		</section>
 	{/if}
 
-	<!-- Work Areas -->
-	{#if workAreas && workAreas.length > 0}
-		<div class="section">
-			<h2>What You Work On</h2>
-			<div class="work-areas">
-				{#each workAreas as area}
-					<div class="work-area-card">
-						<div class="work-area-header">
-							<span class="work-area-name">{area.name}</span>
-							<span class="work-area-count">~{area.session_count} sessions</span>
+	<!-- Work Areas + Persona side by side -->
+	{#if (workAreas && workAreas.length > 0) || persona}
+		<section class="sect">
+			<div class="duo-grid">
+				{#if workAreas && workAreas.length > 0}
+					<div>
+						<h2 class="sect-title">Work areas</h2>
+						<div class="stack-sm">
+							{#each workAreas as area}
+								<div class="content-card">
+									<div class="content-card-head">
+										<strong>{area.name}</strong>
+										<span class="pill-sm">{area.session_count} sessions</span>
+									</div>
+									<p>{@html renderLinkedMarkdown(area.description)}</p>
+								</div>
+							{/each}
 						</div>
-						<p class="work-area-desc">{@html renderLinkedMarkdown(area.description)}</p>
 					</div>
-				{/each}
+				{/if}
+				{#if persona}
+					<div>
+						<h2 class="sect-title">How you use Claude Code</h2>
+						<div class="persona markdown-body">
+							{@html renderLinkedMarkdown(persona.content)}
+						</div>
+					</div>
+				{/if}
 			</div>
-		</div>
+		</section>
 	{/if}
 
-	<!-- Developer Persona -->
-	{#if persona}
-		<div class="section">
-			<h2>How You Use Claude Code</h2>
-			<div class="persona-card markdown-body">
-				{@html renderLinkedMarkdown(persona.content)}
-			</div>
-		</div>
-	{/if}
-
-	<!-- Impressive Wins -->
+	<!-- Wins -->
 	{#if wins && wins.length > 0}
-		<div class="section">
-			<h2>Impressive Things You Did</h2>
-			<div class="cards-list">
+		<section class="sect">
+			<h2 class="sect-title">Wins</h2>
+			<div class="stack">
 				{#each wins as win}
-					<div class="card card-green">
+					<div class="accent-card accent-green">
 						<h3>{win.title}</h3>
 						<p>{@html renderLinkedMarkdown(win.description)}</p>
-						<div class="card-evidence">{@html renderLinkedMarkdown(win.evidence)}</div>
+						<div class="accent-card-sub">{@html renderLinkedMarkdown(win.evidence)}</div>
 					</div>
 				{/each}
 			</div>
-		</div>
+		</section>
 	{/if}
 
-	<!-- Friction Analysis -->
+	<!-- Friction -->
 	{#if frictions && frictions.length > 0}
-		<div class="section">
-			<h2>Where Things Go Wrong</h2>
-			<div class="cards-list">
+		<section class="sect">
+			<h2 class="sect-title">Friction</h2>
+			<div class="stack">
 				{#each frictions as f}
-					<div class="card card-red">
-						<div class="card-header">
+					<div class="accent-card accent-red">
+						<div class="accent-card-head">
 							<h3>{f.category}</h3>
 							{#if f.severity === 'critical'}
-								<span class="severity-badge severity-critical">!!</span>
+								<span class="tag tag-red">Critical</span>
 							{:else if f.severity === 'warning'}
-								<span class="severity-badge severity-warning">!</span>
+								<span class="tag tag-amber">Warning</span>
 							{/if}
 						</div>
 						<p>{@html renderLinkedMarkdown(f.description)}</p>
 						{#if f.examples && f.examples.length > 0}
-							<ul class="friction-examples">
+							<ul class="examples">
 								{#each f.examples as ex}
 									<li>{@html renderLinkedMarkdown(ex)}</li>
 								{/each}
@@ -422,273 +444,502 @@
 					</div>
 				{/each}
 			</div>
-		</div>
+		</section>
 	{/if}
 
 	<!-- CLAUDE.md Suggestions -->
 	{#if claudeMd && claudeMd.length > 0}
-		<div class="section">
-			<h2>Suggested CLAUDE.md Additions</h2>
-			<p class="section-intro">Copy these into Claude Code to add them to your CLAUDE.md.</p>
-			<div class="claude-md-list">
-				{#each claudeMd as suggestion, i}
-					<div class="claude-md-item">
-						<pre class="claude-md-rule">{suggestion.rule}</pre>
-						<div class="claude-md-actions">
-							<button class="copy-btn" onclick={(e) => copyText(suggestion.rule, e.currentTarget as HTMLButtonElement)}>Copy</button>
+		<section class="sect">
+			<h2 class="sect-title">CLAUDE.md suggestions</h2>
+			<p class="sect-sub">Copy these rules into your CLAUDE.md.</p>
+			<div class="stack">
+				{#each claudeMd as suggestion}
+					<div class="rule-card">
+						<div class="rule-top">
+							<pre class="rule-code">{suggestion.rule}</pre>
+							<button class="btn-copy" onclick={(e) => copyText(suggestion.rule, e.currentTarget as HTMLButtonElement)}>Copy</button>
 						</div>
-						<div class="claude-md-why">{@html renderLinkedMarkdown(suggestion.why)}</div>
+						<p class="rule-why">{@html renderLinkedMarkdown(suggestion.why)}</p>
 					</div>
 				{/each}
 			</div>
-		</div>
+		</section>
 	{/if}
 
-	<!-- Feature Recommendations -->
+	<!-- Features -->
 	{#if features && features.length > 0}
-		<div class="section">
-			<h2>CC Features to Try</h2>
-			<div class="cards-list">
+		<section class="sect">
+			<h2 class="sect-title">Features to try</h2>
+			<div class="stack">
 				{#each features as feat, i}
-					<div class="card card-blue" class:card-collapsed={!expandedCards[`feat-${i}`]}>
-						<button class="card-top" onclick={() => expandedCards[`feat-${i}`] = !expandedCards[`feat-${i}`]}>
+					<div class="expand-card" class:expanded={expandedCards[`feat-${i}`]}>
+						<button class="expand-head" onclick={() => expandedCards[`feat-${i}`] = !expandedCards[`feat-${i}`]}>
 							<div>
-								<div class="feature-name">{feat.feature}</div>
+								<span class="expand-tag">{feat.feature}</span>
 								<h3>{feat.title}</h3>
 							</div>
-							<span class="card-toggle">{expandedCards[`feat-${i}`] ? '−' : '+'}</span>
+							<span class="expand-chevron">{expandedCards[`feat-${i}`] ? '−' : '+'}</span>
 						</button>
 						{#if expandedCards[`feat-${i}`]}
-							<p><strong>Why for you:</strong> {@html renderLinkedMarkdown(feat.why_for_you)}</p>
-							{#if feat.setup_code}
-								<div class="code-block-wrap">
-									<pre class="code-block">{feat.setup_code}</pre>
-									<button class="copy-btn" onclick={(e) => copyText(feat.setup_code ?? '', e.currentTarget as HTMLButtonElement)}>Copy</button>
-								</div>
-							{/if}
+							<div class="expand-body">
+								<p>{@html renderLinkedMarkdown(feat.why_for_you)}</p>
+								{#if feat.setup_code}
+									<div class="code-wrap">
+										<pre>{feat.setup_code}</pre>
+										<button class="btn-copy" onclick={(e) => copyText(feat.setup_code ?? '', e.currentTarget as HTMLButtonElement)}>Copy</button>
+									</div>
+								{/if}
+							</div>
 						{/if}
 					</div>
 				{/each}
 			</div>
-		</div>
+		</section>
 	{/if}
 
-	<!-- Workflow Patterns -->
+	<!-- Patterns -->
 	{#if patterns && patterns.length > 0}
-		<div class="section">
-			<h2>New Ways to Use Claude Code</h2>
-			<div class="cards-list">
+		<section class="sect">
+			<h2 class="sect-title">Workflow patterns</h2>
+			<div class="stack">
 				{#each patterns as p, i}
-					<div class="card card-cyan" class:card-collapsed={!expandedCards[`pat-${i}`]}>
-						<button class="card-top" onclick={() => expandedCards[`pat-${i}`] = !expandedCards[`pat-${i}`]}>
+					<div class="expand-card" class:expanded={expandedCards[`pat-${i}`]}>
+						<button class="expand-head" onclick={() => expandedCards[`pat-${i}`] = !expandedCards[`pat-${i}`]}>
 							<div><h3>{p.name}</h3></div>
-							<span class="card-toggle">{expandedCards[`pat-${i}`] ? '−' : '+'}</span>
+							<span class="expand-chevron">{expandedCards[`pat-${i}`] ? '−' : '+'}</span>
 						</button>
 						{#if expandedCards[`pat-${i}`]}
-							<p>{@html renderLinkedMarkdown(p.description)}</p>
-							<p class="card-rationale">{@html renderLinkedMarkdown(p.rationale)}</p>
-							<div class="code-block-wrap">
-								<div class="prompt-label">Paste into Claude Code:</div>
-								<pre class="code-block">{p.starter_prompt}</pre>
-								<button class="copy-btn" onclick={(e) => copyText(p.starter_prompt, e.currentTarget as HTMLButtonElement)}>Copy</button>
+							<div class="expand-body">
+								<p>{@html renderLinkedMarkdown(p.description)}</p>
+								<p class="muted">{@html renderLinkedMarkdown(p.rationale)}</p>
+								<div class="code-wrap">
+									<span class="code-label">Starter prompt</span>
+									<pre>{p.starter_prompt}</pre>
+									<button class="btn-copy" onclick={(e) => copyText(p.starter_prompt, e.currentTarget as HTMLButtonElement)}>Copy</button>
+								</div>
 							</div>
 						{/if}
 					</div>
 				{/each}
 			</div>
-		</div>
+		</section>
 	{/if}
 
-	<!-- Ambitious Workflows -->
+	<!-- Ambitious -->
 	{#if ambitious && ambitious.length > 0}
-		<div class="section">
-			<h2>On the Horizon</h2>
-			<div class="cards-list">
+		<section class="sect">
+			<h2 class="sect-title">On the horizon</h2>
+			<div class="stack">
 				{#each ambitious as a, i}
-					<div class="card card-purple" class:card-collapsed={!expandedCards[`amb-${i}`]}>
-						<button class="card-top" onclick={() => expandedCards[`amb-${i}`] = !expandedCards[`amb-${i}`]}>
+					<div class="expand-card" class:expanded={expandedCards[`amb-${i}`]}>
+						<button class="expand-head" onclick={() => expandedCards[`amb-${i}`] = !expandedCards[`amb-${i}`]}>
 							<div><h3>{a.name}</h3></div>
-							<span class="card-toggle">{expandedCards[`amb-${i}`] ? '−' : '+'}</span>
+							<span class="expand-chevron">{expandedCards[`amb-${i}`] ? '−' : '+'}</span>
 						</button>
 						{#if expandedCards[`amb-${i}`]}
-							<p>{@html renderLinkedMarkdown(a.description)}</p>
-							<p class="card-rationale">{@html renderLinkedMarkdown(a.rationale)}</p>
-							<div class="code-block-wrap">
-								<div class="prompt-label">Paste into Claude Code:</div>
-								<pre class="code-block">{a.starter_prompt}</pre>
-								<button class="copy-btn" onclick={(e) => copyText(a.starter_prompt, e.currentTarget as HTMLButtonElement)}>Copy</button>
+							<div class="expand-body">
+								<p>{@html renderLinkedMarkdown(a.description)}</p>
+								<p class="muted">{@html renderLinkedMarkdown(a.rationale)}</p>
+								<div class="code-wrap">
+									<span class="code-label">Starter prompt</span>
+									<pre>{a.starter_prompt}</pre>
+									<button class="btn-copy" onclick={(e) => copyText(a.starter_prompt, e.currentTarget as HTMLButtonElement)}>Copy</button>
+								</div>
 							</div>
 						{/if}
 					</div>
 				{/each}
 			</div>
-		</div>
+		</section>
 	{/if}
 
-	<!-- Fun Ending -->
-
-	<!-- Footer -->
-	<div class="report-footer">
-		<p>
-			Generated {new Date(digest.created_at).toLocaleString()}
-			| LLM: {(digest.analysis_prompt_tokens + digest.analysis_completion_tokens).toLocaleString()} tokens
-		</p>
-	</div>
+	<footer class="report-footer">
+		Generated {new Date(digest.created_at).toLocaleString()} &middot;
+		{(digest.analysis_prompt_tokens + digest.analysis_completion_tokens).toLocaleString()} tokens
+	</footer>
 {/if}
 
 <style>
-	.loading, .error { text-align: center; padding: 48px; color: #64748b; }
-	.error { color: #dc2626; }
-	.empty-state { text-align: center; padding: 64px; color: #64748b; }
-	.empty-state h2 { color: #0f172a; margin-bottom: 12px; }
-	.empty-state code { background: #f1f5f9; padding: 2px 6px; border-radius: 3px; }
+	/* ── States ── */
+	.loading { display: flex; justify-content: center; gap: 6px; padding: 80px; }
+	.loading-dot { width: 8px; height: 8px; border-radius: 50%; background: #a1a1aa; animation: pulse 1.2s ease-in-out infinite; }
+	.loading-dot:nth-child(2) { animation-delay: 0.15s; }
+	.loading-dot:nth-child(3) { animation-delay: 0.3s; }
+	@keyframes pulse { 0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
 
-	.report-header { margin-bottom: 24px; }
-	.report-header h1 { font-size: 28px; font-weight: 700; color: #0f172a; }
-	.project-label { font-family: monospace; color: #2563eb; margin-right: 8px; }
-	.subtitle { color: #64748b; font-size: 14px; }
-	.back-link { color: #64748b; text-decoration: none; font-size: 13px; display: inline-block; margin-bottom: 8px; }
-	.back-link:hover { color: #2563eb; }
+	.error-state { text-align: center; padding: 80px; color: #ef4444; }
+	.empty-state { text-align: center; padding: 100px 24px; }
+	.empty-icon { margin-bottom: 20px; }
+	.empty-state h2 { font-size: 20px; font-weight: 600; color: #232326; margin-bottom: 8px; }
+	.empty-state p { color: #70707a; font-size: 14px; }
+	.empty-state code { background: #f0f0f2; padding: 2px 8px; border-radius: 5px; font-size: 13px; }
 
-	/* At a Glance */
-	.glance-banner { margin-bottom: 24px; }
-	.glance-title { font-size: 20px; font-weight: 700; color: #0f172a; margin-bottom: 16px; }
-	.glance-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-	.glance-card { border-radius: 10px; padding: 18px; display: flex; flex-direction: column; gap: 10px; }
-	.glance-card-header { display: flex; align-items: center; gap: 8px; }
-	.glance-card-icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; flex-shrink: 0; }
-	.glance-card-header h3 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; margin: 0; }
-	.glance-list { font-size: 14px; line-height: 1.6; margin: 0; padding-left: 18px; }
-	.glance-list li { margin-bottom: 6px; }
-	.glance-list li:last-child { margin-bottom: 0; }
-	.glance-list li :global(p) { display: inline; }
-	.glance-working { background: #f0fdf4; border: 1px solid #bbf7d0; }
-	.glance-working .glance-card-icon { background: #dcfce7; color: #16a34a; }
-	.glance-working h3 { color: #15803d; }
-	.glance-hindering { background: #fef2f2; border: 1px solid #fecaca; }
-	.glance-hindering .glance-card-icon { background: #fee2e2; color: #dc2626; }
-	.glance-hindering h3 { color: #991b1b; }
-	.glance-wins { background: #eff6ff; border: 1px solid #bfdbfe; }
-	.glance-wins .glance-card-icon { background: #dbeafe; color: #2563eb; }
-	.glance-wins h3 { color: #1e40af; }
-	.glance-ambitious { background: #faf5ff; border: 1px solid #e9d5ff; }
-	.glance-ambitious .glance-card-icon { background: #f3e8ff; color: #7c3aed; }
-	.glance-ambitious h3 { color: #5b21b6; }
+	.back-link { color: #70707a; text-decoration: none; font-size: 13px; display: inline-block; margin-bottom: 8px; }
+	.back-link:hover { color: #232326; }
 
-	/* Stats Pills */
-	.stats-pills { display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }
-	.pill { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 20px; text-align: center; flex: 1; min-width: 100px; }
-	.pill-value { display: block; font-size: 24px; font-weight: 700; color: #0f172a; }
-	.pill-label { font-size: 11px; color: #64748b; text-transform: uppercase; }
+	/* ── Hero ── */
+	.hero { margin-bottom: 36px; }
+	.hero-top { margin-bottom: 24px; }
+	.hero h1 {
+		font-size: 30px;
+		font-weight: 800;
+		color: #232326;
+		letter-spacing: -0.8px;
+		line-height: 1.2;
+	}
+	.project-tag {
+		display: inline-block;
+		font-size: 13px;
+		font-weight: 600;
+		color: white;
+		background: linear-gradient(135deg, #7c3aed, #6366f1);
+		padding: 3px 12px;
+		border-radius: 6px;
+		vertical-align: middle;
+		margin-right: 8px;
+		letter-spacing: 0;
+	}
+	.hero-date { color: #a1a1aa; font-size: 14px; margin-top: 6px; }
 
-	/* Charts */
-	.charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
-	.chart-card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; }
-	.chart-title { font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; margin-bottom: 12px; }
-	.bar-row { display: flex; align-items: center; margin-bottom: 5px; }
-	.bar-label { width: 90px; font-size: 11px; color: #475569; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.bar-track { flex: 1; height: 6px; background: #f1f5f9; border-radius: 3px; margin: 0 8px; }
-	.bar-fill { height: 100%; border-radius: 3px; }
-	.bar-blue { background: #2563eb; }
-	.bar-green { background: #10b981; }
-	.bar-purple { background: #8b5cf6; }
-	.bar-red { background: #dc2626; }
-	.bar-value { width: 32px; font-size: 11px; font-weight: 500; color: #64748b; text-align: right; }
-	.bar-empty { font-size: 12px; color: #94a3b8; }
-	.bar-link { text-decoration: none; color: inherit; }
-	.bar-link:hover { background: #f8fafc; border-radius: 3px; }
-	.chart-hint { font-size: 11px; color: #94a3b8; margin-top: 8px; }
+	/* ── Stats strip ── */
+	.stats-strip {
+		display: flex;
+		align-items: center;
+		gap: 20px;
+		background: white;
+		border-radius: 14px;
+		padding: 16px 28px;
+		flex-wrap: wrap;
+	}
+	.ss-item { display: flex; align-items: baseline; gap: 6px; }
+	.ss-num {
+		font-size: 20px;
+		font-weight: 800;
+		letter-spacing: -0.5px;
+		font-variant-numeric: tabular-nums;
+	}
+	.ss-label { font-size: 12px; color: #a1a1aa; font-weight: 500; }
+	.ss-dot { width: 3px; height: 3px; border-radius: 50%; background: #d4d4d8; flex-shrink: 0; }
+	.ss-indigo { color: #6366f1; }
+	.ss-violet { color: #8b5cf6; }
+	.ss-blue { color: #3b82f6; }
+	.ss-teal { color: #0d9488; }
+	.ss-emerald { color: #10b981; }
+	.ss-amber { color: #d97706; }
+	.ss-rose { color: #ef4444; font-size: 14px; }
 
-	/* Health Grid */
-	.health-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
-	.health-card { background: white; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; text-decoration: none; color: inherit; }
-	.health-card:hover { background: #f8fafc; }
-	.health-top { display: flex; justify-content: space-between; align-items: center; }
-	.health-grade { font-size: 18px; font-weight: 700; }
-	.health-session-num { font-size: 11px; font-weight: 600; color: #2563eb; }
-	.health-date { font-size: 12px; color: #64748b; }
-	.health-meta { font-size: 11px; color: #94a3b8; }
-	.show-more-btn { display: block; margin: 12px auto 0; background: none; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 16px; font-size: 13px; color: #64748b; cursor: pointer; }
-	.show-more-btn:hover { background: #f8fafc; color: #334155; }
+	/* ── Callout ── */
+	.callout {
+		background: linear-gradient(135deg, #fffbeb, #fef3c7);
+		border-radius: 12px;
+		padding: 14px 20px;
+		font-size: 14px;
+		color: #92400e;
+		margin-bottom: 40px;
+	}
 
-	/* Sections */
-	.section { margin-bottom: 32px; }
-	.section h2 { font-size: 20px; font-weight: 600; color: #0f172a; margin-bottom: 16px; }
-	.section-intro { font-size: 13px; color: #64748b; margin-bottom: 12px; }
+	/* ── Sections ── */
+	.sect { margin-bottom: 48px; }
+	.sect-title { font-size: 20px; font-weight: 700; color: #232326; margin-bottom: 18px; letter-spacing: -0.3px; }
+	.sect-sub { font-size: 14px; color: #70707a; margin: -10px 0 16px; }
 
-	/* Work Areas */
-	.work-areas { display: flex; flex-direction: column; gap: 10px; }
-	.work-area-card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; }
-	.work-area-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-	.work-area-name { font-weight: 600; font-size: 15px; color: #0f172a; }
-	.work-area-count { font-size: 12px; color: #64748b; background: #f1f5f9; padding: 2px 8px; border-radius: 4px; }
-	.work-area-desc { font-size: 14px; color: #475569; line-height: 1.5; }
+	.count-badge {
+		font-size: 13px;
+		font-weight: 600;
+		color: #6366f1;
+		background: #eef2ff;
+		padding: 2px 10px;
+		border-radius: 100px;
+		vertical-align: middle;
+		margin-left: 4px;
+	}
 
-	/* Persona */
-	.persona-card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; font-size: 14px; color: #475569; line-height: 1.7; }
-	.persona-card :global(p) { margin-bottom: 12px; }
-	.persona-card :global(strong) { color: #0f172a; }
+	.stack { display: flex; flex-direction: column; gap: 12px; }
+	.stack-sm { display: flex; flex-direction: column; gap: 10px; }
 
-	/* Cards */
-	.cards-list { display: flex; flex-direction: column; gap: 12px; }
-	.card { border: 1px solid; border-radius: 8px; padding: 16px; }
-	.card h3 { font-size: 15px; font-weight: 600; color: #0f172a; margin-bottom: 6px; }
-	.card p { font-size: 14px; color: #475569; line-height: 1.5; margin-bottom: 8px; }
-	.card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-	.card-evidence { font-size: 12px; color: #64748b; }
-	.card-rationale { font-size: 13px; color: #64748b; }
-	.card-green { background: #f0fdf4; border-color: #86efac; }
-	.card-red { background: #fef2f2; border-color: #fca5a5; }
-	.card-blue { background: #eff6ff; border-color: #93c5fd; }
-	.card-cyan { background: #ecfeff; border-color: #67e8f9; }
-	.card-purple { background: linear-gradient(135deg, #faf5ff, #f5f3ff); border-color: #c4b5fd; }
+	/* ── At a Glance ── */
+	.glance-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 14px;
+	}
+	.glance-card {
+		border-radius: 16px;
+		padding: 22px 24px;
+	}
+	.gc-icon {
+		width: 32px;
+		height: 32px;
+		border-radius: 10px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		margin-bottom: 12px;
+	}
+	.glance-card h3 {
+		font-size: 13px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		margin-bottom: 10px;
+	}
+	.glance-card ul { padding-left: 18px; font-size: 14px; line-height: 1.7; }
+	.glance-card ul li { margin-bottom: 4px; }
+	.glance-card ul li :global(p) { display: inline; }
 
-	.card-top { display: flex; justify-content: space-between; align-items: flex-start; cursor: pointer; background: none; border: none; padding: 0; width: 100%; text-align: left; font: inherit; color: inherit; }
-	.card-top h3 { margin: 0; }
-	.card-toggle { font-size: 18px; font-weight: 300; color: #94a3b8; flex-shrink: 0; line-height: 1; width: 24px; text-align: center; }
-	.card-collapsed { padding-bottom: 14px; }
+	.gc-green { background: linear-gradient(135deg, #ecfdf5, #d1fae5); }
+	.gc-green .gc-icon { background: #10b981; color: white; }
+	.gc-green h3 { color: #047857; }
+	.gc-green ul { color: #065f46; }
 
-	.feature-name { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #2563eb; margin-bottom: 4px; }
-	.friction-examples { margin: 8px 0 0 20px; font-size: 13px; color: #334155; }
-	.friction-examples li { margin-bottom: 4px; }
+	.gc-amber { background: linear-gradient(135deg, #fffbeb, #fef3c7); }
+	.gc-amber .gc-icon { background: #f59e0b; color: white; }
+	.gc-amber h3 { color: #b45309; }
+	.gc-amber ul { color: #78350f; }
 
-	.severity-badge { font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px; }
-	.severity-critical { background: #fef2f2; color: #dc2626; }
-	.severity-warning { background: #fefce8; color: #ca8a04; }
+	.gc-blue { background: linear-gradient(135deg, #eff6ff, #dbeafe); }
+	.gc-blue .gc-icon { background: #3b82f6; color: white; }
+	.gc-blue h3 { color: #1d4ed8; }
+	.gc-blue ul { color: #1e3a5f; }
 
-	/* CLAUDE.md */
-	.claude-md-list { display: flex; flex-direction: column; gap: 12px; }
-	.claude-md-item { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; }
-	.claude-md-rule { background: white; padding: 10px 14px; border-radius: 4px; font-size: 12px; color: #1e40af; border: 1px solid #bfdbfe; font-family: monospace; white-space: pre-wrap; word-break: break-word; margin: 0 0 8px 0; }
-	.claude-md-actions { margin-bottom: 8px; }
-	.claude-md-why { font-size: 12px; color: #64748b; line-height: 1.5; }
+	.gc-violet { background: linear-gradient(135deg, #f5f3ff, #ede9fe); }
+	.gc-violet .gc-icon { background: #8b5cf6; color: white; }
+	.gc-violet h3 { color: #6d28d9; }
+	.gc-violet ul { color: #4c1d95; }
 
-	/* Code blocks + copy */
-	.code-block-wrap { position: relative; margin-top: 8px; }
-	.code-block { background: #f8fafc; padding: 12px; border-radius: 6px; border: 1px solid #e2e8f0; font-family: monospace; font-size: 12px; white-space: pre-wrap; word-break: break-word; margin: 0; }
-	.prompt-label { font-size: 11px; font-weight: 600; text-transform: uppercase; color: #64748b; margin-bottom: 6px; }
-	.copy-btn { background: #e2e8f0; border: none; border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; color: #475569; }
-	.copy-btn:hover { background: #cbd5e1; }
+	/* ── Charts ── */
+	.chart-bento {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 14px;
+	}
+	.chart-box {
+		background: white;
+		border-radius: 16px;
+		padding: 22px 24px;
+	}
+	.chart-wide { grid-column: span 2; }
+	.chart-box h3 {
+		font-size: 13px;
+		font-weight: 700;
+		color: #232326;
+		margin-bottom: 16px;
+	}
+	.chart-empty { color: #a1a1aa; font-size: 13px; }
 
-	/* Fun Ending */
-	.interaction-stats { display: flex; flex-direction: column; gap: 8px; }
-	.istat { display: flex; justify-content: space-between; align-items: center; }
-	.istat-label { font-size: 13px; color: #475569; }
-	.istat-value { font-size: 15px; font-weight: 600; color: #0f172a; }
-	.istat-divider { height: 1px; background: #e2e8f0; margin: 4px 0; }
+	/* Horizontal bars */
+	.hbars { display: flex; flex-direction: column; gap: 8px; }
+	.hbar { display: flex; align-items: center; gap: 10px; }
+	.hbar-name { width: 100px; font-size: 13px; color: #52525b; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.hbar-track { flex: 1; height: 10px; background: #f4f4f5; border-radius: 5px; overflow: hidden; }
+	.hbar-fill { height: 100%; border-radius: 5px; transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+	.hbar-c1 { background: linear-gradient(90deg, #6366f1, #a5b4fc); }
+	.hbar-c2 { background: linear-gradient(90deg, #10b981, #6ee7b7); }
+	.hbar-c3 { background: linear-gradient(90deg, #8b5cf6, #c4b5fd); }
+	.hbar-c4 { background: linear-gradient(90deg, #ef4444, #fca5a5); }
+	.hbar-val { width: 40px; font-size: 13px; font-weight: 600; color: #71717a; text-align: right; font-variant-numeric: tabular-nums; }
+	.hbar-link { text-decoration: none; border-radius: 8px; padding: 2px 0; transition: background 0.15s; }
+	.hbar-link:hover { background: #f9fafb; }
 
-	.callout { border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; font-size: 14px; line-height: 1.5; }
-	.callout-warn { background: #fefce8; border: 1px solid #fde68a; color: #854d0e; }
-	.pill-warn { border-color: #fde68a; }
-	.pill-warn .pill-value { color: #ca8a04; }
-	.pill-alert { border-color: #fca5a5; }
-	.pill-alert .pill-value { color: #dc2626; font-size: 14px; }
+	/* Vertical time bars */
+	.hour-bars { display: flex; align-items: flex-end; gap: 4px; height: 120px; padding-top: 8px; }
+	.hour-col { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; }
+	.hour-fill {
+		width: 100%;
+		border-radius: 4px 4px 0 0;
+		background: linear-gradient(180deg, #8b5cf6, #ddd6fe);
+		transition: height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+		min-height: 2px;
+	}
+	.hour-label { font-size: 10px; color: #a1a1aa; margin-top: 4px; }
 
-	/* Footer */
-	.report-footer { text-align: center; padding: 24px; color: #94a3b8; font-size: 12px; }
+	/* ── Health ── */
+	.health-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+	.health-pill {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 12px 16px;
+		border-radius: 12px;
+		text-decoration: none;
+		color: inherit;
+		transition: transform 0.15s, box-shadow 0.15s;
+	}
+	.health-pill:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+	.health-grade { font-size: 22px; font-weight: 800; flex-shrink: 0; }
+	.health-info { display: flex; flex-direction: column; min-width: 0; }
+	.health-name { font-size: 13px; font-weight: 600; color: #232326; }
+	.health-meta { font-size: 12px; color: #a1a1aa; }
+	.show-more {
+		display: block;
+		margin: 16px auto 0;
+		background: white;
+		border: none;
+		border-radius: 10px;
+		padding: 10px 24px;
+		font-size: 13px;
+		font-weight: 500;
+		color: #70707a;
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+	.show-more:hover { color: #232326; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
 
+	/* ── Duo grid (work areas + persona) ── */
+	.duo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+
+	.content-card {
+		background: white;
+		border-radius: 14px;
+		padding: 18px 20px;
+	}
+	.content-card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+	.content-card-head strong { font-size: 15px; color: #232326; }
+	.content-card p { font-size: 14px; color: #52525b; line-height: 1.6; }
+
+	.pill-sm {
+		font-size: 12px;
+		color: #6366f1;
+		background: #eef2ff;
+		padding: 2px 10px;
+		border-radius: 100px;
+		white-space: nowrap;
+		font-weight: 500;
+	}
+
+	.persona {
+		background: white;
+		border-radius: 14px;
+		padding: 24px;
+		font-size: 14px;
+		color: #52525b;
+		line-height: 1.8;
+	}
+	.persona :global(p) { margin-bottom: 14px; }
+	.persona :global(strong) { color: #232326; }
+
+	/* ── Accent cards ── */
+	.accent-card {
+		background: white;
+		border-radius: 14px;
+		padding: 20px 22px;
+		border-left: 4px solid;
+	}
+	.accent-card h3 { font-size: 15px; font-weight: 600; color: #232326; margin-bottom: 6px; }
+	.accent-card p { font-size: 14px; color: #52525b; line-height: 1.65; margin-bottom: 6px; }
+	.accent-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+	.accent-card-sub { font-size: 13px; color: #70707a; }
+	.accent-green { border-left-color: #10b981; background: linear-gradient(90deg, #f0fdf4, white 40%); }
+	.accent-red { border-left-color: #ef4444; background: linear-gradient(90deg, #fef2f2, white 40%); }
+
+	.tag { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 100px; }
+	.tag-red { background: #fef2f2; color: #ef4444; }
+	.tag-amber { background: #fffbeb; color: #d97706; }
+
+	.examples { margin: 8px 0 0 20px; font-size: 13px; color: #52525b; line-height: 1.6; }
+	.examples li { margin-bottom: 4px; }
+
+	/* ── Rule cards (CLAUDE.md) ── */
+	.rule-card {
+		background: linear-gradient(135deg, #eef2ff, #e0e7ff);
+		border-radius: 14px;
+		padding: 20px 22px;
+	}
+	.rule-top { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 10px; }
+	.rule-code {
+		flex: 1;
+		background: white;
+		border: 1px solid #c7d2fe;
+		border-radius: 8px;
+		padding: 12px 14px;
+		font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+		font-size: 13px;
+		color: #312e81;
+		white-space: pre-wrap;
+		word-break: break-word;
+		margin: 0;
+	}
+	.rule-why { font-size: 13px; color: #4338ca; line-height: 1.55; }
+
+	/* ── Expandable cards ── */
+	.expand-card { background: white; border-radius: 14px; overflow: hidden; transition: box-shadow 0.15s; }
+	.expand-card:hover { box-shadow: 0 2px 12px rgba(99, 102, 241, 0.08); }
+	.expand-head {
+		display: flex;
+		justify-content: space-between;
+		align-items: flex-start;
+		padding: 18px 22px;
+		cursor: pointer;
+		background: none;
+		border: none;
+		width: 100%;
+		text-align: left;
+		font: inherit;
+		color: inherit;
+	}
+	.expand-head h3 { font-size: 15px; font-weight: 600; color: #232326; margin: 0; }
+	.expand-tag { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #6366f1; margin-bottom: 4px; }
+	.expand-chevron { font-size: 20px; color: #a1a1aa; line-height: 1; flex-shrink: 0; }
+	.expand-body { padding: 0 22px 20px; }
+	.expand-body p { font-size: 14px; color: #52525b; line-height: 1.65; margin-bottom: 8px; }
+	.muted { color: #70707a !important; font-size: 13px !important; }
+	.expanded { box-shadow: 0 0 0 1.5px #6366f1, 0 2px 12px rgba(99, 102, 241, 0.1) !important; }
+
+	/* ── Code blocks ── */
+	.code-wrap { margin-top: 10px; position: relative; }
+	.code-wrap pre {
+		background: #fafafa;
+		border: 1px solid #e4e4e7;
+		border-radius: 10px;
+		padding: 14px 16px;
+		font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+		font-size: 12px;
+		color: #232326;
+		white-space: pre-wrap;
+		word-break: break-word;
+		margin: 0;
+	}
+	.code-label { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #a1a1aa; margin-bottom: 6px; }
+
+	.btn-copy {
+		background: #eef2ff;
+		border: none;
+		border-radius: 8px;
+		padding: 6px 14px;
+		font-size: 12px;
+		font-weight: 500;
+		cursor: pointer;
+		color: #6366f1;
+		transition: all 0.15s;
+		white-space: nowrap;
+	}
+	.btn-copy:hover { background: #e0e7ff; color: #4f46e5; }
+
+	/* ── Markdown globals ── */
+	.accent-card :global(a), .persona :global(a), .glance-card :global(a), .content-card :global(a) {
+		color: #6366f1;
+		text-decoration: none;
+	}
+	.accent-card :global(a:hover), .persona :global(a:hover), .glance-card :global(a:hover), .content-card :global(a:hover) {
+		text-decoration: underline;
+	}
+	.accent-card :global(code), .persona :global(code), .content-card :global(code) {
+		background: #f4f4f5;
+		padding: 1px 6px;
+		border-radius: 4px;
+		font-size: 0.9em;
+	}
+
+	/* ── Footer ── */
+	.report-footer { text-align: center; padding: 32px; color: #a1a1aa; font-size: 12px; }
+
+	/* ── Responsive ── */
 	@media (max-width: 768px) {
-		.charts-row { grid-template-columns: 1fr; }
-		.stats-pills { flex-direction: column; }
+		.stats-strip { gap: 12px; padding: 14px 20px; }
+		.ss-num { font-size: 16px; }
+		.chart-bento { grid-template-columns: 1fr; }
+		.chart-wide { grid-column: span 1; }
+		.glance-grid { grid-template-columns: 1fr; }
+		.duo-grid { grid-template-columns: 1fr; }
 	}
 </style>

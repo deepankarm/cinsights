@@ -2,13 +2,13 @@
 	import type { Snippet } from 'svelte';
 
 	let { children }: { children: Snippet } = $props();
+
 </script>
 
 <div class="app">
 	<header>
 		<nav>
 			<a href="/report" class="logo">cinsights</a>
-			<span class="tagline">coding agent insights</span>
 			<div class="nav-links">
 				<a href="/report" class="nav-link">Report</a>
 				<a href="/projects" class="nav-link">Projects</a>
@@ -30,66 +30,71 @@
 	}
 
 	:global(body) {
-		font-family:
-			'Inter',
-			-apple-system,
-			BlinkMacSystemFont,
-			sans-serif;
-		background: #f8fafc;
-		color: #334155;
-		line-height: 1.6;
+		font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+		background: #f6f4f0;
+		color: #232326;
+		line-height: 1.55;
+		-webkit-font-smoothing: antialiased;
+		transition: background 0.3s ease;
 	}
+
+	:global(a) { color: inherit; }
 
 	.app {
 		min-height: 100vh;
 		display: flex;
 		flex-direction: column;
+		background: #f6f4f0;
 	}
 
 	header {
-		background: #0f172a;
-		color: white;
-		padding: 0 24px;
+		padding: 0 40px;
 		height: 56px;
 		display: flex;
 		align-items: center;
+		position: sticky;
+		top: 0;
+		z-index: 100;
+		background: rgba(246,244,240,0.88);
+		backdrop-filter: blur(12px);
+		-webkit-backdrop-filter: blur(12px);
 	}
 
 	nav {
 		display: flex;
-		align-items: baseline;
-		gap: 12px;
+		align-items: center;
 		width: 100%;
+		max-width: 1200px;
+		margin: 0 auto;
+	}
+
+	.logo {
+		font-size: 17px;
+		font-weight: 800;
+		text-decoration: none;
+		color: #232326;
+		letter-spacing: -0.5px;
 	}
 
 	.nav-links {
 		margin-left: auto;
 		display: flex;
-		gap: 16px;
+		gap: 2px;
 	}
 
 	.nav-link {
-		color: #94a3b8;
 		text-decoration: none;
-		font-size: 14px;
+		font-size: 13px;
 		font-weight: 500;
+		color: #70707a;
+		padding: 6px 14px;
+		border-radius: 8px;
+		transition: all 0.15s;
 	}
 
 	.nav-link:hover {
-		color: white;
-	}
-
-	.logo {
-		font-size: 20px;
-		font-weight: 700;
-		color: white;
-		text-decoration: none;
-		letter-spacing: -0.5px;
-	}
-
-	.tagline {
-		font-size: 13px;
-		color: #94a3b8;
+		color: #232326;
+		background: rgba(0,0,0,0.04);
 	}
 
 	main {
@@ -97,6 +102,11 @@
 		max-width: 1200px;
 		width: 100%;
 		margin: 0 auto;
-		padding: 32px 24px;
+		padding: 40px 40px 80px;
+	}
+
+	@media (max-width: 768px) {
+		header { padding: 0 20px; }
+		main { padding: 24px 20px 60px; }
 	}
 </style>
