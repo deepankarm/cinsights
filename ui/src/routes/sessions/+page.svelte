@@ -69,14 +69,14 @@
 				<div class="stat-label">Insights</div>
 			</div>
 			<div class="stat-card">
-				<div class="stat-value">{Object.keys(stats.top_tools).length}</div>
-				<div class="stat-label">Tools Used</div>
+				<div class="stat-value">{stats.total_tool_calls.toLocaleString()}</div>
+				<div class="stat-label">Tool Calls</div>
 			</div>
 		</div>
 
 		{#if Object.keys(stats.top_tools).length > 0}
 			<div class="section">
-				<h2>Top Tools</h2>
+				<h2>Top Tools <span class="top-tools-hint">({stats.distinct_tool_count} distinct, top 10 shown)</span></h2>
 				<div class="tools-grid">
 					{#each Object.entries(stats.top_tools) as [name, count]}
 						<div class="tool-chip">
@@ -184,6 +184,11 @@
 		font-weight: 600;
 		color: #0f172a;
 		margin-bottom: 16px;
+	}
+	.top-tools-hint {
+		font-size: 12px;
+		font-weight: 400;
+		color: #94a3b8;
 	}
 	.tools-grid {
 		display: flex;

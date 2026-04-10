@@ -52,6 +52,8 @@ export interface StatsResponse {
 	total_sessions: number;
 	analyzed_sessions: number;
 	total_insights: number;
+	total_tool_calls: number;
+	distinct_tool_count: number;
 	top_tools: Record<string, number>;
 	insight_counts: Record<string, number>;
 }
