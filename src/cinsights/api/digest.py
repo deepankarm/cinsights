@@ -9,7 +9,7 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from cinsights.db.engine import get_db
-from cinsights.db.models import Digest, DigestSection
+from cinsights.db.models import CodingSession, Digest, DigestSection
 
 router = APIRouter(prefix="/api/digests", tags=["digests"])
 
@@ -106,6 +106,17 @@ async def get_digest(
     stats = None
     if digest.stats_json:
         stats = json.loads(digest.stats_json)
+        # Overlay live token counts so stale snapshots don't show wrong values
+        if "tokens_per_session" in stats and stats["tokens_per_session"]:
+            sids = [t["session_id"] for t in stats["tokens_per_session"]]
+            live_result = await db.exec(
+                select(CodingSession.id, CodingSession.total_tokens)
+                .where(col(CodingSession.id).in_(sids))
+            )
+            live = {sid: tok for sid, tok in live_result.all()}
+            for t in stats["tokens_per_session"]:
+                if t["session_id"] in live:
+                    t["tokens"] = live[t["session_id"]]
 
     return DigestDetail(
         id=digest.id,
