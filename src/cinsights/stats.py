@@ -523,8 +523,18 @@ async def collect_session_summaries(
     for ins in insights_result.all():
         insights_by_session.setdefault(ins.session_id, []).append(ins)
 
+    from cinsights.config import get_settings
+    min_tools = get_settings().min_session_tool_count
+
     summaries = []
     for s in sessions:
+        tool_count, error_count = counts.get(s.id, (0, 0))
+
+        # Skip tiny sessions from the per-session evidence list.
+        # They still contribute to aggregate stats computed elsewhere.
+        if tool_count < min_tools:
+            continue
+
         summary_text = ""
         friction_texts: list[str] = []
         win_texts: list[str] = []
@@ -540,7 +550,13 @@ async def collect_session_summaries(
         if s.end_time:
             duration = (s.end_time - s.start_time).total_seconds() / 60
 
-        tool_count, error_count = counts.get(s.id, (0, 0))
+        # Size bucket so the LLM can weight evidence appropriately.
+        if tool_count >= 200:
+            size = "MAJOR"
+        elif tool_count >= 50:
+            size = "MEDIUM"
+        else:
+            size = "MINOR"
 
         summaries.append({
             "session_id": s.id, "start_time": s.start_time.isoformat(),
@@ -549,7 +565,11 @@ async def collect_session_summaries(
             "tool_count": tool_count, "error_count": error_count,
             "total_tokens": s.total_tokens, "summary": summary_text,
             "frictions": friction_texts, "wins": win_texts,
+            "size": size,
         })
+
+    # Sort by tool_count desc so the LLM sees the most substantial sessions first.
+    summaries.sort(key=lambda x: x["tool_count"], reverse=True)
     return summaries
 
 
