@@ -116,6 +116,7 @@ async def _store_analysis(
             "turn": int(s.name.replace("Turn ", "")),
             "prompt_tokens": s.prompt_tokens,
             "completion_tokens": s.completion_tokens,
+            "duration_ms": s.duration_ms,
         }
         for s in turn_spans
     ])
@@ -148,6 +149,7 @@ async def _store_analysis(
         # Update metadata that may have changed
         coding_session.user_id = user_id or existing.user_id
         coding_session.project_name = project_name or existing.project_name
+        coding_session.end_time = trace.end_time
         coding_session.total_tokens = total_tokens
         coding_session.prompt_tokens = total_prompt
         coding_session.completion_tokens = total_completion

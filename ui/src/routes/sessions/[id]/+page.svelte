@@ -11,6 +11,7 @@
 	let analyzing = $state(false);
 	let toolsExpanded = $state(false);
 	let hoverIdx: number | null = $state(null);
+	let durHoverIdx: number | null = $state(null);
 
 	const id = $derived(page.params.id);
 
@@ -66,6 +67,12 @@
 		if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
 		if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
 		return n.toString();
+	}
+
+	function formatSecs(ms: number): string {
+		const s = ms / 1000;
+		if (s >= 60) return `${Math.floor(s / 60)}m ${Math.floor(s % 60)}s`;
+		return `${s.toFixed(1)}s`;
 	}
 
 	function categoryColor(cat: string): string {
@@ -140,6 +147,27 @@
 		return cat.replace('_', ' ');
 	}
 
+	const activeTime = $derived.by(() => {
+		if (!session?.context_growth) return null;
+		const totalMs = session.context_growth.reduce((sum, p) => sum + (p.duration_ms ?? 0), 0);
+		if (totalMs === 0) return null;
+		return formatSecs(totalMs);
+	});
+
+	const firstEditCall = $derived.by(() => {
+		if (!session) return null;
+		const edits = session.tool_calls
+			.filter((tc) => tc.tool_name === 'Write' || tc.tool_name === 'Edit')
+			.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+		return edits[0] ?? null;
+	});
+
+	const firstEditMs = $derived(
+		firstEditCall && session
+			? new Date(firstEditCall.timestamp).getTime() - new Date(session.start_time).getTime()
+			: null
+	);
+
 	// Group insights by category for display order
 	const categoryOrder = ['summary', 'friction', 'win', 'recommendation', 'skill_proposal', 'pattern'];
 
@@ -188,12 +216,16 @@
 				<span class="meta-value mono">{session.model ?? '-'}</span>
 			</div>
 			<div class="meta-item">
-				<span class="meta-label">Duration</span>
-				<span class="meta-value">{formatDuration(session.start_time, session.end_time)}</span>
+				<span class="meta-label">Active Time</span>
+				<span class="meta-value">{activeTime ?? formatDuration(session.start_time, session.end_time)}</span>
 			</div>
 			<div class="meta-item">
 				<span class="meta-label">Started</span>
 				<span class="meta-value">{formatDate(session.start_time)}</span>
+			</div>
+			<div class="meta-item">
+				<span class="meta-label">Time Span</span>
+				<span class="meta-value">{formatDuration(session.start_time, session.end_time)}</span>
 			</div>
 			<div class="meta-item">
 				<span class="meta-label">Tokens</span>
@@ -212,6 +244,12 @@
 					{session.status}
 				</span>
 			</div>
+			{#if firstEditMs != null}
+				<div class="meta-item">
+					<span class="meta-label">First Edit</span>
+					<span class="meta-value">{formatSecs(firstEditMs)} in</span>
+				</div>
+			{/if}
 		</div>
 		<button class="reanalyze-btn" onclick={reanalyze} disabled={analyzing}>
 			{analyzing ? 'Analyzing...' : 'Re-analyze'}
@@ -359,6 +397,154 @@
 				</div>
 			</div>
 		</div>
+	{/if}
+
+	<!-- Turn Duration -->
+	{#if session.context_growth && session.context_growth.some((p) => p.duration_ms != null)}
+		{@const pts = session.context_growth.filter((p) => p.duration_ms != null)}
+		{@const n = pts.length}
+		{#if n > 1}
+			{@const durations = pts.map((p) => p.duration_ms!)}
+			{@const maxD = Math.max(...durations, 1)}
+			{@const sortedD = [...durations].sort((a, b) => a - b)}
+			{@const median = sortedD[Math.floor(sortedD.length / 2)]}
+			{@const innerW = CHART_W - CHART_PAD.l - CHART_PAD.r}
+			{@const innerH = CHART_H - CHART_PAD.t - CHART_PAD.b}
+			{@const xOf = (i: number) => CHART_PAD.l + (i / (n - 1)) * innerW}
+			{@const yOf = (v: number) => CHART_PAD.t + innerH - (v / maxD) * innerH}
+			{@const step = Math.max(1, Math.ceil(n / 8))}
+			{@const tickIdxs = pts
+				.map((_, i) => i)
+				.filter((i) => i === 0 || i === n - 1 || i % step === 0)}
+			{@const linePath = pts
+				.map(
+					(p, i) =>
+						`${i === 0 ? 'M' : 'L'} ${xOf(i).toFixed(1)} ${yOf(p.duration_ms!).toFixed(1)}`
+				)
+				.join(' ')}
+			{@const baselineY = (CHART_PAD.t + innerH).toFixed(1)}
+			{@const areaPath = `${linePath} L ${xOf(n - 1).toFixed(1)} ${baselineY} L ${xOf(0).toFixed(1)} ${baselineY} Z`}
+			{@const slowIdxs = pts
+				.map((p, i) => (p.duration_ms! > median * 2 ? i : -1))
+				.filter((i) => i >= 0)}
+			{@const durHover = durHoverIdx !== null ? pts[durHoverIdx] : null}
+			<div class="section">
+				<h2>Turn Duration</h2>
+				<div class="context-chart">
+					<div class="chart-inner">
+						<svg
+							viewBox="0 0 {CHART_W} {CHART_H}"
+							class="context-svg"
+							role="img"
+							aria-label="Turn duration over turns"
+							onmousemove={(e) => {
+								const rect = e.currentTarget.getBoundingClientRect();
+								const xView = ((e.clientX - rect.left) / rect.width) * CHART_W;
+								const frac = (xView - CHART_PAD.l) / innerW;
+								const idx = Math.round(frac * (n - 1));
+								durHoverIdx = Math.max(0, Math.min(n - 1, idx));
+							}}
+							onmouseleave={() => (durHoverIdx = null)}
+						>
+							<defs>
+								<linearGradient id="durArea" x1="0" y1="0" x2="0" y2="1">
+									<stop offset="0%" stop-color="#10b981" stop-opacity="0.35" />
+									<stop offset="100%" stop-color="#10b981" stop-opacity="0" />
+								</linearGradient>
+							</defs>
+
+							{#each [0, 0.5, 1] as frac}
+								{@const gy = CHART_PAD.t + innerH * (1 - frac)}
+								<line
+									x1={CHART_PAD.l}
+									x2={CHART_W - CHART_PAD.r}
+									y1={gy}
+									y2={gy}
+									stroke="#f1f5f9"
+									stroke-width="1"
+								/>
+								<text x={CHART_PAD.l - 6} y={gy + 3} text-anchor="end" class="axis-text">
+									{formatSecs(maxD * frac)}
+								</text>
+							{/each}
+
+							<path d={areaPath} fill="url(#durArea)" />
+							<path
+								d={linePath}
+								fill="none"
+								stroke="#10b981"
+								stroke-width="1.5"
+								stroke-linejoin="round"
+							/>
+
+							{#each slowIdxs as i}
+								<circle
+									cx={xOf(i)}
+									cy={yOf(pts[i].duration_ms!)}
+									r="3"
+									fill="#ef4444"
+									stroke="white"
+									stroke-width="1"
+								/>
+							{/each}
+
+							{#each tickIdxs as i}
+								<text x={xOf(i)} y={CHART_H - 10} text-anchor="middle" class="axis-text">
+									{pts[i].turn}
+								</text>
+							{/each}
+
+							{#if durHover && durHoverIdx !== null}
+								<line
+									x1={xOf(durHoverIdx)}
+									x2={xOf(durHoverIdx)}
+									y1={CHART_PAD.t}
+									y2={CHART_PAD.t + innerH}
+									stroke="#94a3b8"
+									stroke-width="1"
+									stroke-dasharray="2 2"
+								/>
+								<circle
+									cx={xOf(durHoverIdx)}
+									cy={yOf(durHover.duration_ms!)}
+									r="3.5"
+									fill="#10b981"
+									stroke="white"
+									stroke-width="1.5"
+								/>
+							{/if}
+
+							<rect
+								x={CHART_PAD.l}
+								y={CHART_PAD.t}
+								width={innerW}
+								height={innerH}
+								fill="transparent"
+							/>
+						</svg>
+
+						{#if durHover && durHoverIdx !== null}
+							{@const leftPct = (xOf(durHoverIdx) / CHART_W) * 100}
+							{@const topPct = (yOf(durHover.duration_ms!) / CHART_H) * 100}
+							<div
+								class="chart-tooltip"
+								class:flip-left={leftPct < 15}
+								class:flip-right={leftPct > 85}
+								style="left: {leftPct}%; top: {topPct}%;"
+							>
+								<div class="tt-turn">Turn {durHover.turn}</div>
+								<div class="tt-row">
+									<span class="tt-dot duration"></span>{formatSecs(durHover.duration_ms!)}
+								</div>
+								{#if durHover.duration_ms! > median * 2}
+									<div class="tt-row slow">&gt;2x median</div>
+								{/if}
+							</div>
+						{/if}
+					</div>
+				</div>
+			</div>
+		{/if}
 	{/if}
 
 	<!-- Insights -->
@@ -695,6 +881,13 @@
 	}
 	.tt-dot.completion {
 		background: #f59e0b;
+	}
+	.tt-dot.duration {
+		background: #10b981;
+	}
+	.tt-row.slow {
+		color: #fca5a5;
+		font-size: 10px;
 	}
 
 	.collapse-btn {
