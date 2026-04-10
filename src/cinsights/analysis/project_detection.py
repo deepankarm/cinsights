@@ -9,10 +9,11 @@ import re
 from collections import Counter
 from typing import Literal
 
-import anthropic
 from pydantic import BaseModel, Field
 
+from cinsights.analysis import LLMAnalyzer
 from cinsights.prompts import render
+from cinsights.settings import PromptTemplates
 from cinsights.sources.base import SpanData
 
 logger = logging.getLogger(__name__)
@@ -68,13 +69,6 @@ class ProjectGuess(BaseModel):
 
     usage_prompt_tokens: int = 0
     usage_completion_tokens: int = 0
-
-
-_PROJECT_TOOL = {
-    "name": "record_project",
-    "description": "Record the detected project for a Claude Code session.",
-    "input_schema": ProjectGuess.model_json_schema(),
-}
 
 
 def _extract_file_paths(input_value: str | None) -> list[str]:
@@ -135,9 +129,9 @@ def _build_prompts(
 ) -> tuple[str, str]:
     signals = _build_signals(tool_spans)
 
-    system_prompt = render("project_detection_system.md.j2")
+    system_prompt = render(PromptTemplates.PROJECT_DETECTION_SYSTEM)
     user_prompt = render(
-        "project_detection_user.md.j2",
+        PromptTemplates.PROJECT_DETECTION_USER,
         file_paths=signals["file_paths"],
         bash_commands=signals["bash_commands"],
         tool_counts=signals["tool_counts"],
@@ -147,31 +141,14 @@ def _build_prompts(
     return system_prompt, user_prompt
 
 
-class ProjectDetector:
-    def __init__(
-        self,
-        api_key: str,
-        model: str = "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-        base_url: str | None = None,
-        extra_headers: dict[str, str] | None = None,
-    ):
-        kwargs: dict = {"api_key": api_key}
-        if base_url:
-            kwargs["base_url"] = base_url
-        if extra_headers:
-            kwargs["default_headers"] = extra_headers
-        self.async_client = anthropic.AsyncAnthropic(**kwargs)
-        self.model = model
-
+class ProjectDetector(LLMAnalyzer):
     async def detect(
         self,
         tool_spans: list[SpanData],
         known_projects: list[str],
         previous_guess: str | None = None,
     ) -> ProjectGuess:
-        system_prompt, user_prompt = _build_prompts(
-            tool_spans, known_projects, previous_guess
-        )
+        system_prompt, user_prompt = _build_prompts(tool_spans, known_projects, previous_guess)
 
         logger.info(
             "Detecting project (%d tool spans, prompt ~%d chars)",
@@ -179,18 +156,14 @@ class ProjectDetector:
             len(user_prompt),
         )
 
-        response = await self.async_client.messages.create(
-            model=self.model,
+        result, prompt_tokens, completion_tokens = await self._run_llm(
+            ProjectGuess,
+            system_prompt,
+            user_prompt,
             max_tokens=512,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-            tools=[_PROJECT_TOOL],
-            tool_choice={"type": "tool", "name": "record_project"},
         )
-
-        result = self._parse_response(response)
-        result.usage_prompt_tokens = response.usage.input_tokens
-        result.usage_completion_tokens = response.usage.output_tokens
+        result.usage_prompt_tokens = prompt_tokens
+        result.usage_completion_tokens = completion_tokens
         return result
 
     async def detect_batch(
@@ -201,23 +174,9 @@ class ProjectDetector:
     ) -> list[ProjectGuess]:
         semaphore = asyncio.Semaphore(max_concurrency)
 
-        async def _bounded(
-            previous: str | None, spans: list[SpanData]
-        ) -> ProjectGuess:
+        async def _bounded(previous: str | None, spans: list[SpanData]) -> ProjectGuess:
             async with semaphore:
                 return await self.detect(spans, known_projects, previous)
 
         tasks = [_bounded(prev, spans) for prev, spans in items]
         return await asyncio.gather(*tasks)
-
-    def _parse_response(self, response: anthropic.types.Message) -> ProjectGuess:
-        for block in response.content:
-            if block.type == "tool_use" and block.name == "record_project":
-                return ProjectGuess.model_validate(block.input)
-
-        logger.error("No tool_use block in project detection response")
-        return ProjectGuess(
-            project_name=None,
-            confidence="low",
-            reasoning="LLM returned no structured output",
-        )

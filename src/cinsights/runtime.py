@@ -27,7 +27,7 @@ from datetime import UTC, datetime
 
 from rich.console import Console
 
-from cinsights.config import get_settings
+from cinsights.settings import get_settings
 
 console = Console()
 
@@ -127,9 +127,7 @@ async def _track_run(command: str) -> AsyncIterator[_RunHandle]:
             if run is not None:
                 run.completed_at = datetime.now(UTC)
                 run.wall_seconds = wall
-                run.status = (
-                    RefreshRunStatus.FAILED if error else RefreshRunStatus.SUCCESS
-                )
+                run.status = RefreshRunStatus.FAILED if error else RefreshRunStatus.SUCCESS
                 run.db_size_bytes = db_size
                 run.sessions_analyzed = handle.sessions_analyzed
                 run.digests_generated = handle.digests_generated

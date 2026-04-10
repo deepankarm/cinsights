@@ -20,6 +20,7 @@ from cinsights.db.models import (
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
+
 class ToolCallRead(BaseModel):
     id: str
     tool_name: str
@@ -78,6 +79,7 @@ class StatsResponse(BaseModel):
     distinct_tool_count: int
     top_tools: dict[str, int]
     insight_counts: dict[str, int]
+
 
 @router.get("/", response_model=list[SessionRead])
 async def list_sessions(
@@ -155,9 +157,7 @@ async def get_stats(db: AsyncSession = Depends(get_db)) -> StatsResponse:
     # Total and distinct tool counts
     total_tc_result = await db.exec(select(func.count()).select_from(ToolCall))
     total_tool_calls = total_tc_result.one()
-    distinct_tc_result = await db.exec(
-        select(func.count(ToolCall.tool_name.distinct()))
-    )
+    distinct_tc_result = await db.exec(select(func.count(ToolCall.tool_name.distinct())))
     distinct_tool_count = distinct_tc_result.one()
 
     # Top tools
@@ -187,25 +187,19 @@ async def get_stats(db: AsyncSession = Depends(get_db)) -> StatsResponse:
 
 
 @router.get("/{session_id}", response_model=SessionDetail)
-async def get_session_detail(
-    session_id: str, db: AsyncSession = Depends(get_db)
-) -> SessionDetail:
+async def get_session_detail(session_id: str, db: AsyncSession = Depends(get_db)) -> SessionDetail:
     """Get session detail with tool calls and insights."""
     session = await db.get(CodingSession, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
     tc_result = await db.exec(
-        select(ToolCall)
-        .where(ToolCall.session_id == session_id)
-        .order_by(ToolCall.timestamp)
+        select(ToolCall).where(ToolCall.session_id == session_id).order_by(ToolCall.timestamp)
     )
     tool_calls = tc_result.all()
 
     ins_result = await db.exec(
-        select(Insight)
-        .where(Insight.session_id == session_id)
-        .order_by(Insight.created_at)
+        select(Insight).where(Insight.session_id == session_id).order_by(Insight.created_at)
     )
     insights = ins_result.all()
 
@@ -273,14 +267,12 @@ async def update_session(
 
 
 @router.post("/{session_id}/analyze", response_model=SessionDetail)
-async def trigger_analysis(
-    session_id: str, db: AsyncSession = Depends(get_db)
-) -> SessionDetail:
+async def trigger_analysis(session_id: str, db: AsyncSession = Depends(get_db)) -> SessionDetail:
     """Manually trigger LLM analysis for a session."""
     import asyncio
 
     from cinsights.analysis.session import SessionAnalyzer
-    from cinsights.config import get_settings
+    from cinsights.settings import get_settings
     from cinsights.sources.base import TraceData
     from cinsights.sources.phoenix import PhoenixSource
 
@@ -307,9 +299,7 @@ async def trigger_analysis(
     )
 
     # Clear existing insights
-    existing_result = await db.exec(
-        select(Insight).where(Insight.session_id == session_id)
-    )
+    existing_result = await db.exec(select(Insight).where(Insight.session_id == session_id))
     for ins in existing_result.all():
         await db.delete(ins)
     await db.flush()

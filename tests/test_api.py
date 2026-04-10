@@ -14,9 +14,7 @@ from cinsights.db.models import (
 
 
 async def _seed_data(db_engine) -> None:
-    sessionmaker = async_sessionmaker(
-        db_engine, class_=AsyncSession, expire_on_commit=False
-    )
+    sessionmaker = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
     async with sessionmaker() as db:
         session = CodingSession(
             id="trace-100",

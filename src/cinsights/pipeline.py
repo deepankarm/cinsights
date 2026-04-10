@@ -1,19 +1,4 @@
-"""Analyze + digest orchestration — what cinsights actually does to the DB.
-
-This module owns the long-running coroutines that the CLI commands wrap:
-
-- ``_store_analysis`` — persist a single session's analyzed insights
-- ``_store_digest_sections`` — persist the 9 sections of a finished digest
-- ``_run_one_digest`` — compute stats + (optionally) LLM-analyze + persist
-  one digest scope, including the hash-skip fast path
-- ``_analyze_async`` — pull sessions from Phoenix and analyze each
-- ``_digest_async`` — fan out global + per-project digests concurrently
-
-CLI command bodies in ``cli.py`` are thin wrappers around these. Splitting
-them out keeps ``cli.py`` focused on Typer plumbing and lets the next
-iteration (Iter 5: rollups) extend the pipeline without bloating the
-command surface.
-"""
+"""Analyze + digest pipeline orchestration."""
 
 from __future__ import annotations
 
@@ -30,8 +15,8 @@ from sqlmodel import col
 from sqlmodel import select as select_fn
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from cinsights.config import get_settings
 from cinsights.runtime import _content_hash, _RunHandle, console
+from cinsights.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +33,8 @@ if TYPE_CHECKING:
 def _filter_tool_spans(spans: list[SpanData]) -> list[SpanData]:
     """Tool calls + CC permission/notification spans."""
     return [
-        s for s in spans
+        s
+        for s in spans
         if s.parent_id is not None
         and (s.tool_name or "Permission" in s.name or "Notification" in s.name)
     ]
@@ -111,15 +97,17 @@ async def _store_analysis(
     total_completion = sum(s.completion_tokens for s in turn_spans)
     total_tokens = total_prompt + total_completion
 
-    context_growth = json_mod.dumps([
-        {
-            "turn": int(s.name.replace("Turn ", "")),
-            "prompt_tokens": s.prompt_tokens,
-            "completion_tokens": s.completion_tokens,
-            "duration_ms": s.duration_ms,
-        }
-        for s in turn_spans
-    ])
+    context_growth = json_mod.dumps(
+        [
+            {
+                "turn": int(s.name.replace("Turn ", "")),
+                "prompt_tokens": s.prompt_tokens,
+                "completion_tokens": s.completion_tokens,
+                "duration_ms": s.duration_ms,
+            }
+            for s in turn_spans
+        ]
+    )
 
     settings = get_settings()
     tenant_id = settings.tenant_id
@@ -162,14 +150,10 @@ async def _store_analysis(
     # Clear old data if re-analyzing. Use explicit FK queries — AsyncSession
     # doesn't support implicit lazy relationship loads.
     if force or existing:
-        old_tcs_result = await db.exec(
-            select_fn(ToolCall).where(ToolCall.session_id == trace_id)
-        )
+        old_tcs_result = await db.exec(select_fn(ToolCall).where(ToolCall.session_id == trace_id))
         for tc in old_tcs_result.all():
             await db.delete(tc)
-        old_ins_result = await db.exec(
-            select_fn(Insight).where(Insight.session_id == trace_id)
-        )
+        old_ins_result = await db.exec(select_fn(Insight).where(Insight.session_id == trace_id))
         for ins in old_ins_result.all():
             await db.delete(ins)
         await db.flush()
@@ -238,37 +222,70 @@ async def _store_digest_sections(
         return json_mod.dumps([i.model_dump() for i in items])
 
     sections = [
-        (DigestSectionType.AT_A_GLANCE, "At a Glance", "",
-         json_mod.dumps(result.narrative.at_a_glance.model_dump())),
-        (DigestSectionType.WORK_AREAS, "What You Work On", "",
-         _dump(result.narrative.work_areas)),
-        (DigestSectionType.DEVELOPER_PERSONA, "How You Use Claude Code",
-         result.narrative.developer_persona, None),
-        (DigestSectionType.IMPRESSIVE_WINS, "Impressive Things You Did", "",
-         _dump(result.forward.impressive_wins)),
-        (DigestSectionType.FRICTION_ANALYSIS, "Where Things Go Wrong", "",
-         _dump(result.actions.friction_analysis)),
-        (DigestSectionType.CLAUDE_MD_SUGGESTIONS, "Suggested CLAUDE.md Additions", "",
-         _dump(result.actions.claude_md_suggestions)),
-        (DigestSectionType.FEATURE_RECOMMENDATIONS, "CC Features to Try", "",
-         _dump(result.actions.feature_recommendations)),
-        (DigestSectionType.WORKFLOW_PATTERNS, "New Ways to Use Claude Code", "",
-         _dump(result.forward.workflow_patterns)),
-        (DigestSectionType.AMBITIOUS_WORKFLOWS, "On the Horizon", "",
-         _dump(result.forward.ambitious_workflows)),
+        (
+            DigestSectionType.AT_A_GLANCE,
+            "At a Glance",
+            "",
+            json_mod.dumps(result.narrative.at_a_glance.model_dump()),
+        ),
+        (DigestSectionType.WORK_AREAS, "What You Work On", "", _dump(result.narrative.work_areas)),
+        (
+            DigestSectionType.DEVELOPER_PERSONA,
+            "How You Use Claude Code",
+            result.narrative.developer_persona,
+            None,
+        ),
+        (
+            DigestSectionType.IMPRESSIVE_WINS,
+            "Impressive Things You Did",
+            "",
+            _dump(result.forward.impressive_wins),
+        ),
+        (
+            DigestSectionType.FRICTION_ANALYSIS,
+            "Where Things Go Wrong",
+            "",
+            _dump(result.actions.friction_analysis),
+        ),
+        (
+            DigestSectionType.CLAUDE_MD_SUGGESTIONS,
+            "Suggested CLAUDE.md Additions",
+            "",
+            _dump(result.actions.claude_md_suggestions),
+        ),
+        (
+            DigestSectionType.FEATURE_RECOMMENDATIONS,
+            "CC Features to Try",
+            "",
+            _dump(result.actions.feature_recommendations),
+        ),
+        (
+            DigestSectionType.WORKFLOW_PATTERNS,
+            "New Ways to Use Claude Code",
+            "",
+            _dump(result.forward.workflow_patterns),
+        ),
+        (
+            DigestSectionType.AMBITIOUS_WORKFLOWS,
+            "On the Horizon",
+            "",
+            _dump(result.forward.ambitious_workflows),
+        ),
     ]
 
     settings = get_settings()
     for i, (stype, title, content, meta) in enumerate(sections):
-        db.add(DigestSection(
-            digest_id=digest_record.id,
-            section_type=stype,
-            title=title,
-            content=content,
-            order=i,
-            metadata_json=meta,
-            prompt_version=settings.prompt_version_digest,
-        ))
+        db.add(
+            DigestSection(
+                digest_id=digest_record.id,
+                section_type=stype,
+                title=title,
+                content=content,
+                order=i,
+                metadata_json=meta,
+                prompt_version=settings.prompt_version_digest,
+            )
+        )
 
     digest_record.status = DigestStatus.COMPLETE
     digest_record.analysis_prompt_tokens = result.total_prompt_tokens
@@ -427,41 +444,20 @@ async def _analyze_async(
 
     settings = get_settings()
 
-    if not settings.anthropic_api_key:
-        console.print(
-            "[red]Error:[/red] ANTHROPIC_API_KEY not set. "
-            "Set it in your environment or .env file."
-        )
-        raise typer.Exit(1)
-
     from cinsights.analysis.project_detection import ProjectDetector
     from cinsights.analysis.session import SessionAnalyzer
     from cinsights.db.engine import get_sessionmaker
     from cinsights.db.models import CodingSession, SessionStatus
+    from cinsights.settings import get_llm_config
     from cinsights.sources.phoenix import PhoenixSource
 
-    source = PhoenixSource(
-        base_url=settings.phoenix_endpoint, project=settings.phoenix_project
-    )
+    source = PhoenixSource(base_url=settings.phoenix_endpoint, project=settings.phoenix_project)
     sessionmaker = get_sessionmaker()
-    import json
 
-    extra_headers = None
-    if settings.anthropic_extra_headers:
-        extra_headers = json.loads(settings.anthropic_extra_headers)
-
-    analyzer = SessionAnalyzer(
-        api_key=settings.anthropic_api_key,
-        model=settings.anthropic_model,
-        base_url=settings.anthropic_base_url,
-        extra_headers=extra_headers,
-    )
-
+    llm = get_llm_config()
+    analyzer = SessionAnalyzer(model=llm.build_model())
     project_detector = ProjectDetector(
-        api_key=settings.anthropic_api_key,
-        model=settings.project_detection_model,
-        base_url=settings.anthropic_base_url,
-        extra_headers=extra_headers,
+        model=llm.build_model(override_model=llm.project_detection_model),
     )
 
     async with sessionmaker() as _kp_db:
@@ -486,9 +482,7 @@ async def _analyze_async(
             TextColumn("[progress.description]{task.description}"),
             console=console,
         ) as progress:
-            task = progress.add_task(
-                f"Fetching {len(trace_ids)} ID(s) from Phoenix...", total=None
-            )
+            task = progress.add_task(f"Fetching {len(trace_ids)} ID(s) from Phoenix...", total=None)
             for tid in trace_ids:
                 # Try as session ID first (fetches all spans across traces)
                 spans = await asyncio.to_thread(source.get_spans_by_session, tid)
@@ -513,9 +507,7 @@ async def _analyze_async(
                         work_items.append((tid, tid, trace, spans))
                     else:
                         console.print(f"  [yellow]No spans for {tid[:16]}...[/yellow]")
-            progress.update(
-                task, description=f"Found {len(work_items)} session(s) with spans"
-            )
+            progress.update(task, description=f"Found {len(work_items)} session(s) with spans")
     else:
         # Discover all sessions from Phoenix
         start_time = datetime.now(UTC) - timedelta(hours=hours)
@@ -526,9 +518,7 @@ async def _analyze_async(
             console=console,
         ) as progress:
             task = progress.add_task("Discovering sessions from Phoenix...", total=None)
-            discovered = await asyncio.to_thread(
-                source.discover_sessions, start_time=start_time
-            )
+            discovered = await asyncio.to_thread(source.discover_sessions, start_time=start_time)
             progress.update(task, description=f"Found {len(discovered)} sessions")
 
         if not discovered:
@@ -558,9 +548,7 @@ async def _analyze_async(
                     if last_seen is not None and last_seen.tzinfo is None:
                         last_seen = last_seen.replace(tzinfo=UTC)
                     quiet_for = (
-                        (now - last_seen).total_seconds()
-                        if last_seen is not None
-                        else float("inf")
+                        (now - last_seen).total_seconds() if last_seen is not None else float("inf")
                     )
 
                     if growth < REANALYZE_GROWTH_RATIO or quiet_for < REANALYZE_QUIET_SECONDS:
@@ -593,29 +581,23 @@ async def _analyze_async(
         return
 
     console.print(
-        f"\n[bold]Analyzing {len(work_items)} trace(s) "
-        f"(concurrency={concurrency})...[/bold]\n"
+        f"\n[bold]Analyzing {len(work_items)} trace(s) (concurrency={concurrency})...[/bold]\n"
     )
 
     async with sessionmaker() as _prev_db:
         previous_tags: dict[str, str | None] = {}
         for trace_id, _, _, _ in work_items:
             existing_row = await _prev_db.get(CodingSession, trace_id)
-            previous_tags[trace_id] = (
-                existing_row.project_name if existing_row else None
-            )
+            previous_tags[trace_id] = existing_row.project_name if existing_row else None
 
     analysis_items = [(trace, spans) for _, _, trace, spans in work_items]
     detect_items: list[tuple[str | None, list[SpanData]]] = [
-        (previous_tags[trace_id], _filter_tool_spans(spans))
-        for trace_id, _, _, spans in work_items
+        (previous_tags[trace_id], _filter_tool_spans(spans)) for trace_id, _, _, spans in work_items
     ]
 
     analysis_results, project_guesses = await asyncio.gather(
         analyzer.analyze_batch(analysis_items, max_concurrency=concurrency),
-        project_detector.detect_batch(
-            detect_items, known_projects, max_concurrency=concurrency
-        ),
+        project_detector.detect_batch(detect_items, known_projects, max_concurrency=concurrency),
     )
 
     # Store results in DB
@@ -644,12 +626,10 @@ async def _analyze_async(
                 if run is not None:
                     run.sessions_analyzed += 1
                     run.total_prompt_tokens += (
-                        result.usage_prompt_tokens
-                        + project_guess.usage_prompt_tokens
+                        result.usage_prompt_tokens + project_guess.usage_prompt_tokens
                     )
                     run.total_completion_tokens += (
-                        result.usage_completion_tokens
-                        + project_guess.usage_completion_tokens
+                        result.usage_completion_tokens + project_guess.usage_completion_tokens
                     )
                 console.print(
                     f"  [green]✓[/green] {trace_id[:12]} — {n_insights} insights, "
@@ -693,15 +673,6 @@ async def _digest_async(
 
     settings = get_settings()
 
-    if not stats_only and not settings.anthropic_api_key:
-        console.print(
-            "[red]Error:[/red] ANTHROPIC_API_KEY not set. "
-            "Use --stats-only for free stats, or set the key."
-        )
-        raise typer.Exit(1)
-
-    import json
-
     from cinsights.db.engine import get_sessionmaker
     from cinsights.db.models import CodingSession, SessionStatus
 
@@ -730,22 +701,13 @@ async def _digest_async(
     # Build the analyzer once and share it across scopes (just an HTTP client).
     analyzer = None
     if not stats_only:
-        extra_headers = None
-        if settings.anthropic_extra_headers:
-            extra_headers = json.loads(settings.anthropic_extra_headers)
-
         from cinsights.analysis.digest import DigestAnalyzer
+        from cinsights.settings import get_llm_config
 
-        analyzer = DigestAnalyzer(
-            api_key=settings.anthropic_api_key,
-            model=settings.anthropic_model,
-            base_url=settings.anthropic_base_url,
-            extra_headers=extra_headers,
-        )
+        analyzer = DigestAnalyzer(model=get_llm_config().build_model())
 
     console.print(
-        f"[bold]Running {len(scopes)} digest(s) for last {days} days "
-        f"(concurrent)...[/bold]\n"
+        f"[bold]Running {len(scopes)} digest(s) for last {days} days (concurrent)...[/bold]\n"
     )
 
     tasks = [
@@ -767,13 +729,9 @@ async def _digest_async(
         return r[0] if isinstance(r, tuple) else r
 
     succeeded = sum(1 for r in results if _status_of(r) is True)
-    skipped = sum(
-        1 for r in results if _status_of(r) in ("empty", "stats_only", "unchanged")
-    )
+    skipped = sum(1 for r in results if _status_of(r) in ("empty", "stats_only", "unchanged"))
     failed = [
-        (scope, r)
-        for scope, r in zip(scopes, results, strict=True)
-        if isinstance(r, Exception)
+        (scope, r) for scope, r in zip(scopes, results, strict=True) if isinstance(r, Exception)
     ]
 
     if run is not None:
@@ -803,9 +761,7 @@ async def _digest_async(
     console.print(table)
 
     if not stats_only and succeeded:
-        console.print(
-            f"\n  View at: [bold]http://localhost:{settings.port}/report[/bold]"
-        )
+        console.print(f"\n  View at: [bold]http://localhost:{settings.port}/report[/bold]")
 
     if failed and not succeeded and not skipped:
         raise typer.Exit(1)

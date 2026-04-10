@@ -15,7 +15,7 @@ import asyncio
 
 import typer
 
-from cinsights.config import get_settings
+from cinsights.settings import get_settings
 from cinsights.pipeline import _analyze_async, _digest_async
 from cinsights.runtime import _track_run
 
@@ -130,6 +130,110 @@ def serve(
         host=host or settings.host,
         port=port or settings.port,
     )
+
+
+@app.command()
+def setup(
+    provider: str | None = typer.Option(None, help="LLM provider (e.g. anthropic, openai)."),
+    model: str | None = typer.Option(None, help="Model name."),
+    base_url: str | None = typer.Option(None, help="Custom base URL (for gateways/proxies)."),
+    extra_headers: str | None = typer.Option(None, help="Extra HTTP headers as JSON string."),
+    validate: bool = typer.Option(
+        False, "--validate", help="Test current config without prompting."
+    ),
+) -> None:
+    """Configure LLM provider settings (saved to ~/.cinsights/config.json).
+
+    Interactive mode (no args): prompts for each value, like `aws configure`.
+    One-shot mode: pass --provider, --model, etc. directly.
+    Validate mode: --validate tests the current config.
+    """
+    import json
+
+    from cinsights.settings import LLMConfig, Paths
+    from cinsights.runtime import console
+
+    llm = LLMConfig.load()
+
+    if validate:
+        console.print(
+            f"  Provider: [bold]{llm.provider}[/bold]\n"
+            f"  Model:    [bold]{llm.model}[/bold]\n"
+            f"  Base URL: {llm.base_url or '(default)'}\n"
+            f"  Headers:  {llm.extra_headers or '(none)'}"
+        )
+        _test_connection(llm)
+        return
+
+    # Interactive mode: prompt for values with current defaults
+    if provider is None:
+        provider = typer.prompt("LLM Provider", default=llm.provider)
+    if model is None:
+        model = typer.prompt("Model name", default=llm.model)
+    if base_url is None:
+        base_url = typer.prompt(
+            "Base URL (blank for default)",
+            default=llm.base_url or "",
+            show_default=False,
+        )
+    if extra_headers is None:
+        current = json.dumps(llm.extra_headers) if llm.extra_headers else ""
+        extra_headers = typer.prompt(
+            "Extra HTTP headers as JSON (blank for none)",
+            default=current,
+            show_default=bool(current),
+        )
+
+    # Parse extra headers
+    headers_dict: dict[str, str] = {}
+    if extra_headers:
+        try:
+            headers_dict = json.loads(extra_headers)
+        except json.JSONDecodeError as e:
+            console.print("[red]Invalid JSON for extra headers.[/red]")
+            raise typer.Exit(1) from e
+
+    new_config = LLMConfig(
+        provider=provider,
+        model=model,
+        base_url=base_url or None,
+        extra_headers=headers_dict,
+        project_detection_model=llm.project_detection_model,
+    )
+    new_config.save()
+    console.print(f"\n  Configuration written to [bold]{Paths.config_file}[/bold]")
+
+    # Offer to test
+    if typer.confirm("Test connection?", default=True):
+        _test_connection(new_config)
+
+
+def _test_connection(llm) -> None:
+    """Send a minimal request to verify the LLM config works."""
+    import asyncio
+
+    from cinsights.runtime import console
+
+    async def _probe():
+        from pydantic_ai import Agent
+        from pydantic_ai.settings import ModelSettings
+
+        agent = Agent(
+            llm.build_model(),
+            output_type=str,
+            model_settings=ModelSettings(max_tokens=20),
+            instrument=False,
+        )
+        result = await agent.run("Reply with exactly: OK")
+        usage = result.usage()
+        return usage.output_tokens or 0
+
+    try:
+        tokens = asyncio.run(_probe())
+        console.print(f"  Testing... [green]Got {tokens} tokens back from {llm.model}[/green]")
+    except Exception as e:
+        console.print(f"  Testing... [red]Failed: {e}[/red]")
+        raise typer.Exit(1) from e
 
 
 if __name__ == "__main__":
