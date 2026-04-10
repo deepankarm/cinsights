@@ -11,6 +11,14 @@
 - {{ name }}: {{ count }}
 {% endfor %}
 
+{% if user_queries %}
+## User Queries
+What the developer asked the agent each turn (truncated to 200 chars):
+{% for q in user_queries %}
+- Turn {{ q.turn }}: {{ q.query }}
+{% endfor %}
+{% endif %}
+
 ## Timeline
 {% if truncation_notice %}**{{ truncation_notice }}**
 

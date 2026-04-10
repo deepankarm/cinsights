@@ -198,6 +198,17 @@ def _build_prompts(trace: TraceData, spans: list[SpanData]) -> tuple[str, str]:
 
     timeline_spans, truncation_notice = _sample_timeline_spans(spans)
 
+    # Extract user queries from Turn spans for richer interaction analysis.
+    user_queries = []
+    for ts in turn_spans:
+        query = ts.input_value
+        if query and query.strip():
+            turn_num = ts.name.replace("Turn ", "")
+            user_queries.append({
+                "turn": turn_num,
+                "query": query.strip()[:200],
+            })
+
     system_prompt = render("session_analysis_system.md.j2")
     user_prompt = render(
         "session_analysis_user.md.j2",
@@ -212,6 +223,7 @@ def _build_prompts(trace: TraceData, spans: list[SpanData]) -> tuple[str, str]:
         tool_counts=sorted_counts,
         spans=[_SpanView(s) for s in timeline_spans],
         truncation_notice=truncation_notice,
+        user_queries=user_queries,
     )
     return system_prompt, user_prompt
 
@@ -277,7 +289,14 @@ class SessionAnalyzer:
         """Parse structured output from tool_use response."""
         for block in response.content:
             if block.type == "tool_use" and block.name == "record_analysis":
-                return AnalysisResult.model_validate(block.input)
+                data = block.input
+                # Drop malformed insights that the LLM occasionally produces.
+                if "insights" in data and isinstance(data["insights"], list):
+                    data["insights"] = [
+                        i for i in data["insights"]
+                        if isinstance(i, dict) and "category" in i
+                    ]
+                return AnalysisResult.model_validate(data)
 
         # Fallback if no tool_use block found (shouldn't happen with tool_choice)
         logger.error("No tool_use block in response, falling back to text parse")
