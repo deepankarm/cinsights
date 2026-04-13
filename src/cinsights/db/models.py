@@ -104,6 +104,60 @@ class Insight(SQLModel, table=True):
     session: CodingSession = Relationship(back_populates="insights")
 
 
+class SessionDailyTrend(SQLModel, table=True):
+    __tablename__ = "session_daily_trend"
+
+    id: str = Field(primary_key=True)  # "{date}:{user_id}:{project_name}"
+    date: str = Field(index=True)  # ISO date YYYY-MM-DD
+    user_id: str = Field(index=True)
+    project_name: str | None = Field(default=None, index=True)
+    tenant_id: str = Field(default="default", index=True)
+
+    session_count: int = 0
+    indexed_count: int = 0
+    analyzed_count: int = 0
+    total_turns: int = 0
+    total_tool_calls: int = 0
+    total_tokens: int = 0
+
+    avg_read_edit_ratio: float | None = None
+    avg_edits_without_read_pct: float | None = None
+    avg_user_interrupts_per_1k: float | None = None
+    avg_research_mutation_ratio: float | None = None
+    avg_write_vs_edit_pct: float | None = None
+    avg_error_rate: float | None = None
+
+    avg_session_duration_ms: float | None = None
+    avg_tool_calls_per_turn: float | None = None
+
+    agent_distribution_json: str | None = None
+
+    last_updated: datetime = Field(default_factory=datetime.utcnow)
+
+
+class SessionBaseline(SQLModel, table=True):
+    __tablename__ = "session_baseline"
+
+    id: str = Field(primary_key=True)  # "{user_id}:{project_name}"
+    user_id: str = Field(index=True)
+    project_name: str | None = Field(default=None, index=True)
+    tenant_id: str = Field(default="default")
+
+    session_count: int = 0
+    avg_turns: float = 0
+    avg_tool_count: float = 0
+    avg_read_edit_ratio: float = 0
+    avg_edits_without_read_pct: float = 0
+    avg_error_rate: float = 0
+    avg_duration_ms: float = 0
+    avg_user_interrupts_per_1k: float = 0
+    avg_research_mutation_ratio: float = 0
+    avg_write_vs_edit_pct: float = 0
+    tool_distribution_json: str | None = None
+
+    last_updated: datetime = Field(default_factory=datetime.utcnow)
+
+
 class DigestStatus(StrEnum):
     PENDING = "pending"
     COMPUTING_STATS = "computing_stats"
