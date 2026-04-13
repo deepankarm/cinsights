@@ -115,7 +115,8 @@ class TestProjectFromCcSlug:
     def test_dotted_directory_name(self):
         with _fake_fs("/Users", "/Users/alice", "/Users/alice/repos",
                        "/Users/alice/repos/acme", "/Users/alice/repos/acme/alice.github.io"):
-            assert _project_from_cc_slug("-Users-alice-repos-acme-alice-github-io") == "alice.github.io"
+            slug = "-Users-alice-repos-acme-alice-github-io"
+            assert _project_from_cc_slug(slug) == "alice.github.io"
 
     def test_dashed_directory_name(self):
         with _fake_fs("/Users", "/Users/alice", "/Users/alice/repos",

@@ -22,27 +22,14 @@ from cinsights.settings import get_settings
 app = typer.Typer(name="cinsights", help="LLM-powered insights from coding agent sessions.")
 
 
-def _apply_source_overrides(source: str | None, repo: str | None, paths: str | None = None) -> None:
-    """Override settings.source, entireio_repo_path, and local homes from CLI flags.
-
-    Uses lru_cache mutation so the rest of the pipeline sees updated values.
-    ``--paths`` is a comma-separated list of agent home directories (e.g.
-    ``~/.claude-personal,~/.codex``) that overrides both claude_code_homes
-    and codex_homes in config.json.
-    """
-    if source or repo or paths:
+def _apply_source_overrides(source: str | None, repo: str | None) -> None:
+    """Override settings.source and entireio_repo_path from CLI flags."""
+    if source or repo:
         settings = get_settings()
         if source:
             settings.source = source
         if repo:
             settings.entireio_repo_path = repo
-        if paths:
-            from cinsights.settings import get_config
-
-            config = get_config()
-            homes = [p.strip() for p in paths.split(",") if p.strip()]
-            config.claude_code_homes = homes
-            config.codex_homes = homes
 
 
 @app.command()
@@ -54,14 +41,13 @@ def analyze(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
     source: str | None = typer.Option(None, help="Override source (phoenix, entireio, local)."),
     repo: str | None = typer.Option(None, help="Repo path for entireio source."),
-    paths: str | None = typer.Option(None, help="Comma-separated dirs for local source."),
     index_only: bool = typer.Option(False, "--index-only", help="Index only, no LLM."),
     trace_ids: list[str] | None = typer.Argument(
         None, help="Specific trace/session IDs to analyze."
     ),
 ) -> None:
     """Pull sessions from a source, run LLM analysis, store insights."""
-    _apply_source_overrides(source, repo, paths)
+    _apply_source_overrides(source, repo)
 
     async def _entry() -> None:
         async with _track_run("analyze") as run:
@@ -113,10 +99,9 @@ def refresh(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
     source: str | None = typer.Option(None, help="Override source (phoenix, entireio, local)."),
     repo: str | None = typer.Option(None, help="Repo path for entireio source."),
-    paths: str | None = typer.Option(None, help="Comma-separated dirs for local source."),
 ) -> None:
     """Refresh everything: pull + analyze new sessions, then regenerate all digests."""
-    _apply_source_overrides(source, repo, paths)
+    _apply_source_overrides(source, repo)
 
     async def _entry() -> None:
         async with _track_run("refresh") as run:

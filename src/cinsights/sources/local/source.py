@@ -119,6 +119,7 @@ class LocalSource:
         self.claude_code_homes = claude_code_homes
         self.codex_homes = codex_homes
         self._file_index: dict[str, _FileRef] | None = None
+        self._slug_cache: dict[str, str | None] = {}
 
     def _build_index(self) -> dict[str, _FileRef]:
         if self._file_index is not None:
@@ -181,7 +182,9 @@ class LocalSource:
         except (ValueError, IndexError):
             slug = jsonl_file.parent.name
 
-        project_name = _project_from_cc_slug(slug)
+        if slug not in self._slug_cache:
+            self._slug_cache[slug] = _project_from_cc_slug(slug)
+        project_name = self._slug_cache[slug]
 
         return session_id, _FileRef(
             path=jsonl_file,
