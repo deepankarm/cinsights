@@ -660,6 +660,14 @@ async def _analyze_async(
         failed = 0
         async with sessionmaker() as db:
             for trace_id, session_id, trace, spans in work_items:
+                # For local source, derive per-session project name
+                pn = project_name
+                if pn is None and settings.source == SourceType.LOCAL:
+                    from cinsights.sources.local import LocalSource
+
+                    if isinstance(source, LocalSource):
+                        pn = source.get_project_name(trace_id)
+
                 try:
                     existing = await db.get(CodingSession, trace_id)
                     coding_session = await _store_indexed(
@@ -671,7 +679,7 @@ async def _analyze_async(
                         source,
                         force,
                         existing,
-                        project_name=project_name,
+                        project_name=pn,
                     )
                     await update_daily_trend(db, coding_session)
                     await update_baseline(db, coding_session)
@@ -709,6 +717,20 @@ async def _analyze_async(
         assert analyzer is not None
         analysis_results = await analyzer.analyze_batch(analysis_items, max_concurrency=concurrency)
         project_guesses = [static_guess] * len(work_items)
+    elif settings.source == SourceType.LOCAL:
+        from cinsights.analysis.project_detection import ProjectGuess
+        from cinsights.sources.local import LocalSource
+
+        assert isinstance(source, LocalSource)
+        analysis_results = await analyzer.analyze_batch(analysis_items, max_concurrency=concurrency)
+        project_guesses = [
+            ProjectGuess(
+                project_name=source.get_project_name(trace_id),
+                confidence="high",
+                reasoning="Derived from local directory structure",
+            )
+            for trace_id, _, _, _ in work_items
+        ]
     else:
         detect_items: list[tuple[str | None, list[SpanData]]] = [
             (previous_tags[trace_id], _filter_tool_spans(spans))

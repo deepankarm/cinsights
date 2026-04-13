@@ -40,7 +40,7 @@ class Paths:
 
 
 class LLMConfig(BaseModel):
-    """LLM provider configuration, loaded from ~/.cinsights/config.json.
+    """LLM provider configuration.
 
     API keys are NOT stored here — they come from the environment
     (e.g. ANTHROPIC_API_KEY) and the provider SDK reads them automatically.
@@ -56,33 +56,11 @@ class LLMConfig(BaseModel):
 
     @classmethod
     def load(cls) -> "LLMConfig":
-        """Load from ~/.cinsights/config.json, falling back to defaults."""
-        if Paths.config_file.is_file():
-            try:
-                data = json.loads(Paths.config_file.read_text())
-                if isinstance(data, dict):
-                    # Accept legacy llm_* prefixed keys from older config files
-                    cleaned = {}
-                    for k, v in data.items():
-                        key = k.removeprefix("llm_") if k.startswith("llm_") else k
-                        cleaned[key] = v
-                    return cls.model_validate(cleaned)
-            except (json.JSONDecodeError, OSError) as e:
-                logger.warning("Failed to read %s: %s", Paths.config_file, e)
-        return cls()
-
-    def save(self) -> None:
-        """Write config to ~/.cinsights/config.json."""
-        Paths.config_dir.mkdir(parents=True, exist_ok=True)
-        Paths.config_file.write_text(self.model_dump_json(indent=2, exclude_none=True) + "\n")
+        """Convenience: load just the LLM section from config.json."""
+        return AppConfig.load().llm
 
     def _make_provider(self, provider_name: str):
-        """Provider factory that injects base_url and extra headers.
-
-        All major pydantic-ai providers (anthropic, openai, groq, mistral, ...)
-        accept the same kwargs: ``base_url``, ``http_client``. API keys are
-        read from the environment by the SDK automatically.
-        """
+        """Provider factory that injects base_url and extra headers."""
         from pydantic_ai.providers import infer_provider_class
 
         provider_cls = infer_provider_class(provider_name)
@@ -109,6 +87,52 @@ class LLMConfig(BaseModel):
 
         model_id = f"{self.provider}:{self.model}"
         return infer_model(model_id, provider_factory=self._make_provider)
+
+
+class AppConfig(BaseModel):
+    """Full ~/.cinsights/config.json model.
+
+    Example::
+
+        {
+          "llm": {
+            "provider": "anthropic",
+            "model": "claude-haiku-4-5-20251001",
+            "extra_headers": {}
+          },
+          "claude_code_homes": ["~/.claude-work", "~/.claude"],
+          "codex_homes": ["~/.codex"]
+        }
+    """
+
+    llm: LLMConfig = Field(default_factory=LLMConfig)
+    claude_code_homes: list[str] = Field(default_factory=lambda: ["~/.claude"])
+    codex_homes: list[str] = Field(default_factory=lambda: ["~/.codex"])
+
+    @classmethod
+    def load(cls) -> "AppConfig":
+        """Load from ~/.cinsights/config.json, falling back to defaults."""
+        if Paths.config_file.is_file():
+            try:
+                data = json.loads(Paths.config_file.read_text())
+                if isinstance(data, dict):
+                    return cls.model_validate(data)
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("Failed to read %s: %s", Paths.config_file, e)
+        return cls()
+
+    def save(self) -> None:
+        """Write config to ~/.cinsights/config.json."""
+        Paths.config_dir.mkdir(parents=True, exist_ok=True)
+        Paths.config_file.write_text(self.model_dump_json(indent=2, exclude_none=True) + "\n")
+
+    @property
+    def resolved_claude_code_homes(self) -> list[Path]:
+        return [Path(p).expanduser() for p in self.claude_code_homes if p.strip()]
+
+    @property
+    def resolved_codex_homes(self) -> list[Path]:
+        return [Path(p).expanduser() for p in self.codex_homes if p.strip()]
 
 
 class SourceType(StrEnum):
@@ -138,8 +162,7 @@ class Settings(BaseSettings):
     entireio_repo_path: str | None = None
     entireio_branch: str = "entire/checkpoints/v1"
 
-    # Local source config
-    local_paths: str | None = None  # comma-separated directories
+    # Local source config (homes configured in ~/.cinsights/config.json)
 
     host: str = "127.0.0.1"
     port: int = 8100
@@ -152,5 +175,10 @@ def get_settings() -> Settings:
 
 
 @lru_cache
+def get_config() -> AppConfig:
+    return AppConfig.load()
+
+
+@lru_cache
 def get_llm_config() -> LLMConfig:
-    return LLMConfig.load()
+    return get_config().llm
