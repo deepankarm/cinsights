@@ -145,6 +145,8 @@ async def _store_indexed(
                 ):
                     if ref.metadata.agent:
                         agent_name = ref.metadata.agent.lower().replace(" ", "-")
+                        if agent_name in ("agent", "mock-lifecycle-agent", "vogon-agent"):
+                            agent_name = "unknown"
                         if not existing:
                             coding_session.agent_type = agent_name
                     break
@@ -191,7 +193,14 @@ async def _store_indexed(
     # Compute Tier 0 quality metrics
     from cinsights.metrics import compute_all as compute_metrics
 
-    metrics = compute_metrics(tool_call_rows)
+    context_growth_list = None
+    if context_growth:
+        import contextlib
+
+        with contextlib.suppress(json_mod.JSONDecodeError, TypeError):
+            context_growth_list = json_mod.loads(context_growth)
+
+    metrics = compute_metrics(tool_call_rows, context_growth_list, total_tokens)
     for key, value in metrics.items():
         if value is not None:
             setattr(coding_session, key, value)
@@ -470,6 +479,7 @@ async def _analyze_async(
     verbose: bool,
     trace_ids: list[str] | None,
     run: _RunHandle | None = None,
+    index_only: bool = False,
 ) -> None:
     """Pull sessions from the configured source and run per-session LLM analysis.
 
@@ -494,10 +504,13 @@ async def _analyze_async(
     source = create_source(settings)
     sessionmaker = get_sessionmaker()
 
-    llm = get_llm_config()
-    model = llm.build_model()
-    analyzer = SessionAnalyzer(model=model)
-    project_detector = ProjectDetector(model=model)
+    analyzer = None
+    project_detector = None
+    if not index_only:
+        llm = get_llm_config()
+        model = llm.build_model()
+        analyzer = SessionAnalyzer(model=model)
+        project_detector = ProjectDetector(model=model)
 
     async with sessionmaker() as _kp_db:
         kp_result = await _kp_db.exec(
@@ -631,9 +644,57 @@ async def _analyze_async(
             existing_row = await _prev_db.get(CodingSession, trace_id)
             previous_tags[trace_id] = existing_row.project_name if existing_row else None
 
+    from cinsights.trends import update_baseline, update_daily_trend
+
+    if index_only:
+        # Index-only mode: store metadata + metrics, skip LLM
+        from cinsights.analysis.project_detection import ProjectGuess
+
+        project_name = None
+        if settings.source == SourceType.ENTIREIO and settings.entireio_repo_path:
+            from pathlib import Path
+
+            project_name = Path(settings.entireio_repo_path).name
+
+        indexed = 0
+        failed = 0
+        async with sessionmaker() as db:
+            for trace_id, session_id, trace, spans in work_items:
+                try:
+                    existing = await db.get(CodingSession, trace_id)
+                    coding_session = await _store_indexed(
+                        db,
+                        trace_id,
+                        session_id,
+                        trace,
+                        spans,
+                        source,
+                        force,
+                        existing,
+                        project_name=project_name,
+                    )
+                    await update_daily_trend(db, coding_session)
+                    await update_baseline(db, coding_session)
+                    await db.commit()
+                    indexed += 1
+                    console.print(f"  [cyan]○[/cyan] {trace_id[:12]} — indexed")
+                except Exception as e:
+                    await db.rollback()
+                    failed += 1
+                    console.print(f"  [red]✗[/red] {trace_id[:12]} — {e}")
+
+        console.print()
+        table = Table(title="Index Summary")
+        table.add_column("Metric", style="bold")
+        table.add_column("Count", justify="right")
+        table.add_row("Indexed", str(indexed))
+        table.add_row("Failed", str(failed))
+        console.print(table)
+        return
+
+    # Full analysis mode: index + LLM insights
     analysis_items = [(trace, spans) for _, _, trace, spans in work_items]
 
-    # For entireio source, use repo directory name as project (skip LLM detection)
     if settings.source == SourceType.ENTIREIO and settings.entireio_repo_path:
         from pathlib import Path
 
@@ -645,6 +706,7 @@ async def _analyze_async(
             confidence="high",
             reasoning="Derived from entireio repo path",
         )
+        assert analyzer is not None
         analysis_results = await analyzer.analyze_batch(analysis_items, max_concurrency=concurrency)
         project_guesses = [static_guess] * len(work_items)
     else:
@@ -652,6 +714,8 @@ async def _analyze_async(
             (previous_tags[trace_id], _filter_tool_spans(spans))
             for trace_id, _, _, spans in work_items
         ]
+        assert analyzer is not None
+        assert project_detector is not None
         analysis_results, project_guesses = await asyncio.gather(
             analyzer.analyze_batch(analysis_items, max_concurrency=concurrency),
             project_detector.detect_batch(
@@ -680,9 +744,6 @@ async def _analyze_async(
                     project_name=project_guess.project_name,
                 )
                 n_insights = await _store_insights(db, coding_session, result)
-
-                # Update daily trends and baselines (zero LLM cost)
-                from cinsights.trends import update_baseline, update_daily_trend
 
                 await update_daily_trend(db, coding_session)
                 await update_baseline(db, coding_session)

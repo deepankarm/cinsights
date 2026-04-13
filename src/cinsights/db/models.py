@@ -51,11 +51,15 @@ class CodingSession(SQLModel, table=True):
     # Tier 0 quality metrics (computed during indexing, zero LLM cost)
     read_edit_ratio: float | None = None
     edits_without_read_pct: float | None = None
-    user_interrupts_per_1k: float | None = None
     research_mutation_ratio: float | None = None
     write_vs_edit_pct: float | None = None
-    reasoning_loops_per_1k: float | None = None
     error_rate: float | None = None
+    repeated_edits_count: int | None = None
+    subagent_spawn_rate: float | None = None
+    tokens_per_useful_edit: float | None = None
+    context_pressure_score: float | None = None
+    turn_count: int | None = None
+    tool_calls_per_turn: float | None = None
 
     # Scoring
     interestingness_score: float | None = None
@@ -122,7 +126,6 @@ class SessionDailyTrend(SQLModel, table=True):
 
     avg_read_edit_ratio: float | None = None
     avg_edits_without_read_pct: float | None = None
-    avg_user_interrupts_per_1k: float | None = None
     avg_research_mutation_ratio: float | None = None
     avg_write_vs_edit_pct: float | None = None
     avg_error_rate: float | None = None
@@ -150,7 +153,6 @@ class SessionBaseline(SQLModel, table=True):
     avg_edits_without_read_pct: float = 0
     avg_error_rate: float = 0
     avg_duration_ms: float = 0
-    avg_user_interrupts_per_1k: float = 0
     avg_research_mutation_ratio: float = 0
     avg_write_vs_edit_pct: float = 0
     tool_distribution_json: str | None = None

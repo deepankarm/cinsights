@@ -74,7 +74,7 @@ async def get_daily_trends(
                 avg_error_rate=_avg([r.avg_error_rate for r in day_rows]),
                 avg_research_mutation_ratio=_avg([r.avg_research_mutation_ratio for r in day_rows]),
                 avg_session_duration_ms=_avg([r.avg_session_duration_ms for r in day_rows]),
-                agent_distribution_json=None,
+                agent_distribution_json=_merge_agent_dist(day_rows),
             )
         )
 
@@ -115,3 +115,18 @@ def _avg(values: list[float | None]) -> float | None:
     if not nums:
         return None
     return round(sum(nums) / len(nums), 2)
+
+
+def _merge_agent_dist(rows: list[SessionDailyTrend]) -> str | None:
+    import json
+
+    merged: dict[str, int] = {}
+    for r in rows:
+        if r.agent_distribution_json:
+            try:
+                dist = json.loads(r.agent_distribution_json)
+                for agent, count in dist.items():
+                    merged[agent] = merged.get(agent, 0) + count
+            except (json.JSONDecodeError, TypeError):
+                pass
+    return json.dumps(merged) if merged else None

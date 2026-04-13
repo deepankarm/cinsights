@@ -47,6 +47,7 @@ def analyze(
     source: str | None = typer.Option(None, help="Override source (phoenix, entireio, local)."),
     repo: str | None = typer.Option(None, help="Repo path for entireio source."),
     paths: str | None = typer.Option(None, help="Comma-separated dirs for local source."),
+    index_only: bool = typer.Option(False, "--index-only", help="Index only, no LLM."),
     trace_ids: list[str] | None = typer.Argument(
         None, help="Specific trace/session IDs to analyze."
     ),
@@ -64,6 +65,7 @@ def analyze(
                 verbose=verbose,
                 trace_ids=trace_ids,
                 run=run,
+                index_only=index_only,
             )
 
     asyncio.run(_entry())
