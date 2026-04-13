@@ -680,6 +680,13 @@ async def _analyze_async(
                     project_name=project_guess.project_name,
                 )
                 n_insights = await _store_insights(db, coding_session, result)
+
+                # Update daily trends and baselines (zero LLM cost)
+                from cinsights.trends import update_baseline, update_daily_trend
+
+                await update_daily_trend(db, coding_session)
+                await update_baseline(db, coding_session)
+
                 await db.commit()
                 analyzed += 1
                 if run is not None:
