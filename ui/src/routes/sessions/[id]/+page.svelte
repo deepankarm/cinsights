@@ -244,7 +244,7 @@
 					{session.status}
 				</span>
 			</div>
-			{#if firstEditMs != null}
+			{#if firstEditMs != null && firstEditMs > 0}
 				<div class="meta-item">
 					<span class="meta-label">First Edit</span>
 					<span class="meta-value">{formatSecs(firstEditMs)} in</span>

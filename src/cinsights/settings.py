@@ -1,5 +1,6 @@
 import json
 import logging
+from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 
@@ -49,11 +50,9 @@ class LLMConfig(BaseModel):
     """
 
     provider: str = "anthropic"
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-haiku-4-5-20251001"
     base_url: str | None = None
     extra_headers: dict[str, str] = Field(default_factory=dict)
-    # Cheaper model for project detection. Falls back to the main model if unset.
-    project_detection_model: str | None = None
 
     @classmethod
     def load(cls) -> "LLMConfig":
@@ -104,17 +103,17 @@ class LLMConfig(BaseModel):
 
         return provider_cls(**kwargs)
 
-    def build_model(self, override_model: str | None = None):
-        """Build a pydantic-ai Model via ``infer_model("provider:model")``.
-
-        Any provider pydantic-ai supports works automatically — no
-        provider-specific code branches needed.
-        """
+    def build_model(self):
+        """Build a pydantic-ai Model via ``infer_model("provider:model")``."""
         from pydantic_ai.models import infer_model
 
-        model_name = override_model or self.model
-        model_id = f"{self.provider}:{model_name}"
+        model_id = f"{self.provider}:{self.model}"
         return infer_model(model_id, provider_factory=self._make_provider)
+
+
+class SourceType(StrEnum):
+    PHOENIX = "phoenix"
+    ENTIREIO = "entireio"
 
 
 class Settings(BaseSettings):
@@ -126,13 +125,17 @@ class Settings(BaseSettings):
 
     tenant_id: str = "default"
     agent_type: str = "claude-code"
-    source: str = "phoenix"
+    source: SourceType = SourceType.PHOENIX
     prompt_version_session: str = "session-v1"
     prompt_version_digest: str = "digest-v1"
 
     # Sessions with fewer tool calls than this are excluded from the
     # per-session evidence list in digest prompts.
     min_session_tool_count: int = 10
+
+    # Entireio source config
+    entireio_repo_path: str | None = None
+    entireio_branch: str = "entire/checkpoints/v1"
 
     host: str = "127.0.0.1"
     port: int = 8100

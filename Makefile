@@ -1,4 +1,4 @@
-.PHONY: dev serve analyze digest refresh build-ui test lint fix fmt check init clean sync restart help
+.PHONY: dev serve analyze digest refresh analyze-entireio refresh-entireio build-ui test lint fix fmt check init clean sync restart help
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -26,6 +26,12 @@ digest: ## Generate global + per-project insights reports (last 30 days, concurr
 
 refresh: ## Pull new sessions + analyze + regenerate all digests (the cron entrypoint)
 	uv run cinsights refresh --hours 24 --days 30
+
+analyze-entireio: ## Analyze Entireio checkpoints from a repo (set REPO=/path/to/repo)
+	uv run cinsights analyze --source entireio --repo $(REPO)
+
+refresh-entireio: ## Refresh from Entireio checkpoints (set REPO=/path/to/repo)
+	uv run cinsights refresh --source entireio --repo $(REPO) --hours 8760 --days 30
 
 build-ui: ## Build SvelteKit to static files
 	cd ui && npm run build

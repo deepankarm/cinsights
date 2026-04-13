@@ -164,8 +164,8 @@ def _build_prompts(trace: TraceData, spans: list[SpanData]) -> tuple[str, str]:
     active_duration_ms = sum(s.duration_ms for s in turn_spans) if turn_spans else 0
     duration_s = active_duration_ms / 1000 if active_duration_ms > 0 else wall_duration_s
 
-    # Tool spans in Claude Code traces are CHAIN kind with tool-like names,
-    # not span_kind == "TOOL". Match the pipeline's _filter_tool_spans logic.
+    # Tool spans are identified by parent + tool name attributes.
+    # Match the pipeline's _filter_tool_spans logic.
     tool_spans = [
         s
         for s in spans

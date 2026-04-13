@@ -224,8 +224,8 @@ async def compute_error_breakdown(
 
     failed_result = await db.exec(
         _tc_agg_query((ToolCall.output_value,), start, end, project_name).where(
-            ToolCall.success == False
-        )  # noqa: E712
+            ToolCall.success == False  # noqa: E712 — SQLAlchemy filter
+        )
     )
     failed_calls = failed_result.all()
 

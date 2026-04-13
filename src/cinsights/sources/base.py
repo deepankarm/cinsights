@@ -6,6 +6,17 @@ from typing import Protocol, runtime_checkable
 
 
 @dataclass
+class DiscoveredSession:
+    """Lightweight session info discovered from span attributes or checkpoint metadata."""
+
+    session_id: str
+    span_count: int
+    last_span_time: datetime
+    start_time: datetime
+    end_time: datetime
+
+
+@dataclass
 class SpanData:
     """Normalized span data from any trace source."""
 
@@ -103,7 +114,7 @@ class TraceData:
 
 @runtime_checkable
 class TraceSource(Protocol):
-    """Protocol for trace data sources (Phoenix, Langfuse, raw OTEL, etc.)."""
+    """Protocol for trace data sources."""
 
     def get_sessions(
         self,

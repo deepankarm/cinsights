@@ -15,11 +15,24 @@ import asyncio
 
 import typer
 
-from cinsights.settings import get_settings
 from cinsights.pipeline import _analyze_async, _digest_async
 from cinsights.runtime import _track_run
+from cinsights.settings import get_settings
 
 app = typer.Typer(name="cinsights", help="LLM-powered insights from coding agent sessions.")
+
+
+def _apply_source_overrides(source: str | None, repo: str | None) -> None:
+    """Override settings.source and entireio_repo_path from CLI flags.
+
+    Uses lru_cache mutation so the rest of the pipeline sees updated values.
+    """
+    if source or repo:
+        settings = get_settings()
+        if source:
+            settings.source = source
+        if repo:
+            settings.entireio_repo_path = repo
 
 
 @app.command()
@@ -29,11 +42,14 @@ def analyze(
     force: bool = typer.Option(False, help="Re-analyze already-analyzed sessions."),
     concurrency: int = typer.Option(5, help="Max concurrent LLM analysis requests."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
+    source: str | None = typer.Option(None, help="Override source (phoenix, entireio)."),
+    repo: str | None = typer.Option(None, help="Repo path for entireio source."),
     trace_ids: list[str] | None = typer.Argument(
-        None, help="Specific trace IDs to analyze. If omitted, fetches from Phoenix."
+        None, help="Specific trace/session IDs to analyze."
     ),
 ) -> None:
-    """Pull sessions from Phoenix, run LLM analysis, store insights."""
+    """Pull sessions from a source, run LLM analysis, store insights."""
+    _apply_source_overrides(source, repo)
 
     async def _entry() -> None:
         async with _track_run("analyze") as run:
@@ -82,13 +98,11 @@ def refresh(
     force: bool = typer.Option(False, help="Re-analyze already-analyzed sessions."),
     concurrency: int = typer.Option(5, help="Max concurrent LLM analysis requests."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
+    source: str | None = typer.Option(None, help="Override source (phoenix, entireio)."),
+    repo: str | None = typer.Option(None, help="Repo path for entireio source."),
 ) -> None:
-    """Refresh everything: pull + analyze new sessions, then regenerate all digests.
-
-    This is the standard entrypoint for cron / scheduled jobs. It runs `analyze`
-    followed by `digest` (global + per-project, concurrent) so dashboards always
-    reflect the latest Phoenix data.
-    """
+    """Refresh everything: pull + analyze new sessions, then regenerate all digests."""
+    _apply_source_overrides(source, repo)
 
     async def _entry() -> None:
         async with _track_run("refresh") as run:
@@ -150,8 +164,8 @@ def setup(
     """
     import json
 
-    from cinsights.settings import LLMConfig, Paths
     from cinsights.runtime import console
+    from cinsights.settings import LLMConfig, Paths
 
     llm = LLMConfig.load()
 
@@ -198,7 +212,6 @@ def setup(
         model=model,
         base_url=base_url or None,
         extra_headers=headers_dict,
-        project_detection_model=llm.project_detection_model,
     )
     new_config.save()
     console.print(f"\n  Configuration written to [bold]{Paths.config_file}[/bold]")

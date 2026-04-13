@@ -16,7 +16,7 @@ from sqlmodel import select as select_fn
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from cinsights.runtime import _content_hash, _RunHandle, console
-from cinsights.settings import get_settings
+from cinsights.settings import SourceType, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +137,7 @@ async def _store_analysis(
         # Update metadata that may have changed
         coding_session.user_id = user_id or existing.user_id
         coding_session.project_name = project_name or existing.project_name
+        coding_session.start_time = trace.start_time
         coding_session.end_time = trace.end_time
         coding_session.total_tokens = total_tokens
         coding_session.prompt_tokens = total_prompt
@@ -146,6 +147,24 @@ async def _store_analysis(
         coding_session.last_span_time = last_span_time
         # tenant/source/agent are intentionally NOT overwritten on re-analyze —
         # they reflect where the row was first ingested.
+
+    # Populate entireio-specific metadata
+    if settings.source == SourceType.ENTIREIO:
+        from cinsights.sources.entireio import EntireioSource
+
+        if isinstance(source, EntireioSource):
+            coding_session.metadata_json = source.get_session_metadata_json(trace_id)
+            # Use agent_type from checkpoint metadata instead of settings default
+            idx = source._build_index()
+            for _, ref in idx.items():
+                if ref.checkpoint_id == trace_id.split(":")[1] and ref.session_idx == int(
+                    trace_id.split(":")[2]
+                ):
+                    if ref.metadata.agent:
+                        agent_name = ref.metadata.agent.lower().replace(" ", "-")
+                        if not existing:
+                            coding_session.agent_type = agent_name
+                    break
 
     # Clear old data if re-analyzing. Use explicit FK queries — AsyncSession
     # doesn't support implicit lazy relationship loads.
@@ -431,9 +450,9 @@ async def _analyze_async(
     trace_ids: list[str] | None,
     run: _RunHandle | None = None,
 ) -> None:
-    """Pull sessions from Phoenix and run per-session LLM analysis.
+    """Pull sessions from the configured source and run per-session LLM analysis.
 
-    Phoenix's client is sync, so every blocking call is pushed into a
+    Source clients may be sync, so blocking calls are pushed into a
     threadpool via ``asyncio.to_thread``. The LLM analyzer is genuinely
     async and runs concurrently up to ``concurrency``.
     """
@@ -449,16 +468,15 @@ async def _analyze_async(
     from cinsights.db.engine import get_sessionmaker
     from cinsights.db.models import CodingSession, SessionStatus
     from cinsights.settings import get_llm_config
-    from cinsights.sources.phoenix import PhoenixSource
+    from cinsights.sources.factory import create_source
 
-    source = PhoenixSource(base_url=settings.phoenix_endpoint, project=settings.phoenix_project)
+    source = create_source(settings)
     sessionmaker = get_sessionmaker()
 
     llm = get_llm_config()
-    analyzer = SessionAnalyzer(model=llm.build_model())
-    project_detector = ProjectDetector(
-        model=llm.build_model(override_model=llm.project_detection_model),
-    )
+    model = llm.build_model()
+    analyzer = SessionAnalyzer(model=model)
+    project_detector = ProjectDetector(model=model)
 
     async with sessionmaker() as _kp_db:
         kp_result = await _kp_db.exec(
@@ -472,8 +490,8 @@ async def _analyze_async(
     # Each work item: (trace_id, session_id, TraceData, spans)
     work_items: list[tuple[str, str, object, list]] = []
 
-    # PhoenixSource is sync (HTTP via the phoenix client). Push every blocking
-    # call into a thread so the event loop stays free for the LLM analyzer.
+    # Source clients may be sync — push blocking calls into a thread
+    # so the event loop stays free for the LLM analyzer.
     if trace_ids:
         from cinsights.sources.base import TraceData
 
@@ -482,7 +500,9 @@ async def _analyze_async(
             TextColumn("[progress.description]{task.description}"),
             console=console,
         ) as progress:
-            task = progress.add_task(f"Fetching {len(trace_ids)} ID(s) from Phoenix...", total=None)
+            task = progress.add_task(
+                f"Fetching {len(trace_ids)} ID(s) from {settings.source}...", total=None
+            )
             for tid in trace_ids:
                 # Try as session ID first (fetches all spans across traces)
                 spans = await asyncio.to_thread(source.get_spans_by_session, tid)
@@ -509,7 +529,7 @@ async def _analyze_async(
                         console.print(f"  [yellow]No spans for {tid[:16]}...[/yellow]")
             progress.update(task, description=f"Found {len(work_items)} session(s) with spans")
     else:
-        # Discover all sessions from Phoenix
+        # Discover all sessions from the configured source
         start_time = datetime.now(UTC) - timedelta(hours=hours)
 
         with Progress(
@@ -517,7 +537,7 @@ async def _analyze_async(
             TextColumn("[progress.description]{task.description}"),
             console=console,
         ) as progress:
-            task = progress.add_task("Discovering sessions from Phoenix...", total=None)
+            task = progress.add_task(f"Discovering sessions from {settings.source}...", total=None)
             discovered = await asyncio.to_thread(source.discover_sessions, start_time=start_time)
             progress.update(task, description=f"Found {len(discovered)} sessions")
 
@@ -567,8 +587,8 @@ async def _analyze_async(
 
                     trace = TraceData(
                         trace_id=d.session_id,
-                        start_time=d.start_time,
-                        end_time=d.end_time,
+                        start_time=spans[0].start_time,
+                        end_time=spans[-1].end_time,
                         spans=spans,
                     )
                     work_items.append((d.session_id, d.session_id, trace, spans))
@@ -591,14 +611,32 @@ async def _analyze_async(
             previous_tags[trace_id] = existing_row.project_name if existing_row else None
 
     analysis_items = [(trace, spans) for _, _, trace, spans in work_items]
-    detect_items: list[tuple[str | None, list[SpanData]]] = [
-        (previous_tags[trace_id], _filter_tool_spans(spans)) for trace_id, _, _, spans in work_items
-    ]
 
-    analysis_results, project_guesses = await asyncio.gather(
-        analyzer.analyze_batch(analysis_items, max_concurrency=concurrency),
-        project_detector.detect_batch(detect_items, known_projects, max_concurrency=concurrency),
-    )
+    # For entireio source, use repo directory name as project (skip LLM detection)
+    if settings.source == SourceType.ENTIREIO and settings.entireio_repo_path:
+        from pathlib import Path
+
+        from cinsights.analysis.project_detection import ProjectGuess
+
+        repo_name = Path(settings.entireio_repo_path).name
+        static_guess = ProjectGuess(
+            project_name=repo_name,
+            confidence="high",
+            reasoning="Derived from entireio repo path",
+        )
+        analysis_results = await analyzer.analyze_batch(analysis_items, max_concurrency=concurrency)
+        project_guesses = [static_guess] * len(work_items)
+    else:
+        detect_items: list[tuple[str | None, list[SpanData]]] = [
+            (previous_tags[trace_id], _filter_tool_spans(spans))
+            for trace_id, _, _, spans in work_items
+        ]
+        analysis_results, project_guesses = await asyncio.gather(
+            analyzer.analyze_batch(analysis_items, max_concurrency=concurrency),
+            project_detector.detect_batch(
+                detect_items, known_projects, max_concurrency=concurrency
+            ),
+        )
 
     # Store results in DB
     analyzed = 0

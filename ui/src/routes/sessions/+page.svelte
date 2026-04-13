@@ -43,6 +43,15 @@
 				return '#64748b';
 		}
 	}
+
+	const sessionsByProject = $derived.by(() => {
+		const groups: Record<string, SessionRead[]> = {};
+		for (const s of sessions) {
+			const key = s.project_name ?? 'Unknown';
+			(groups[key] ??= []).push(s);
+		}
+		return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
+	});
 </script>
 
 <svelte:head>
@@ -93,51 +102,54 @@
 		<h2>Sessions</h2>
 		{#if sessions.length === 0}
 			<div class="empty">
-				No sessions found. Run <code>cinsights analyze</code> to import sessions from Phoenix.
+				No sessions found. Run <code>cinsights analyze</code> to import sessions.
 			</div>
 		{:else}
-			<div class="table-wrap">
-				<table>
-					<thead>
-						<tr>
-							<th>Session</th>
-							<th>Time</th>
-							<th>Model</th>
-							<th>User</th>
-							<th>Project</th>
-							<th>Duration</th>
-							<th>Tools</th>
-							<th>Tokens</th>
-							<th>Insights</th>
-							<th>Status</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each sessions as session}
+			{#each sessionsByProject as [project, projectSessions]}
+				<h3 class="project-heading">{project} <span class="project-count">({projectSessions.length})</span></h3>
+				<div class="table-wrap">
+					<table>
+						<thead>
 							<tr>
-								<td class="mono">
-									<a href="/sessions/{session.id}" class="session-link">
-										{session.id.slice(0, 8)}
-									</a>
-								</td>
-								<td>{formatDate(session.start_time)}</td>
-								<td class="mono">{session.model ?? '-'}</td>
-								<td class="mono">{session.user_id ?? '-'}</td>
-								<td class="mono">{session.project_name ?? '-'}</td>
-								<td>{formatDuration(session.start_time, session.end_time)}</td>
-								<td>{session.tool_call_count}</td>
-								<td>{session.total_tokens.toLocaleString()}</td>
-								<td>{session.insight_count}</td>
-								<td>
-									<span class="status-badge" style="color: {statusColor(session.status)}">
-										{session.status}
-									</span>
-								</td>
+								<th>Session</th>
+								<th>Time</th>
+								<th>Model</th>
+								<th>User</th>
+								<th>Agent</th>
+								<th>Duration</th>
+								<th>Tools</th>
+								<th>Tokens</th>
+								<th>Insights</th>
+								<th>Status</th>
 							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
+						</thead>
+						<tbody>
+							{#each projectSessions as session}
+								<tr>
+									<td class="mono">
+										<a href="/sessions/{session.id}" class="session-link" title={session.id}>
+											{session.id.startsWith('entireio:') ? session.id.split(':')[1].slice(0, 8) : session.id.slice(0, 8)}
+										</a>
+									</td>
+									<td>{formatDate(session.start_time)}</td>
+									<td class="mono">{session.model ?? '-'}</td>
+									<td class="mono">{session.user_id ?? '-'}</td>
+									<td class="mono">{session.agent_type ?? '-'}</td>
+									<td>{formatDuration(session.start_time, session.end_time)}</td>
+									<td>{session.tool_call_count}</td>
+									<td>{session.total_tokens.toLocaleString()}</td>
+									<td>{session.insight_count}</td>
+									<td>
+										<span class="status-badge" style="color: {statusColor(session.status)}">
+											{session.status}
+										</span>
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/each}
 		{/if}
 	</div>
 {/if}
@@ -270,6 +282,21 @@
 		background: white;
 		border: 1px solid #e2e8f0;
 		border-radius: 8px;
+	}
+	.project-heading {
+		font-size: 15px;
+		font-weight: 600;
+		color: #334155;
+		margin-top: 24px;
+		margin-bottom: 8px;
+	}
+	.project-heading:first-of-type {
+		margin-top: 0;
+	}
+	.project-count {
+		font-weight: 400;
+		color: #94a3b8;
+		font-size: 13px;
 	}
 	.empty code {
 		background: #f1f5f9;
