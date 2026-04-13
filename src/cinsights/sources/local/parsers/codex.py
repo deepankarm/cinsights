@@ -7,13 +7,9 @@ import logging
 from datetime import UTC, datetime
 
 from cinsights.sources.base import SpanData, TraceData
+from cinsights.sources.jsonl_utils import parse_dt
 
 logger = logging.getLogger(__name__)
-
-
-def _parse_dt(value: str) -> datetime:
-    value = value.replace("Z", "+00:00")
-    return datetime.fromisoformat(value)
 
 
 def parse_codex(
@@ -38,18 +34,6 @@ def parse_codex(
             cwd = payload.get("cwd", "")
             break
 
-    # Extract model from tool.execution_complete or event_msg
-    for line in lines:
-        if line.get("type") == "response_item":
-            payload = line.get("payload", {})
-            if payload.get("type") == "function_call":
-                # Model info sometimes in nearby events
-                pass
-        elif line.get("type") == "event_msg":
-            payload = line.get("payload", {})
-            if payload.get("type") == "agent_message":
-                pass
-
     if not project_name and cwd:
         project_name = cwd.rstrip("/").rsplit("/", 1)[-1]
 
@@ -59,7 +43,7 @@ def parse_codex(
     all_spans: list[SpanData] = []
     root_id = f"{trace_id}:root"
 
-    all_timestamps = [_parse_dt(line["timestamp"]) for line in lines if line.get("timestamp")]
+    all_timestamps = [parse_dt(line["timestamp"]) for line in lines if line.get("timestamp")]
     if all_timestamps:
         session_start = min(all_timestamps)
         session_end = max(all_timestamps)
@@ -70,8 +54,8 @@ def parse_codex(
     for turn_num, turn in enumerate(turns, 1):
         turn_id = f"{trace_id}:turn:{turn_num}"
 
-        turn_start = _parse_dt(turn["start_ts"]) if turn.get("start_ts") else session_start
-        turn_end = _parse_dt(turn["end_ts"]) if turn.get("end_ts") else turn_start
+        turn_start = parse_dt(turn["start_ts"]) if turn.get("start_ts") else session_start
+        turn_end = parse_dt(turn["end_ts"]) if turn.get("end_ts") else turn_start
 
         # Aggregate tokens from token_count events in this turn
         total_prompt = turn.get("input_tokens", 0)
@@ -97,8 +81,8 @@ def parse_codex(
 
         # Tool spans from function_call / function_call_output pairs
         for tool in turn.get("tools", []):
-            tool_start = _parse_dt(tool["start_ts"]) if tool.get("start_ts") else turn_start
-            tool_end = _parse_dt(tool["end_ts"]) if tool.get("end_ts") else tool_start
+            tool_start = parse_dt(tool["start_ts"]) if tool.get("start_ts") else turn_start
+            tool_end = parse_dt(tool["end_ts"]) if tool.get("end_ts") else tool_start
 
             tool_span = SpanData(
                 span_id=f"{trace_id}:tool:{tool['call_id']}",
