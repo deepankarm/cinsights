@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from datetime import datetime
 
 import pandas as pd
 from phoenix.client import Client
 
-from cinsights.sources.base import SessionData, SpanData, TraceData
+from cinsights.sources.base import DiscoveredSession, SessionData, SpanData, TraceData
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +42,7 @@ def _df_rows_to_spans(df: pd.DataFrame) -> list[SpanData]:
             if col.startswith("attributes."):
                 val = row[col]
                 if val is not None and str(val) != "nan":
-                    key = col[len("attributes.") :]
+                    key = col[len("attributes."):]
                     attrs[key] = val
 
         parent_id = row.get("parent_id")
@@ -64,17 +63,6 @@ def _df_rows_to_spans(df: pd.DataFrame) -> list[SpanData]:
             )
         )
     return spans
-
-
-@dataclass
-class DiscoveredSession:
-    """Lightweight session info discovered from span attributes."""
-
-    session_id: str
-    span_count: int
-    last_span_time: datetime
-    start_time: datetime
-    end_time: datetime
 
 
 class PhoenixSource:
@@ -106,11 +94,7 @@ class PhoenixSource:
         start_time: datetime | None = None,
         end_time: datetime | None = None,
     ) -> list[DiscoveredSession]:
-        """Discover all sessions by scanning span attributes.
-
-        Returns lightweight session metadata (ID, span count, timestamps)
-        for deciding what needs (re-)analysis.
-        """
+        """Discover all sessions by scanning span attributes."""
         df = self._fetch_all_spans_df()
         if df.empty:
             return []
@@ -119,7 +103,6 @@ class PhoenixSource:
         if sid_col not in df.columns:
             return []
 
-        # Drop rows without session.id
         df_with_sid = df[df[sid_col].notna()]
         if df_with_sid.empty:
             return []
@@ -154,7 +137,7 @@ class PhoenixSource:
         end_time: datetime | None = None,
         limit: int = 100,
     ) -> list[SessionData]:
-        """Fetch sessions from Phoenix with their traces."""
+        """Fetch sessions with their traces."""
         discovered = self.discover_sessions(start_time, end_time)
         return [
             SessionData(

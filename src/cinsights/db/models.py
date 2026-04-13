@@ -29,11 +29,11 @@ class InsightSeverity(StrEnum):
 class CodingSession(SQLModel, table=True):
     __tablename__ = "coding_session"
 
-    id: str = Field(primary_key=True)  # Phoenix trace_id
+    id: str = Field(primary_key=True)  # source-specific session key
     tenant_id: str = Field(default="default", index=True)  # multi-tenant boundary
     source: str = Field(default="phoenix")  # observability backend
     agent_type: str = Field(default="claude-code")  # coding agent identity
-    session_id: str | None = Field(default=None, index=True)  # Phoenix session.id
+    session_id: str | None = Field(default=None, index=True)  # source-native session grouping key
     user_id: str | None = Field(default=None, index=True)  # user.id from spans
     project_name: str | None = Field(default=None, index=True)  # project.name from spans
     start_time: datetime
@@ -45,6 +45,7 @@ class CodingSession(SQLModel, table=True):
     span_count: int = 0  # Track span count for change detection
     last_span_time: datetime | None = None  # Track latest span for change detection
     context_growth_json: str | None = None  # [{turn, prompt_tokens, completion_tokens}]
+    metadata_json: str | None = None  # Source-specific rich data (cache tokens, attribution, etc.)
     analysis_prompt_tokens: int = 0  # Tokens used by cinsights analysis
     analysis_completion_tokens: int = 0
     status: SessionStatus = SessionStatus.PENDING

@@ -45,6 +45,7 @@ class SessionRead(BaseModel):
     session_id: str | None
     user_id: str | None
     project_name: str | None
+    agent_type: str | None = None
     start_time: datetime
     end_time: datetime | None
     model: str | None
@@ -128,6 +129,7 @@ async def list_sessions(
             session_id=s.session_id,
             user_id=s.user_id,
             project_name=s.project_name,
+            agent_type=s.agent_type,
             start_time=s.start_time,
             end_time=s.end_time,
             model=s.model,
@@ -274,20 +276,16 @@ async def trigger_analysis(session_id: str, db: AsyncSession = Depends(get_db)) 
     from cinsights.analysis.session import SessionAnalyzer
     from cinsights.settings import get_settings
     from cinsights.sources.base import TraceData
-    from cinsights.sources.phoenix import PhoenixSource
+    from cinsights.sources.factory import create_source
 
     session = await db.get(CodingSession, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
     settings = get_settings()
-    if not settings.anthropic_api_key:
-        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
 
-    # PhoenixSource is sync (HTTP via the phoenix client), so we run its blocking
-    # call in a thread to keep the event loop free.
-    source = PhoenixSource(base_url=settings.phoenix_endpoint)
-    spans = await asyncio.to_thread(source.get_spans, session_id)
+    source = create_source(settings)
+    spans = await asyncio.to_thread(source.get_spans_by_session, session_id)
     if not spans:
         raise HTTPException(status_code=404, detail="No spans found for session")
 
