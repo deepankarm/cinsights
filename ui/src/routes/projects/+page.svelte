@@ -80,12 +80,14 @@
 				<div class="project-footer">
 					<span class="last-active">Last active: {formatDate(project.latest_session)}</span>
 					<div class="project-actions">
-						<a href="/report?project={encodeURIComponent(project.name)}" class="action-btn">
-							{project.has_digest ? 'View Report' : 'Generate Report'}
+						<a href="/projects/{encodeURIComponent(project.name)}" class="action-btn">
+							Dashboard
 						</a>
-						<a href="/?project={encodeURIComponent(project.name)}" class="action-link">
-							Sessions
-						</a>
+						{#if project.has_digest}
+							<a href="/report?project={encodeURIComponent(project.name)}" class="action-link">
+								Report
+							</a>
+						{/if}
 					</div>
 				</div>
 			</div>

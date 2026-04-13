@@ -6,7 +6,7 @@ to the async pipeline. All real work lives in:
 
 - ``cinsights.runtime`` — observability primitives (``_track_run``,
   ``_RunHandle``, ``console``, ``_content_hash``)
-- ``cinsights.pipeline`` — the analyze + digest orchestration coroutines
+- ``cinsights.pipeline`` — the index, score, analyze, and digest coroutines
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import asyncio
 
 import typer
 
-from cinsights.pipeline import _analyze_async, _digest_async
+from cinsights.pipeline import _analyze_async, _digest_async, _index_async, _score_async
 from cinsights.runtime import _track_run
 from cinsights.settings import get_settings
 
@@ -33,33 +33,81 @@ def _apply_source_overrides(source: str | None, repo: str | None) -> None:
 
 
 @app.command()
+def index(
+    hours: int = typer.Option(24, help="Index sessions from the last N hours."),
+    limit: int = typer.Option(50, help="Max sessions to index."),
+    force: bool = typer.Option(False, help="Re-index already-indexed sessions."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
+    source: str | None = typer.Option(None, help="Override source (phoenix, entireio, local)."),
+    repo: str | None = typer.Option(None, help="Repo path for entireio source."),
+    trace_ids: list[str] | None = typer.Argument(
+        None, help="Specific trace/session IDs to index."
+    ),
+) -> None:
+    """Discover sessions, extract metadata + quality metrics, score against baselines. Zero LLM cost."""
+    _apply_source_overrides(source, repo)
+
+    async def _entry() -> None:
+        async with _track_run("analyze") as run:
+            await _index_async(
+                hours=hours,
+                limit=limit,
+                force=force,
+                verbose=verbose,
+                trace_ids=trace_ids,
+                run=run,
+            )
+
+    asyncio.run(_entry())
+
+
+@app.command()
+def score(
+    user_id: str | None = typer.Option(None, "--user", help="Filter by user ID."),
+    project: str | None = typer.Option(None, "--project", help="Filter by project name."),
+    min_score: float = typer.Option(0.0, "--min-score", help="Show sessions above this score."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
+) -> None:
+    """Re-score existing sessions, show distribution and coverage gaps. Zero LLM cost."""
+
+    async def _entry() -> None:
+        await _score_async(
+            user_id=user_id,
+            project=project,
+            min_score=min_score,
+            verbose=verbose,
+        )
+
+    asyncio.run(_entry())
+
+
+@app.command()
 def analyze(
-    hours: int = typer.Option(24, help="Analyze sessions from the last N hours."),
     limit: int = typer.Option(50, help="Max sessions to analyze."),
     force: bool = typer.Option(False, help="Re-analyze already-analyzed sessions."),
     concurrency: int = typer.Option(5, help="Max concurrent LLM analysis requests."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
     source: str | None = typer.Option(None, help="Override source (phoenix, entireio, local)."),
     repo: str | None = typer.Option(None, help="Repo path for entireio source."),
-    index_only: bool = typer.Option(False, "--index-only", help="Index only, no LLM."),
+    min_score: float = typer.Option(0.0, "--min-score", help="Only analyze sessions with score >= this."),
     trace_ids: list[str] | None = typer.Argument(
         None, help="Specific trace/session IDs to analyze."
     ),
 ) -> None:
-    """Pull sessions from a source, run LLM analysis, store insights."""
+    """LLM-analyze INDEXED sessions above the score threshold. Costs tokens."""
     _apply_source_overrides(source, repo)
 
     async def _entry() -> None:
         async with _track_run("analyze") as run:
             await _analyze_async(
-                hours=hours,
+                hours=24,
                 limit=limit,
                 force=force,
                 concurrency=concurrency,
                 verbose=verbose,
                 trace_ids=trace_ids,
                 run=run,
-                index_only=index_only,
+                min_score=min_score,
             )
 
     asyncio.run(_entry())
@@ -91,20 +139,31 @@ def digest(
 
 @app.command()
 def refresh(
-    hours: int = typer.Option(24, help="Analyze sessions from the last N hours."),
+    hours: int = typer.Option(24, help="Index sessions from the last N hours."),
     days: int = typer.Option(7, help="Digest window in days."),
-    limit: int = typer.Option(50, help="Max sessions to analyze."),
-    force: bool = typer.Option(False, help="Re-analyze already-analyzed sessions."),
+    limit: int = typer.Option(50, help="Max sessions to process."),
+    force: bool = typer.Option(False, help="Re-process already-processed sessions."),
     concurrency: int = typer.Option(5, help="Max concurrent LLM analysis requests."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
     source: str | None = typer.Option(None, help="Override source (phoenix, entireio, local)."),
     repo: str | None = typer.Option(None, help="Repo path for entireio source."),
+    min_score: float = typer.Option(0.4, "--min-score", help="Only analyze sessions with score >= this."),
 ) -> None:
-    """Refresh everything: pull + analyze new sessions, then regenerate all digests."""
+    """Refresh everything: index → analyze (scored) → digest."""
     _apply_source_overrides(source, repo)
 
     async def _entry() -> None:
         async with _track_run("refresh") as run:
+            await _index_async(
+                hours=hours,
+                limit=limit,
+                force=force,
+                verbose=verbose,
+                run=run,
+            )
+            from cinsights.runtime import console
+
+            console.print()
             await _analyze_async(
                 hours=hours,
                 limit=limit,
@@ -113,9 +172,8 @@ def refresh(
                 verbose=verbose,
                 trace_ids=None,
                 run=run,
+                min_score=min_score,
             )
-            from cinsights.runtime import console
-
             console.print()
             await _digest_async(
                 days=days,

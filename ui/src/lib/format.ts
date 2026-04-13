@@ -42,3 +42,39 @@ export function avatarColor(name: string): string {
 	for (let i = 0; i < name.length; i++) h = ((h << 5) - h + name.charCodeAt(i)) | 0;
 	return avatarColors[Math.abs(h) % avatarColors.length];
 }
+
+export type QualityMetric = { label: string; value: string };
+
+type MetricField = { key: string; label: string; suffix: string; fmt?: (v: number) => string };
+const METRIC_FIELDS: MetricField[] = [
+	{ key: 'avg_read_edit_ratio', label: 'Read:Edit', suffix: '' },
+	{ key: 'avg_edits_without_read_pct', label: 'Blind edits', suffix: '%' },
+	{ key: 'avg_research_mutation_ratio', label: 'Research:Mut', suffix: '' },
+	{ key: 'avg_error_rate', label: 'Error rate', suffix: '%' },
+	{ key: 'avg_write_vs_edit_pct', label: 'Write vs Edit', suffix: '%' },
+	{ key: 'avg_repeated_edits', label: 'Thrashing', suffix: '' },
+	{ key: 'avg_subagent_spawn_rate', label: 'Subagents', suffix: '%' },
+	{ key: 'avg_context_pressure', label: 'Ctx pressure', suffix: '' },
+	{ key: 'avg_tool_calls_per_turn', label: 'Tools/turn', suffix: '' },
+	{ key: 'avg_duration_ms', label: 'Avg duration', suffix: '', fmt: (v: number) => fmtDur(v) },
+];
+
+export function userQualityMetrics(user: Record<string, unknown>): QualityMetric[] {
+	return METRIC_FIELDS.map(f => {
+		const v = user[f.key] as number | null;
+		return { label: f.label, value: f.fmt ? f.fmt(v ?? 0) : fmtNum(v, f.suffix) };
+	});
+}
+
+export function aggregateQualityMetrics(users: Record<string, unknown>[]): QualityMetric[] {
+	return METRIC_FIELDS.map(f => {
+		let weightedSum = 0, totalWeight = 0;
+		for (const u of users) {
+			const v = u[f.key] as number | null;
+			const w = (u['analyzed_count'] as number) || 1;
+			if (v != null) { weightedSum += v * w; totalWeight += w; }
+		}
+		const avg = totalWeight > 0 ? weightedSum / totalWeight : null;
+		return { label: f.label, value: f.fmt ? f.fmt(avg ?? 0) : fmtNum(avg, f.suffix) };
+	});
+}

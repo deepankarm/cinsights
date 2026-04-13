@@ -280,7 +280,8 @@
 
 <style>
 	.charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 28px; }
-	.chart-card { background: white; border-radius: 12px; padding: 16px; border: 1px solid #e8e5e0; }
+	.chart-card { background: white; border-radius: 16px; padding: 20px 22px; border: 1px solid #e8e5e0; transition: box-shadow 0.25s ease; }
+	.chart-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.04); }
 	.chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1px; }
 	.chart-header h3 { font-size: 14px; font-weight: 700; color: #232326; }
 	.chart-header-right { display: flex; align-items: center; gap: 6px; }

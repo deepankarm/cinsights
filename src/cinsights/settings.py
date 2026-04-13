@@ -158,6 +158,10 @@ class Settings(BaseSettings):
     # per-session evidence list in digest prompts.
     min_session_tool_count: int = 10
 
+    # Scoring & selective analysis
+    budget_mode: str = "balanced"  # frugal (10%), balanced (30%), thorough (50%), all (100%)
+    cold_start_sessions: int = 10  # always analyze first N sessions per (user, project)
+
     # Entireio source config
     entireio_repo_path: str | None = None
     entireio_branch: str = "entire/checkpoints/v1"
