@@ -6,7 +6,7 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from cinsights.db.engine import get_db
-from cinsights.db.models import SessionBaseline, SessionDailyTrend
+from cinsights.db.models import CodingSession, SessionBaseline, SessionDailyTrend, SessionStatus
 
 router = APIRouter(prefix="/api/trends", tags=["trends"])
 
@@ -108,6 +108,50 @@ async def get_baselines(
         )
         for b in result.all()
     ]
+
+
+class TokenDistribution(BaseModel):
+    q1: int
+    median: int
+    q3: int
+    whisker_low: int
+    whisker_high: int
+    max_val: int
+    count: int
+
+
+@router.get("/token-distribution", response_model=TokenDistribution | None)
+async def get_token_distribution(
+    project: str | None = Query(None),
+    user_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> TokenDistribution | None:
+    query = select(CodingSession.total_tokens).where(
+        col(CodingSession.status).in_([SessionStatus.INDEXED, SessionStatus.ANALYZED]),
+        CodingSession.total_tokens > 0,
+    )
+    if project:
+        query = query.where(CodingSession.project_name == project)
+    if user_id:
+        query = query.where(CodingSession.user_id == user_id)
+
+    result = await db.exec(query)
+    vals = sorted(result.all())
+    if len(vals) < 3:
+        return None
+
+    q1 = vals[len(vals) // 4]
+    median = vals[len(vals) // 2]
+    q3 = vals[len(vals) * 3 // 4]
+    iqr = q3 - q1
+    whisker_low = max(vals[0], q1 - int(1.5 * iqr))
+    whisker_high = min(vals[-1], q3 + int(1.5 * iqr))
+
+    return TokenDistribution(
+        q1=q1, median=median, q3=q3,
+        whisker_low=whisker_low, whisker_high=whisker_high,
+        max_val=vals[-1], count=len(vals),
+    )
 
 
 def _avg(values: list[float | None]) -> float | None:
