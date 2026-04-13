@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     from types import ModuleType
 
     from cinsights.analysis.digest import DigestAnalysisResult, DigestAnalyzer
-    from cinsights.analysis.project_detection import ProjectGuess
     from cinsights.analysis.session import AnalysisResult
     from cinsights.db.models import CodingSession, Digest
     from cinsights.sources.base import SpanData, TraceData, TraceSource
@@ -40,30 +39,25 @@ def _filter_tool_spans(spans: list[SpanData]) -> list[SpanData]:
     ]
 
 
-async def _store_analysis(
+async def _store_indexed(
     db: AsyncSession,
     trace_id: str,
     session_id: str,
     trace: TraceData,
     spans: list[SpanData],
-    result: AnalysisResult,
     source: TraceSource,
     force: bool,
     existing: CodingSession | None,
-    project_guess: ProjectGuess,
-) -> int:
-    """Store trace data and analysis results in the database.
+    project_name: str | None,
+) -> CodingSession:
+    """Extract and store Tier 0 metadata + quality metrics (zero LLM cost).
 
-    Returns the number of insights persisted. On re-analyze (existing row or
-    --force), all prior tool_calls and insights for this session are deleted
-    via explicit queries — we never touch lazy relationship attributes because
-    AsyncSession does not support implicit lazy loads.
+    Creates/updates CodingSession and ToolCall rows. Computes quality metrics
+    from the tool call sequence. Sets status = INDEXED.
     """
     from cinsights.db.models import (
         CodingSession,
         Insight,
-        InsightCategory,
-        InsightSeverity,
         SessionStatus,
         ToolCall,
     )
@@ -71,7 +65,6 @@ async def _store_analysis(
     root = next((s for s in spans if s.parent_id is None), None)
     tool_spans = _filter_tool_spans(spans)
 
-    # Extract user.id from span attributes
     user_id = None
     for s in spans:
         if not user_id:
@@ -79,14 +72,8 @@ async def _store_analysis(
         if user_id:
             break
 
-    project_name = project_guess.project_name
-
     last_span_time = max(s.end_time for s in spans) if spans else None
 
-    # Sum prompt_tokens across ALL Turn spans, not just the last. Each Turn's
-    # prompt_tokens is the full context sent at that turn; compaction resets
-    # the turn counter so the same session can have multiple "Turn 1" spans.
-    # The stored value is RAW input tokens (no cache discount).
     import json as json_mod
 
     turn_spans = sorted(
@@ -129,12 +116,11 @@ async def _store_analysis(
             context_growth_json=context_growth,
             span_count=len(spans),
             last_span_time=last_span_time,
-            status=SessionStatus.PENDING,
+            status=SessionStatus.INDEXED,
         )
         db.add(coding_session)
     else:
         coding_session = existing
-        # Update metadata that may have changed
         coding_session.user_id = user_id or existing.user_id
         coding_session.project_name = project_name or existing.project_name
         coding_session.start_time = trace.start_time
@@ -145,16 +131,13 @@ async def _store_analysis(
         coding_session.context_growth_json = context_growth
         coding_session.span_count = len(spans)
         coding_session.last_span_time = last_span_time
-        # tenant/source/agent are intentionally NOT overwritten on re-analyze —
-        # they reflect where the row was first ingested.
 
-    # Populate entireio-specific metadata
+    # Source-specific agent_type detection
     if settings.source == SourceType.ENTIREIO:
         from cinsights.sources.entireio import EntireioSource
 
         if isinstance(source, EntireioSource):
             coding_session.metadata_json = source.get_session_metadata_json(trace_id)
-            # Use agent_type from checkpoint metadata instead of settings default
             idx = source._build_index()
             for _, ref in idx.items():
                 if ref.checkpoint_id == trace_id.split(":")[1] and ref.session_idx == int(
@@ -166,7 +149,6 @@ async def _store_analysis(
                             coding_session.agent_type = agent_name
                     break
 
-    # Use detected agent_type for local source
     if settings.source == SourceType.LOCAL:
         from cinsights.sources.local import LocalSource
 
@@ -175,19 +157,19 @@ async def _store_analysis(
             if detected and not existing:
                 coding_session.agent_type = detected
 
-    # Clear old data if re-analyzing. Use explicit FK queries — AsyncSession
-    # doesn't support implicit lazy relationship loads.
+    # Clear old tool calls and insights if re-indexing
     if force or existing:
-        old_tcs_result = await db.exec(select_fn(ToolCall).where(ToolCall.session_id == trace_id))
-        for tc in old_tcs_result.all():
+        old_tcs = await db.exec(select_fn(ToolCall).where(ToolCall.session_id == trace_id))
+        for tc in old_tcs.all():
             await db.delete(tc)
-        old_ins_result = await db.exec(select_fn(Insight).where(Insight.session_id == trace_id))
-        for ins in old_ins_result.all():
+        old_ins = await db.exec(select_fn(Insight).where(Insight.session_id == trace_id))
+        for ins in old_ins.all():
             await db.delete(ins)
         await db.flush()
 
+    # Store tool calls
+    tool_call_rows = []
     for span in tool_spans:
-        # Only store output for failed calls (error classification) to save DB space
         output = None
         if not span.is_success and span.output_value:
             output = span.output_value[:2000]
@@ -204,6 +186,36 @@ async def _store_analysis(
             timestamp=span.start_time,
         )
         db.add(tc)
+        tool_call_rows.append(tc)
+
+    # Compute Tier 0 quality metrics
+    from cinsights.metrics import compute_all as compute_metrics
+
+    metrics = compute_metrics(tool_call_rows)
+    for key, value in metrics.items():
+        if value is not None:
+            setattr(coding_session, key, value)
+
+    return coding_session
+
+
+async def _store_insights(
+    db: AsyncSession,
+    coding_session: CodingSession,
+    result: AnalysisResult,
+) -> int:
+    """Store LLM-generated insights on an already-INDEXED session.
+
+    Updates status to ANALYZED. Returns the number of insights persisted.
+    """
+    from cinsights.db.models import (
+        Insight,
+        InsightCategory,
+        InsightSeverity,
+        SessionStatus,
+    )
+
+    settings = get_settings()
 
     for item in result.insights:
         try:
@@ -216,8 +228,8 @@ async def _store_analysis(
             sev = InsightSeverity.INFO
 
         insight = Insight(
-            tenant_id=tenant_id,
-            session_id=trace_id,
+            tenant_id=coding_session.tenant_id,
+            session_id=coding_session.id,
             category=cat,
             title=item.title,
             content=item.content,
@@ -656,18 +668,18 @@ async def _analyze_async(
         ):
             try:
                 existing = await db.get(CodingSession, trace_id)
-                n_insights = await _store_analysis(
+                coding_session = await _store_indexed(
                     db,
                     trace_id,
                     session_id,
                     trace,
                     spans,
-                    result,
                     source,
                     force,
                     existing,
-                    project_guess=project_guess,
+                    project_name=project_guess.project_name,
                 )
+                n_insights = await _store_insights(db, coding_session, result)
                 await db.commit()
                 analyzed += 1
                 if run is not None:
