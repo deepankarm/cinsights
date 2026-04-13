@@ -108,6 +108,25 @@ export async function getTrends(project?: string, userId?: string, days = 90): P
 	return fetchJSON(url);
 }
 
+export interface TokenDistribution {
+	q1: number;
+	median: number;
+	q3: number;
+	whisker_low: number;
+	whisker_high: number;
+	max_val: number;
+	count: number;
+}
+
+export async function getTokenDistribution(project?: string, userId?: string): Promise<TokenDistribution | null> {
+	let url = '/api/trends/token-distribution';
+	const params: string[] = [];
+	if (project) params.push(`project=${encodeURIComponent(project)}`);
+	if (userId) params.push(`user_id=${encodeURIComponent(userId)}`);
+	if (params.length) url += `?${params.join('&')}`;
+	return fetchJSON(url);
+}
+
 export async function getBaselines(project?: string): Promise<BaselineRead[]> {
 	let url = '/api/trends/baselines';
 	if (project) url += `?project=${encodeURIComponent(project)}`;

@@ -14,6 +14,7 @@
 				<a href="/sessions" class="nav-link">Sessions</a>
 				<a href="/projects" class="nav-link">Projects</a>
 				<a href="/report" class="nav-link">Report</a>
+				<!-- Users accessed via Dashboard developer cards -->
 			</div>
 		</nav>
 	</header>
