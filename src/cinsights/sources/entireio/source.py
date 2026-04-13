@@ -184,13 +184,37 @@ class EntireioSource:
         # Get user_id from git author
         user_id = authors.get(ref.checkpoint_dir)
 
-        _, spans = parse_full_jsonl(
-            data=transcript_data,
-            checkpoint_id=checkpoint_id,
-            session_idx=session_idx,
-            metadata=ref.metadata,
-            user_id=user_id,
-        )
+        try:
+            agent = (ref.metadata.agent or "").lower()
+            trace_id = f"entireio:{checkpoint_id}:{session_idx}"
+
+            if agent == "codex":
+                from cinsights.sources.local.parsers.codex import parse_codex
+
+                _, spans = parse_codex(
+                    data=transcript_data,
+                    trace_id=trace_id,
+                    user_id=user_id,
+                )
+            elif agent in ("copilot", "copilot cli"):
+                from cinsights.sources.local.parsers.copilot import parse_copilot
+
+                _, spans = parse_copilot(
+                    data=transcript_data,
+                    trace_id=trace_id,
+                    user_id=user_id,
+                )
+            else:
+                _, spans = parse_full_jsonl(
+                    data=transcript_data,
+                    checkpoint_id=checkpoint_id,
+                    session_idx=session_idx,
+                    metadata=ref.metadata,
+                    user_id=user_id,
+                )
+        except Exception:
+            logger.exception("Failed to parse transcript: %s", ref.transcript_path)
+            return []
         return spans
 
     def get_session_metadata_json(self, session_id: str) -> str | None:

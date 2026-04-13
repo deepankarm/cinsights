@@ -27,7 +27,6 @@ logger = logging.getLogger(__name__)
 _METRIC_FIELDS = [
     "read_edit_ratio",
     "edits_without_read_pct",
-    "user_interrupts_per_1k",
     "research_mutation_ratio",
     "write_vs_edit_pct",
     "error_rate",

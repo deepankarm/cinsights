@@ -9,7 +9,7 @@ export interface SessionRead {
 	end_time: string | null;
 	model: string | null;
 	total_tokens: number;
-	status: 'pending' | 'analyzed' | 'failed';
+	status: 'indexed' | 'pending' | 'analyzed' | 'failed';
 	tool_call_count: number;
 	insight_count: number;
 }
