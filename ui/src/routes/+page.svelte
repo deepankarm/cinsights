@@ -1,149 +1,106 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { getStats, getTrends, getUsers, getProjects, getTokenDistribution, type TrendPoint, type UserSummary, type ProjectRead, type TokenDistribution } from '$lib/api';
-	import type { StatsResponse } from '$lib/types';
+	import type { UserSummary, ProjectRead } from '$lib/api';
 	import { fmtTokens, fmtDur, fmtNum, avatarColor } from '$lib/format';
-	import HeroMetrics from '$lib/components/HeroMetrics.svelte';
-	import TrendCharts from '$lib/components/TrendCharts.svelte';
+	import DashboardView from '$lib/components/DashboardView.svelte';
 
-	let stats: StatsResponse | null = $state(null);
-	let trends: TrendPoint[] = $state([]);
-	let users: UserSummary[] = $state([]);
-	let projects: ProjectRead[] = $state([]);
-	let tokenDist: TokenDistribution | null = $state(null);
-	let loading = $state(true);
-	let error: string | null = $state(null);
 	let hoveredUser: UserSummary | null = $state(null);
 	let hoverPos = $state({ x: 0, y: 0 });
-
-	onMount(async () => {
-		try {
-			[stats, trends, users, projects, tokenDist] = await Promise.all([
-				getStats(), getTrends(), getUsers(), getProjects(), getTokenDistribution(),
-			]);
-		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load dashboard';
-		} finally {
-			loading = false;
-		}
-	});
-
-	const avgRE = $derived.by(() => {
-		const v = trends.filter(t => t.avg_read_edit_ratio != null);
-		return v.length ? v.reduce((s, t) => s + (t.avg_read_edit_ratio ?? 0), 0) / v.length : 0;
-	});
-	const daysTracked = $derived(new Set(trends.map(t => t.date)).size);
-	const latestDate = $derived(trends.length ? trends[trends.length - 1].date : '-');
-	const totalTokens = $derived(trends.reduce((s, t) => s + t.total_tokens, 0));
-
-	const heroMetrics = $derived([
-		{ value: String(stats?.total_sessions ?? 0), label: 'Sessions', sub: `${stats?.analyzed_sessions ?? 0} analyzed · ${(stats?.total_sessions ?? 0) - (stats?.analyzed_sessions ?? 0)} indexed` },
-		{ value: fmtTokens(totalTokens), label: 'Total Tokens', sub: 'across all sessions' },
-		{ value: String(users.length), label: 'Developers', sub: `${projects.length} projects` },
-		{ value: String(daysTracked), label: 'Days tracked', sub: `${latestDate.slice(5)} latest` },
-	]);
 </script>
 
 <svelte:head><title>cinsights</title></svelte:head>
 
-{#if loading}
-	<div class="loading">Loading dashboard...</div>
-{:else if error}
-	<div class="loading" style="color: #dc2626">{error}</div>
-{:else}
-	<HeroMetrics metrics={heroMetrics} />
-	<TrendCharts {trends} {tokenDist} />
-
-	{#if users.length > 0}
-		<div class="section">
-			<h2>Developers</h2>
-			<p class="section-desc">{users.length} developers across {projects.length} projects. Hover for details.</p>
-			<div class="users-grid">
-				{#each users as u}
-					<a href="/users/{encodeURIComponent(u.user_id)}" class="user-card"
-						onmouseenter={(e) => { hoveredUser = u; hoverPos = { x: e.clientX, y: e.clientY }; }}
-						onmousemove={(e) => { hoverPos = { x: e.clientX, y: e.clientY }; }}
-						onmouseleave={() => { hoveredUser = null; }}>
-						<div class="user-header">
-							<span class="avatar" style="background: {avatarColor(u.display_name)}">{u.display_name[0].toUpperCase()}</span>
-							<div class="user-info">
-								<div class="user-name">{u.display_name}</div>
-								<div class="user-meta">{u.session_count} sessions · {u.agents.join(', ')}</div>
+<DashboardView scope="org">
+	{#snippet extra({ users, projects })}
+		{#if users.length > 0}
+			<div class="section">
+				<h2>Developers</h2>
+				<p class="section-desc">{users.length} developers across {projects.length} projects. Hover for details.</p>
+				<div class="users-grid">
+					{#each users as u}
+						<a href="/users/{encodeURIComponent(u.user_id)}" class="user-card"
+							onmouseenter={(e) => { hoveredUser = u; hoverPos = { x: e.clientX, y: e.clientY }; }}
+							onmousemove={(e) => { hoverPos = { x: e.clientX, y: e.clientY }; }}
+							onmouseleave={() => { hoveredUser = null; }}>
+							<div class="user-header">
+								<span class="avatar" style="background: {avatarColor(u.display_name)}">{u.display_name[0].toUpperCase()}</span>
+								<div class="user-info">
+									<div class="user-name">{u.display_name}</div>
+									<div class="user-meta">{u.session_count} sessions · {u.agents.join(', ')}</div>
+								</div>
 							</div>
-						</div>
-						<div class="user-metrics">
-							<div class="um"><span class="um-val">{fmtNum(u.avg_read_edit_ratio)}</span><span class="um-label">R:E</span></div>
-							<div class="um"><span class="um-val">{fmtNum(u.avg_error_rate, '%')}</span><span class="um-label">Errors</span></div>
-							<div class="um"><span class="um-val">{fmtNum(u.avg_turn_count)}</span><span class="um-label">Turns/s</span></div>
-							<div class="um"><span class="um-val">{fmtDur(u.avg_duration_ms)}</span><span class="um-label">Avg dur</span></div>
-						</div>
-					</a>
-				{/each}
+							<div class="user-metrics">
+								<div class="um"><span class="um-val">{fmtNum(u.avg_read_edit_ratio)}</span><span class="um-label">R:E</span></div>
+								<div class="um"><span class="um-val">{fmtNum(u.avg_error_rate, '%')}</span><span class="um-label">Errors</span></div>
+								<div class="um"><span class="um-val">{fmtNum(u.avg_turn_count)}</span><span class="um-label">Turns/s</span></div>
+								<div class="um"><span class="um-val">{fmtDur(u.avg_duration_ms)}</span><span class="um-label">Avg dur</span></div>
+							</div>
+						</a>
+					{/each}
+				</div>
 			</div>
-		</div>
 
-		{#if hoveredUser}
-			{@const u = hoveredUser}
-			{@const panelW = 380}
-			{@const panelH = 340}
-			{@const px = Math.min(hoverPos.x + 16, (typeof window !== 'undefined' ? window.innerWidth : 1200) - panelW - 20)}
-			{@const py = Math.min(hoverPos.y - panelH / 2, (typeof window !== 'undefined' ? window.innerHeight : 800) - panelH - 20)}
-			<div class="hover-panel" style="left: {Math.max(8, px)}px; top: {Math.max(8, py)}px">
-				<div class="hp-header">
-					<span class="avatar" style="background: {avatarColor(u.display_name)}">{u.display_name[0].toUpperCase()}</span>
-					<div>
-						<div class="hp-name">{u.display_name}</div>
-						<div class="hp-email">{u.user_id}</div>
+			{#if hoveredUser}
+				{@const u = hoveredUser}
+				{@const panelW = 380}
+				{@const panelH = 340}
+				{@const px = Math.min(hoverPos.x + 16, (typeof window !== 'undefined' ? window.innerWidth : 1200) - panelW - 20)}
+				{@const py = Math.min(hoverPos.y - panelH / 2, (typeof window !== 'undefined' ? window.innerHeight : 800) - panelH - 20)}
+				<div class="hover-panel" style="left: {Math.max(8, px)}px; top: {Math.max(8, py)}px">
+					<div class="hp-header">
+						<span class="avatar" style="background: {avatarColor(u.display_name)}">{u.display_name[0].toUpperCase()}</span>
+						<div>
+							<div class="hp-name">{u.display_name}</div>
+							<div class="hp-email">{u.user_id}</div>
+						</div>
+					</div>
+					<div class="hp-tags">
+						{#each u.projects as p}<span class="hp-tag project">{p}</span>{/each}
+						{#each u.agents as a}<span class="hp-tag agent">{a}</span>{/each}
+						{#each u.sources as s}<span class="hp-tag source">{s}</span>{/each}
+					</div>
+					<div class="hp-grid">
+						<div class="hp-item"><span class="hp-val">{u.session_count}</span><span class="hp-label">Sessions</span></div>
+						<div class="hp-item"><span class="hp-val">{u.analyzed_count}</span><span class="hp-label">Analyzed</span></div>
+						<div class="hp-item"><span class="hp-val">{fmtTokens(u.total_tokens)}</span><span class="hp-label">Tokens</span></div>
+						<div class="hp-item"><span class="hp-val">{fmtNum(u.avg_read_edit_ratio)}</span><span class="hp-label">Read:Edit</span></div>
+						<div class="hp-item"><span class="hp-val">{fmtNum(u.avg_edits_without_read_pct, '%')}</span><span class="hp-label">Blind edits</span></div>
+						<div class="hp-item"><span class="hp-val">{fmtNum(u.avg_research_mutation_ratio)}</span><span class="hp-label">Research:Mut</span></div>
+						<div class="hp-item"><span class="hp-val">{fmtNum(u.avg_write_vs_edit_pct, '%')}</span><span class="hp-label">Write vs Edit</span></div>
+						<div class="hp-item"><span class="hp-val">{fmtNum(u.avg_error_rate, '%')}</span><span class="hp-label">Error rate</span></div>
+						<div class="hp-item"><span class="hp-val">{fmtNum(u.avg_repeated_edits)}</span><span class="hp-label">Thrashing</span></div>
+						<div class="hp-item"><span class="hp-val">{fmtNum(u.avg_subagent_spawn_rate, '%')}</span><span class="hp-label">Subagents</span></div>
+						<div class="hp-item"><span class="hp-val">{fmtNum(u.avg_context_pressure)}</span><span class="hp-label">Ctx pressure</span></div>
+						<div class="hp-item"><span class="hp-val">{fmtNum(u.avg_tool_calls_per_turn)}</span><span class="hp-label">Tools/turn</span></div>
+						<div class="hp-item"><span class="hp-val">{fmtNum(u.avg_turn_count)}</span><span class="hp-label">Turns/sess</span></div>
+						<div class="hp-item"><span class="hp-val">{fmtDur(u.avg_duration_ms)}</span><span class="hp-label">Avg duration</span></div>
 					</div>
 				</div>
-				<div class="hp-tags">
-					{#each u.projects as p}<span class="hp-tag project">{p}</span>{/each}
-					{#each u.agents as a}<span class="hp-tag agent">{a}</span>{/each}
-					{#each u.sources as s}<span class="hp-tag source">{s}</span>{/each}
-				</div>
-				<div class="hp-grid">
-					<div class="hp-item"><span class="hp-val">{u.session_count}</span><span class="hp-label">Sessions</span></div>
-					<div class="hp-item"><span class="hp-val">{u.analyzed_count}</span><span class="hp-label">Analyzed</span></div>
-					<div class="hp-item"><span class="hp-val">{fmtTokens(u.total_tokens)}</span><span class="hp-label">Tokens</span></div>
-					<div class="hp-item"><span class="hp-val">{fmtNum(u.avg_read_edit_ratio)}</span><span class="hp-label">Read:Edit</span></div>
-					<div class="hp-item"><span class="hp-val">{fmtNum(u.avg_edits_without_read_pct, '%')}</span><span class="hp-label">Blind edits</span></div>
-					<div class="hp-item"><span class="hp-val">{fmtNum(u.avg_research_mutation_ratio)}</span><span class="hp-label">Research:Mut</span></div>
-					<div class="hp-item"><span class="hp-val">{fmtNum(u.avg_write_vs_edit_pct, '%')}</span><span class="hp-label">Write vs Edit</span></div>
-					<div class="hp-item"><span class="hp-val">{fmtNum(u.avg_error_rate, '%')}</span><span class="hp-label">Error rate</span></div>
-					<div class="hp-item"><span class="hp-val">{fmtNum(u.avg_repeated_edits)}</span><span class="hp-label">Thrashing</span></div>
-					<div class="hp-item"><span class="hp-val">{fmtNum(u.avg_subagent_spawn_rate, '%')}</span><span class="hp-label">Subagents</span></div>
-					<div class="hp-item"><span class="hp-val">{fmtNum(u.avg_context_pressure)}</span><span class="hp-label">Ctx pressure</span></div>
-					<div class="hp-item"><span class="hp-val">{fmtNum(u.avg_tool_calls_per_turn)}</span><span class="hp-label">Tools/turn</span></div>
-					<div class="hp-item"><span class="hp-val">{fmtNum(u.avg_turn_count)}</span><span class="hp-label">Turns/sess</span></div>
-					<div class="hp-item"><span class="hp-val">{fmtDur(u.avg_duration_ms)}</span><span class="hp-label">Avg duration</span></div>
+			{/if}
+		{/if}
+
+		{#if projects.length > 0}
+			<div class="section">
+				<h2>Projects</h2>
+				<div class="project-cards">
+					{#each projects as p}
+						<a href="/projects/{encodeURIComponent(p.name)}" class="project-link">
+							<div class="project-mini">
+								<div class="pm-name">{p.name}</div>
+								<div class="pm-stats">
+									<span>{p.session_count} sessions</span>
+									<span>{p.total_tool_calls.toLocaleString()} tools</span>
+								</div>
+								{#if p.has_digest}<span class="pm-badge">Report ready</span>{/if}
+							</div>
+						</a>
+					{/each}
 				</div>
 			</div>
 		{/if}
-	{/if}
-
-	{#if projects.length > 0}
-		<div class="section">
-			<h2>Projects</h2>
-			<div class="project-cards">
-				{#each projects as p}
-					<a href="/report?project={encodeURIComponent(p.name)}" class="project-link">
-						<div class="project-mini">
-							<div class="pm-name">{p.name}</div>
-							<div class="pm-stats">
-								<span>{p.session_count} sessions</span>
-								<span>{p.total_tool_calls.toLocaleString()} tools</span>
-							</div>
-							{#if p.has_digest}<span class="pm-badge">Report ready</span>{/if}
-						</div>
-					</a>
-				{/each}
-			</div>
-		</div>
-	{/if}
-{/if}
+	{/snippet}
+</DashboardView>
 
 <style>
-	.loading { text-align: center; padding: 80px; color: #94a3b8; }
 	.section { margin-bottom: 28px; }
 	h2 { font-size: 17px; font-weight: 700; color: #232326; margin-bottom: 2px; }
 	.section-desc { font-size: 12px; color: #a1a1aa; margin-bottom: 14px; }
