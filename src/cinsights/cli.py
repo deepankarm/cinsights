@@ -23,9 +23,12 @@ app = typer.Typer(name="cinsights", help="LLM-powered insights from coding agent
 
 
 def _apply_source_overrides(source: str | None, repo: str | None, paths: str | None = None) -> None:
-    """Override settings.source, entireio_repo_path, and local_paths from CLI flags.
+    """Override settings.source, entireio_repo_path, and local homes from CLI flags.
 
     Uses lru_cache mutation so the rest of the pipeline sees updated values.
+    ``--paths`` is a comma-separated list of agent home directories (e.g.
+    ``~/.claude-personal,~/.codex``) that overrides both claude_code_homes
+    and codex_homes in config.json.
     """
     if source or repo or paths:
         settings = get_settings()
@@ -34,7 +37,12 @@ def _apply_source_overrides(source: str | None, repo: str | None, paths: str | N
         if repo:
             settings.entireio_repo_path = repo
         if paths:
-            settings.local_paths = paths
+            from cinsights.settings import get_config
+
+            config = get_config()
+            homes = [p.strip() for p in paths.split(",") if p.strip()]
+            config.claude_code_homes = homes
+            config.codex_homes = homes
 
 
 @app.command()
@@ -171,9 +179,10 @@ def setup(
     import json
 
     from cinsights.runtime import console
-    from cinsights.settings import LLMConfig, Paths
+    from cinsights.settings import AppConfig, LLMConfig, Paths
 
-    llm = LLMConfig.load()
+    app_config = AppConfig.load()
+    llm = app_config.llm
 
     if validate:
         console.print(
@@ -213,18 +222,18 @@ def setup(
             console.print("[red]Invalid JSON for extra headers.[/red]")
             raise typer.Exit(1) from e
 
-    new_config = LLMConfig(
+    app_config.llm = LLMConfig(
         provider=provider,
         model=model,
         base_url=base_url or None,
         extra_headers=headers_dict,
     )
-    new_config.save()
+    app_config.save()
     console.print(f"\n  Configuration written to [bold]{Paths.config_file}[/bold]")
 
     # Offer to test
     if typer.confirm("Test connection?", default=True):
-        _test_connection(new_config)
+        _test_connection(app_config.llm)
 
 
 def _test_connection(llm) -> None:
