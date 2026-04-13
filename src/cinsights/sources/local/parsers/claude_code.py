@@ -1,7 +1,6 @@
 """Parse Claude Code JSONL sessions into cinsights SpanData.
 
-Reuses the turn-grouping and span-building logic from the entireio parser,
-adapted for direct filesystem reads (no checkpoint metadata).
+Uses shared parsing utilities from jsonl_utils (same format as entireio).
 """
 
 from __future__ import annotations
@@ -11,44 +10,14 @@ import logging
 from datetime import UTC, datetime
 
 from cinsights.sources.base import SpanData, TraceData
+from cinsights.sources.jsonl_utils import (
+    extract_user_content,
+    group_into_turns,
+    parse_dt,
+    parse_lines,
+)
 
 logger = logging.getLogger(__name__)
-
-_SKIP_TYPES = {"progress", "system", "file-history-snapshot", "queue-operation", "summary"}
-
-
-def _parse_dt(value: str) -> datetime:
-    value = value.replace("Z", "+00:00")
-    return datetime.fromisoformat(value)
-
-
-def _extract_user_content(message: dict) -> str:
-    content = message.get("content", "")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        texts = []
-        for block in content:
-            if isinstance(block, dict):
-                if block.get("type") == "text":
-                    texts.append(block.get("text", ""))
-            elif isinstance(block, str):
-                texts.append(block)
-        return "\n".join(texts)
-    return str(content)
-
-
-def _extract_tool_results(message: dict) -> dict[str, dict]:
-    content = message.get("content", [])
-    if not isinstance(content, list):
-        return {}
-    results = {}
-    for block in content:
-        if isinstance(block, dict) and block.get("type") == "tool_result":
-            tool_use_id = block.get("tool_use_id", "")
-            if tool_use_id:
-                results[tool_use_id] = block
-    return results
 
 
 def parse_claude_code(
@@ -58,13 +27,13 @@ def parse_claude_code(
     project_name: str | None = None,
 ) -> tuple[TraceData, list[SpanData]]:
     """Parse a Claude Code JSONL file into a span tree."""
-    lines = _parse_lines(data)
+    lines = parse_lines(data)
     if not lines:
         now = datetime.now(UTC)
         trace = TraceData(trace_id=trace_id, start_time=now, end_time=now)
         return trace, []
 
-    turns = _group_into_turns(lines)
+    turns = group_into_turns(lines)
     all_spans: list[SpanData] = []
     root_id = f"{trace_id}:root"
 
@@ -78,7 +47,7 @@ def parse_claude_code(
                 break
 
     # Session time boundaries
-    all_timestamps = [_parse_dt(line["timestamp"]) for line in lines if line.get("timestamp")]
+    all_timestamps = [parse_dt(line["timestamp"]) for line in lines if line.get("timestamp")]
     if all_timestamps:
         session_start = min(all_timestamps)
         session_end = max(all_timestamps)
@@ -93,7 +62,7 @@ def parse_claude_code(
         tool_results = turn.get("tool_results", {})
 
         turn_start = (
-            _parse_dt(user_line["timestamp"])
+            parse_dt(user_line["timestamp"])
             if user_line and "timestamp" in user_line
             else session_start
         )
@@ -101,7 +70,7 @@ def parse_claude_code(
         if assistant_lines:
             last_ts = assistant_lines[-1].get("timestamp")
             if last_ts:
-                turn_end = _parse_dt(last_ts)
+                turn_end = parse_dt(last_ts)
 
         # Aggregate tokens (take max per message ID for streaming fragments)
         msg_tokens: dict[str, tuple[int, int]] = {}
@@ -128,7 +97,7 @@ def parse_claude_code(
 
         user_query = ""
         if user_line:
-            user_query = _extract_user_content(user_line.get("message", {}))
+            user_query = extract_user_content(user_line.get("message", {}))
 
         turn_span = SpanData(
             span_id=turn_id,
@@ -155,7 +124,7 @@ def parse_claude_code(
             if not isinstance(content_blocks, list):
                 continue
             aline_ts = aline.get("timestamp")
-            tool_start = _parse_dt(aline_ts) if aline_ts else turn_start
+            tool_start = parse_dt(aline_ts) if aline_ts else turn_start
 
             for block in content_blocks:
                 if not isinstance(block, dict) or block.get("type") != "tool_use":
@@ -172,7 +141,7 @@ def parse_claude_code(
                 tool_end = tool_start
                 result_ts = turn.get("tool_result_timestamps", {}).get(tool_use_id)
                 if result_ts:
-                    tool_end = _parse_dt(result_ts)
+                    tool_end = parse_dt(result_ts)
 
                 input_str = (
                     json.dumps(tool_input) if isinstance(tool_input, dict) else str(tool_input)
@@ -226,64 +195,3 @@ def parse_claude_code(
         spans=all_spans,
     )
     return trace, all_spans
-
-
-def _parse_lines(data: bytes) -> list[dict]:
-    lines = []
-    for raw_line in data.split(b"\n"):
-        raw_line = raw_line.strip()
-        if not raw_line:
-            continue
-        try:
-            obj = json.loads(raw_line)
-        except json.JSONDecodeError:
-            continue
-        line_type = obj.get("type", "")
-        if line_type in _SKIP_TYPES:
-            continue
-        if "snapshot" in obj and "messageId" in obj:
-            continue
-        lines.append(obj)
-    return lines
-
-
-def _group_into_turns(lines: list[dict]) -> list[dict]:
-    turns: list[dict] = []
-    current_turn: dict | None = None
-
-    for line in lines:
-        line_type = line.get("type", "")
-
-        if line_type == "user":
-            msg = line.get("message", {})
-            tool_results = _extract_tool_results(msg)
-
-            if tool_results and current_turn:
-                current_turn["tool_results"].update(tool_results)
-                ts = line.get("timestamp", "")
-                for tid in tool_results:
-                    current_turn["tool_result_timestamps"][tid] = ts
-            else:
-                if current_turn:
-                    turns.append(current_turn)
-                current_turn = {
-                    "user": line,
-                    "assistants": [],
-                    "tool_results": {},
-                    "tool_result_timestamps": {},
-                }
-
-        elif line_type == "assistant":
-            if current_turn is None:
-                current_turn = {
-                    "user": None,
-                    "assistants": [],
-                    "tool_results": {},
-                    "tool_result_timestamps": {},
-                }
-            current_turn["assistants"].append(line)
-
-    if current_turn:
-        turns.append(current_turn)
-
-    return turns
