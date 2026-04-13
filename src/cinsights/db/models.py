@@ -6,6 +6,7 @@ from sqlmodel import Field, Relationship, SQLModel
 
 
 class SessionStatus(StrEnum):
+    INDEXED = "indexed"
     PENDING = "pending"
     ANALYZED = "analyzed"
     FAILED = "failed"
@@ -46,6 +47,20 @@ class CodingSession(SQLModel, table=True):
     last_span_time: datetime | None = None  # Track latest span for change detection
     context_growth_json: str | None = None  # [{turn, prompt_tokens, completion_tokens}]
     metadata_json: str | None = None  # Source-specific rich data (cache tokens, attribution, etc.)
+
+    # Tier 0 quality metrics (computed during indexing, zero LLM cost)
+    read_edit_ratio: float | None = None
+    edits_without_read_pct: float | None = None
+    user_interrupts_per_1k: float | None = None
+    research_mutation_ratio: float | None = None
+    write_vs_edit_pct: float | None = None
+    reasoning_loops_per_1k: float | None = None
+    error_rate: float | None = None
+
+    # Scoring
+    interestingness_score: float | None = None
+    skip_reason: str | None = None
+
     analysis_prompt_tokens: int = 0  # Tokens used by cinsights analysis
     analysis_completion_tokens: int = 0
     status: SessionStatus = SessionStatus.PENDING
