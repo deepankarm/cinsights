@@ -1,4 +1,8 @@
-"""Parse Entire.co full.jsonl transcripts into cinsights SpanData."""
+"""Parse Claude Code JSONL sessions into cinsights SpanData.
+
+Reuses the turn-grouping and span-building logic from the entireio parser,
+adapted for direct filesystem reads (no checkpoint metadata).
+"""
 
 from __future__ import annotations
 
@@ -7,12 +11,10 @@ import logging
 from datetime import UTC, datetime
 
 from cinsights.sources.base import SpanData, TraceData
-from cinsights.sources.entireio.models import CommittedMetadata
 
 logger = logging.getLogger(__name__)
 
-# Line types to skip
-_SKIP_TYPES = {"progress", "system", "file-history-snapshot", "queue-operation"}
+_SKIP_TYPES = {"progress", "system", "file-history-snapshot", "queue-operation", "summary"}
 
 
 def _parse_dt(value: str) -> datetime:
@@ -21,7 +23,6 @@ def _parse_dt(value: str) -> datetime:
 
 
 def _extract_user_content(message: dict) -> str:
-    """Extract text content from a user message."""
     content = message.get("content", "")
     if isinstance(content, str):
         return content
@@ -31,9 +32,6 @@ def _extract_user_content(message: dict) -> str:
             if isinstance(block, dict):
                 if block.get("type") == "text":
                     texts.append(block.get("text", ""))
-                elif block.get("type") == "tool_result":
-                    # Skip tool results in user content extraction
-                    pass
             elif isinstance(block, str):
                 texts.append(block)
         return "\n".join(texts)
@@ -41,7 +39,6 @@ def _extract_user_content(message: dict) -> str:
 
 
 def _extract_tool_results(message: dict) -> dict[str, dict]:
-    """Extract tool_result blocks from a user message, keyed by tool_use_id."""
     content = message.get("content", [])
     if not isinstance(content, list):
         return {}
@@ -54,51 +51,47 @@ def _extract_tool_results(message: dict) -> dict[str, dict]:
     return results
 
 
-def parse_full_jsonl(
+def parse_claude_code(
     data: bytes,
-    checkpoint_id: str,
-    session_idx: int,
-    metadata: CommittedMetadata,
+    trace_id: str,
     user_id: str | None = None,
+    project_name: str | None = None,
 ) -> tuple[TraceData, list[SpanData]]:
-    """Parse a full.jsonl transcript into a synthesized span tree.
-
-    Returns (TraceData, all_spans) matching the structure the cinsights
-    pipeline expects: root span → Turn spans → tool spans.
-    """
+    """Parse a Claude Code JSONL file into a span tree."""
     lines = _parse_lines(data)
     if not lines:
         now = datetime.now(UTC)
-        trace_id = f"entireio:{checkpoint_id}:{session_idx}"
         trace = TraceData(trace_id=trace_id, start_time=now, end_time=now)
         return trace, []
 
-    trace_id = f"entireio:{checkpoint_id}:{session_idx}"
     turns = _group_into_turns(lines)
-
     all_spans: list[SpanData] = []
     root_id = f"{trace_id}:root"
 
-    # Compute session boundaries from ALL line timestamps
-    fallback_ts = metadata.created_at.isoformat()
-    all_timestamps = [
-        _parse_dt(line.get("timestamp", fallback_ts)) for line in lines if line.get("timestamp")
-    ]
+    # Extract model from first assistant message
+    model_name = ""
+    for line in lines:
+        if line.get("type") == "assistant":
+            m = line.get("message", {}).get("model")
+            if m:
+                model_name = m
+                break
+
+    # Session time boundaries
+    all_timestamps = [_parse_dt(line["timestamp"]) for line in lines if line.get("timestamp")]
     if all_timestamps:
         session_start = min(all_timestamps)
         session_end = max(all_timestamps)
     else:
-        session_start = _parse_dt(fallback_ts)
+        session_start = datetime.now(UTC)
         session_end = session_start
 
-    # Build turn and tool spans
     for turn_num, turn in enumerate(turns, 1):
         turn_id = f"{trace_id}:turn:{turn_num}"
         user_line = turn.get("user")
         assistant_lines = turn.get("assistants", [])
         tool_results = turn.get("tool_results", {})
 
-        # Turn timestamps
         turn_start = (
             _parse_dt(user_line["timestamp"])
             if user_line and "timestamp" in user_line
@@ -110,30 +103,21 @@ def parse_full_jsonl(
             if last_ts:
                 turn_end = _parse_dt(last_ts)
 
-        # Aggregate token counts from all assistant messages in this turn
-        # (streaming fragments share the same message ID; take max per ID)
+        # Aggregate tokens (take max per message ID for streaming fragments)
         msg_tokens: dict[str, tuple[int, int]] = {}
-        model_name = metadata.model or ""
         for aline in assistant_lines:
             msg = aline.get("message", {})
             msg_id = msg.get("id", "")
             usage = msg.get("usage", {})
-            # Full context = fresh input + cache creation + cache read
             prompt_t = (
                 usage.get("input_tokens", 0)
                 + usage.get("cache_creation_input_tokens", 0)
                 + usage.get("cache_read_input_tokens", 0)
             )
             completion_t = usage.get("output_tokens", 0)
-            if msg_id:
-                existing = msg_tokens.get(msg_id, (0, 0))
-                # Take the max (last streaming fragment has final counts)
-                msg_tokens[msg_id] = (
-                    max(existing[0], prompt_t),
-                    max(existing[1], completion_t),
-                )
-            else:
-                msg_tokens[aline.get("uuid", "")] = (prompt_t, completion_t)
+            key = msg_id or aline.get("uuid", "")
+            existing = msg_tokens.get(key, (0, 0))
+            msg_tokens[key] = (max(existing[0], prompt_t), max(existing[1], completion_t))
 
             m = msg.get("model")
             if m:
@@ -142,7 +126,6 @@ def parse_full_jsonl(
         total_prompt = sum(p for p, _ in msg_tokens.values())
         total_completion = sum(c for _, c in msg_tokens.values())
 
-        # User query
         user_query = ""
         if user_line:
             user_query = _extract_user_content(user_line.get("message", {}))
@@ -165,7 +148,7 @@ def parse_full_jsonl(
         )
         all_spans.append(turn_span)
 
-        # Extract tool spans from assistant content
+        # Tool spans
         for aline in assistant_lines:
             msg = aline.get("message", {})
             content_blocks = msg.get("content", [])
@@ -182,18 +165,15 @@ def parse_full_jsonl(
                 tool_name = block.get("name", "unknown")
                 tool_input = block.get("input", {})
 
-                # Find matching tool_result
                 result_block = tool_results.get(tool_use_id, {})
                 tool_output = result_block.get("content", "")
                 is_error = result_block.get("is_error", False)
 
-                # Tool end time: from the tool_result's parent user message timestamp
                 tool_end = tool_start
                 result_ts = turn.get("tool_result_timestamps", {}).get(tool_use_id)
                 if result_ts:
                     tool_end = _parse_dt(result_ts)
 
-                # Format input for display
                 input_str = (
                     json.dumps(tool_input) if isinstance(tool_input, dict) else str(tool_input)
                 )
@@ -232,8 +212,9 @@ def parse_full_jsonl(
         end_time=session_end,
         attributes={
             "user.id": user_id or "",
-            "llm.model_name": metadata.model or "",
-            "session.id": metadata.session_id,
+            "llm.model_name": model_name,
+            "session.id": trace_id,
+            "project.name": project_name or "",
         },
     )
     all_spans.insert(0, root_span)
@@ -248,7 +229,6 @@ def parse_full_jsonl(
 
 
 def _parse_lines(data: bytes) -> list[dict]:
-    """Parse JSONL bytes into a list of dicts, skipping non-conversation lines."""
     lines = []
     for raw_line in data.split(b"\n"):
         raw_line = raw_line.strip()
@@ -261,7 +241,6 @@ def _parse_lines(data: bytes) -> list[dict]:
         line_type = obj.get("type", "")
         if line_type in _SKIP_TYPES:
             continue
-        # Skip file-history-snapshot (also checked by key presence)
         if "snapshot" in obj and "messageId" in obj:
             continue
         lines.append(obj)
@@ -269,14 +248,6 @@ def _parse_lines(data: bytes) -> list[dict]:
 
 
 def _group_into_turns(lines: list[dict]) -> list[dict]:
-    """Group conversation lines into turns (user → assistant exchanges).
-
-    Each turn is a dict with:
-      - user: the user message line (or None for assistant-only turns)
-      - assistants: list of assistant message lines
-      - tool_results: {tool_use_id: tool_result_block} from user messages
-      - tool_result_timestamps: {tool_use_id: timestamp} for timing
-    """
     turns: list[dict] = []
     current_turn: dict | None = None
 
@@ -288,13 +259,11 @@ def _group_into_turns(lines: list[dict]) -> list[dict]:
             tool_results = _extract_tool_results(msg)
 
             if tool_results and current_turn:
-                # This is a tool_result response, add to current turn
                 current_turn["tool_results"].update(tool_results)
                 ts = line.get("timestamp", "")
                 for tid in tool_results:
                     current_turn["tool_result_timestamps"][tid] = ts
             else:
-                # New turn starts with a user message
                 if current_turn:
                     turns.append(current_turn)
                 current_turn = {

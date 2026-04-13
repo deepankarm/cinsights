@@ -22,17 +22,19 @@ from cinsights.settings import get_settings
 app = typer.Typer(name="cinsights", help="LLM-powered insights from coding agent sessions.")
 
 
-def _apply_source_overrides(source: str | None, repo: str | None) -> None:
-    """Override settings.source and entireio_repo_path from CLI flags.
+def _apply_source_overrides(source: str | None, repo: str | None, paths: str | None = None) -> None:
+    """Override settings.source, entireio_repo_path, and local_paths from CLI flags.
 
     Uses lru_cache mutation so the rest of the pipeline sees updated values.
     """
-    if source or repo:
+    if source or repo or paths:
         settings = get_settings()
         if source:
             settings.source = source
         if repo:
             settings.entireio_repo_path = repo
+        if paths:
+            settings.local_paths = paths
 
 
 @app.command()
@@ -42,14 +44,15 @@ def analyze(
     force: bool = typer.Option(False, help="Re-analyze already-analyzed sessions."),
     concurrency: int = typer.Option(5, help="Max concurrent LLM analysis requests."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
-    source: str | None = typer.Option(None, help="Override source (phoenix, entireio)."),
+    source: str | None = typer.Option(None, help="Override source (phoenix, entireio, local)."),
     repo: str | None = typer.Option(None, help="Repo path for entireio source."),
+    paths: str | None = typer.Option(None, help="Comma-separated dirs for local source."),
     trace_ids: list[str] | None = typer.Argument(
         None, help="Specific trace/session IDs to analyze."
     ),
 ) -> None:
     """Pull sessions from a source, run LLM analysis, store insights."""
-    _apply_source_overrides(source, repo)
+    _apply_source_overrides(source, repo, paths)
 
     async def _entry() -> None:
         async with _track_run("analyze") as run:
@@ -98,11 +101,12 @@ def refresh(
     force: bool = typer.Option(False, help="Re-analyze already-analyzed sessions."),
     concurrency: int = typer.Option(5, help="Max concurrent LLM analysis requests."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
-    source: str | None = typer.Option(None, help="Override source (phoenix, entireio)."),
+    source: str | None = typer.Option(None, help="Override source (phoenix, entireio, local)."),
     repo: str | None = typer.Option(None, help="Repo path for entireio source."),
+    paths: str | None = typer.Option(None, help="Comma-separated dirs for local source."),
 ) -> None:
     """Refresh everything: pull + analyze new sessions, then regenerate all digests."""
-    _apply_source_overrides(source, repo)
+    _apply_source_overrides(source, repo, paths)
 
     async def _entry() -> None:
         async with _track_run("refresh") as run:

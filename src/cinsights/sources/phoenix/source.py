@@ -42,7 +42,7 @@ def _df_rows_to_spans(df: pd.DataFrame) -> list[SpanData]:
             if col.startswith("attributes."):
                 val = row[col]
                 if val is not None and str(val) != "nan":
-                    key = col[len("attributes."):]
+                    key = col[len("attributes.") :]
                     attrs[key] = val
 
         parent_id = row.get("parent_id")

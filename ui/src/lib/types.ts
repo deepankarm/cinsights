@@ -4,6 +4,7 @@ export interface SessionRead {
 	user_id: string | null;
 	project_name: string | null;
 	agent_type: string | null;
+	source: string | null;
 	start_time: string;
 	end_time: string | null;
 	model: string | null;
