@@ -46,6 +46,7 @@ class SessionRead(BaseModel):
     user_id: str | None
     project_name: str | None
     agent_type: str | None = None
+    source: str | None = None
     start_time: datetime
     end_time: datetime | None
     model: str | None
@@ -130,6 +131,7 @@ async def list_sessions(
             user_id=s.user_id,
             project_name=s.project_name,
             agent_type=s.agent_type,
+            source=s.source,
             start_time=s.start_time,
             end_time=s.end_time,
             model=s.model,

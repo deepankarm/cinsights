@@ -166,6 +166,15 @@ async def _store_analysis(
                             coding_session.agent_type = agent_name
                     break
 
+    # Use detected agent_type for local source
+    if settings.source == SourceType.LOCAL:
+        from cinsights.sources.local import LocalSource
+
+        if isinstance(source, LocalSource):
+            detected = source.get_agent_type(trace_id)
+            if detected and not existing:
+                coding_session.agent_type = detected
+
     # Clear old data if re-analyzing. Use explicit FK queries — AsyncSession
     # doesn't support implicit lazy relationship loads.
     if force or existing:

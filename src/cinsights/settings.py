@@ -114,6 +114,7 @@ class LLMConfig(BaseModel):
 class SourceType(StrEnum):
     PHOENIX = "phoenix"
     ENTIREIO = "entireio"
+    LOCAL = "local"
 
 
 class Settings(BaseSettings):
@@ -136,6 +137,9 @@ class Settings(BaseSettings):
     # Entireio source config
     entireio_repo_path: str | None = None
     entireio_branch: str = "entire/checkpoints/v1"
+
+    # Local source config
+    local_paths: str | None = None  # comma-separated directories
 
     host: str = "127.0.0.1"
     port: int = 8100
