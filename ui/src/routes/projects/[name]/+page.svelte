@@ -1,23 +1,34 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
-	import { getProjects, type ProjectRead } from '$lib/api';
-	import type { SessionRead } from '$lib/types';
+	import { getProjects, getDigests, getDigest, type ProjectRead } from '$lib/api';
+	import type { SessionRead, DigestDetail } from '$lib/types';
 	import { fmtTokens, fmtDate, fmtDuration } from '$lib/format';
 	import DashboardView from '$lib/components/DashboardView.svelte';
+	import InsightsPanel from '$lib/components/InsightsPanel.svelte';
 
 	const projectName = $derived(decodeURIComponent(page.params.name));
 
 	let project: ProjectRead | null = $state(null);
+	let digest: DigestDetail | null = $state(null);
 	let loading = $state(true);
 	let error: string | null = $state(null);
 	let expandedUsers: Set<string> = $state(new Set());
+	let showAllUsers = $state(false);
 
 	onMount(async () => {
 		try {
-			const projects = await getProjects();
+			const [projects, digests] = await Promise.all([
+				getProjects(),
+				getDigests(projectName).catch(() => []),
+			]);
 			project = projects.find(p => p.name === projectName) ?? null;
 			if (!project) error = `Project not found: ${projectName}`;
+
+			const completed = digests.find(d => d.status === 'complete');
+			if (completed) {
+				digest = await getDigest(completed.id);
+			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load project';
 		} finally {
@@ -70,8 +81,8 @@
 			<div class="banner-tags">
 				{#each project.top_tools.slice(0, 5) as t}<span class="tag tool">{t}</span>{/each}
 				{#each project.languages as l}<span class="tag lang">{l}</span>{/each}
-				{#if project.has_digest}
-					<a href="/report?project={encodeURIComponent(project.name)}" class="tag report">View Report</a>
+				{#if digest}
+					<span class="tag insights">Insights</span>
 				{/if}
 			</div>
 		</div>
@@ -80,11 +91,13 @@
 	<DashboardView scope="project" {projectName}>
 		{#snippet extra({ sessions })}
 			{@const sessionsByUser = groupByUser(sessions)}
+			{@const userLimit = 5}
+			{@const visibleUsers = showAllUsers ? sessionsByUser : sessionsByUser.slice(0, userLimit)}
 			{#if sessionsByUser.length > 0}
 				<div class="section">
-					<h2>Sessions <span class="dim">({sessions.length} total)</span></h2>
+					<h2>Sessions <span class="dim">({sessions.length} total, {sessionsByUser.length} developers)</span></h2>
 					<div class="user-list">
-						{#each sessionsByUser as [userId, userSessions]}
+						{#each visibleUsers as [userId, userSessions]}
 							{@const isOpen = expandedUsers.has(userId)}
 							{@const preview = userSessions.slice(0, 5)}
 							{@const analyzed = userSessions.filter(s => s.status === 'analyzed').length}
@@ -128,6 +141,25 @@
 							</div>
 						{/each}
 					</div>
+					{#if sessionsByUser.length > userLimit}
+						<button class="show-more" onclick={() => showAllUsers = !showAllUsers}>
+							{showAllUsers ? 'Show fewer' : `Show all ${sessionsByUser.length} developers`}
+						</button>
+					{/if}
+				</div>
+			{/if}
+
+			<!-- Insights -->
+			{#if digest}
+				<div class="section">
+					<h2>Insights</h2>
+					<InsightsPanel {digest} />
+				</div>
+			{:else}
+				<div class="section">
+					<div class="empty-insights">
+						No insights yet. Run <code>cinsights digest --days 30 --project {projectName}</code> to generate.
+					</div>
 				</div>
 			{/if}
 		{/snippet}
@@ -145,7 +177,9 @@
 	.tag { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 5px; border: 1px solid; text-decoration: none; }
 	.tag.tool { background: #f1f5f9; color: #475569; border-color: #e2e8f0; font-family: monospace; }
 	.tag.lang { background: #eff6ff; color: #2563eb; border-color: #bfdbfe; }
-	.tag.report { background: #f0fdf4; color: #16a34a; border-color: #bbf7d0; }
+	.tag.insights { background: #f0fdf4; color: #16a34a; border-color: #bbf7d0; }
+	.empty-insights { text-align: center; padding: 40px; color: #94a3b8; font-size: 14px; background: white; border-radius: 12px; }
+	.empty-insights code { background: #f4f4f5; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
 
 	.section { margin-bottom: 28px; }
 	h2 { font-size: 17px; font-weight: 700; color: #232326; margin-bottom: 12px; }
@@ -175,6 +209,8 @@
 	.pc-id { font-family: monospace; color: #2563eb; font-weight: 500; }
 	.pc-dur { color: #94a3b8; }
 	.preview-more { background: none; border: 1px dashed #d4d4d8; border-radius: 5px; padding: 3px 10px; font-size: 11px; color: #3b82f6; cursor: pointer; }
+	.show-more { display: block; margin: 16px auto 0; background: white; border: none; border-radius: 10px; padding: 10px 24px; font-size: 13px; font-weight: 500; color: #70707a; cursor: pointer; transition: all 0.15s; }
+	.show-more:hover { color: #232326; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
 
 	.user-sessions { border-top: 1px solid #f1f5f9; }
 	.session-row {

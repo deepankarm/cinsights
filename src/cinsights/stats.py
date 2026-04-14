@@ -74,6 +74,19 @@ _ERROR_PATTERNS = [
 ]
 
 
+class WeeklyTrend(BaseModel):
+    """One week of aggregated quality metrics."""
+    week: str  # ISO date of Monday
+    session_count: int
+    avg_read_edit_ratio: float | None = None
+    avg_edits_without_read_pct: float | None = None
+    avg_error_rate: float | None = None
+    avg_research_mutation_ratio: float | None = None
+    avg_write_vs_edit_pct: float | None = None
+    avg_context_pressure: float | None = None
+    total_tokens: int = 0
+
+
 class SessionHealthScore(BaseModel):
     session_id: str
     start_time: datetime
@@ -141,34 +154,52 @@ class DigestStats(BaseModel):
     has_claude_md: bool
     project_breakdown: list[ProjectBreakdown]
 
+    weekly_trends: list[WeeklyTrend]
+    previous_digest_summary: str | None = None
     analysis_tokens_used: int
 
 
-def _session_filter(start: datetime, end: datetime, project_name: str | None = None) -> list[Any]:
-    """Build the standard WHERE clauses for selecting analyzed sessions in a window.
+def _session_filter(
+    start: datetime,
+    end: datetime,
+    project_name: str | None = None,
+    *,
+    analyzed_only: bool = False,
+) -> list[Any]:
+    """Build WHERE clauses for selecting sessions in a window.
 
-    Returns a list of SQLAlchemy expressions to be ``AND``-ed via repeated
-    ``query.where(...)`` calls. Pure: builds expressions, no DB I/O.
+    By default selects INDEXED + ANALYZED sessions (all sessions with
+    extracted metadata). Pass ``analyzed_only=True`` to restrict to sessions
+    that have LLM-generated insights.
     """
     clauses: list[Any] = [
         CodingSession.start_time >= start,
         CodingSession.start_time <= end,
-        CodingSession.status == SessionStatus.ANALYZED,
     ]
+    if analyzed_only:
+        clauses.append(CodingSession.status == SessionStatus.ANALYZED)
+    else:
+        clauses.append(
+            col(CodingSession.status).in_([SessionStatus.INDEXED, SessionStatus.ANALYZED])
+        )
     if project_name:
         clauses.append(CodingSession.project_name == project_name)
     return clauses
 
 
 def _base_query(
-    start: datetime, end: datetime, project_name: str | None = None
+    start: datetime,
+    end: datetime,
+    project_name: str | None = None,
+    *,
+    analyzed_only: bool = False,
 ) -> SelectOfScalar[CodingSession]:
-    """Build a SELECT for analyzed CodingSessions in the given window.
+    """Build a SELECT for CodingSessions in the given window.
 
     Pure: builds the Select expression, doesn't execute it.
     """
     q = select(CodingSession)
-    for clause in _session_filter(start, end, project_name):
+    for clause in _session_filter(start, end, project_name, analyzed_only=analyzed_only):
         q = q.where(clause)
     return q
 
@@ -178,6 +209,8 @@ def _tc_agg_query(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    *,
+    analyzed_only: bool = False,
 ) -> Any:
     """Build a SELECT over ToolCall joined to its session, scoped to the window.
 
@@ -189,7 +222,7 @@ def _tc_agg_query(
         .select_from(ToolCall)
         .join(CodingSession, ToolCall.session_id == CodingSession.id)
     )
-    for clause in _session_filter(start, end, project_name):
+    for clause in _session_filter(start, end, project_name, analyzed_only=analyzed_only):
         q = q.where(clause)
     return q
 
@@ -521,8 +554,10 @@ async def collect_session_summaries(
     end: datetime,
     project_name: str | None = None,
 ) -> list[dict]:
+    # Session summaries depend on Insight rows → ANALYZED only
     sessions_result = await db.exec(
-        _base_query(start, end, project_name).order_by(CodingSession.start_time)
+        _base_query(start, end, project_name, analyzed_only=True)
+        .order_by(CodingSession.start_time)
     )
     sessions = sessions_result.all()
     if not sessions:
@@ -610,8 +645,48 @@ async def collect_session_summaries(
         )
 
     # Sort by tool_count desc so the LLM sees the most substantial sessions first.
+    # Cap to keep digest prompts within context limits.
+    from cinsights.settings import get_config
+    max_summaries = get_config().limits.max_digest_session_summaries
     summaries.sort(key=lambda x: x["tool_count"], reverse=True)
-    return summaries
+    return summaries[:max_summaries]
+
+
+def _compute_weekly_trends(sessions: list[CodingSession]) -> list[WeeklyTrend]:
+    """Aggregate sessions into weekly buckets by quality metrics."""
+    from datetime import timedelta
+
+    if not sessions:
+        return []
+
+    # Group by ISO week (Monday start)
+    by_week: dict[str, list[CodingSession]] = {}
+    for s in sessions:
+        monday = s.start_time.date() - timedelta(days=s.start_time.weekday())
+        week_key = monday.isoformat()
+        by_week.setdefault(week_key, []).append(s)
+
+    def _avg_field(sess: list[CodingSession], field: str) -> float | None:
+        vals = [getattr(s, field) for s in sess if getattr(s, field, None) is not None]
+        return round(sum(vals) / len(vals), 2) if vals else None
+
+    trends = []
+    for week in sorted(by_week.keys()):
+        week_sessions = by_week[week]
+        trends.append(
+            WeeklyTrend(
+                week=week,
+                session_count=len(week_sessions),
+                avg_read_edit_ratio=_avg_field(week_sessions, "read_edit_ratio"),
+                avg_edits_without_read_pct=_avg_field(week_sessions, "edits_without_read_pct"),
+                avg_error_rate=_avg_field(week_sessions, "error_rate"),
+                avg_research_mutation_ratio=_avg_field(week_sessions, "research_mutation_ratio"),
+                avg_write_vs_edit_pct=_avg_field(week_sessions, "write_vs_edit_pct"),
+                avg_context_pressure=_avg_field(week_sessions, "context_pressure_score"),
+                total_tokens=sum(s.total_tokens for s in week_sessions),
+            )
+        )
+    return trends
 
 
 async def compute_all(
@@ -628,8 +703,10 @@ async def compute_all(
     must serialize queries on one session and rely on the request boundary
     (separate sessions per request / per scope) for parallelism.
     """
+    # All indexed+analyzed sessions for quantitative stats
     sessions_result = await db.exec(_base_query(start, end, project_name))
     sessions = sessions_result.all()
+    analyzed_count = sum(1 for s in sessions if s.status == SessionStatus.ANALYZED)
 
     total_tokens = sum(s.total_tokens for s in sessions)
     total_prompt = sum(s.prompt_tokens for s in sessions)
@@ -649,7 +726,11 @@ async def compute_all(
     tc_count_result = await db.exec(tc_count_q)
     total_tool_calls = tc_count_result.one()
 
-    analysis_tokens = sum(s.analysis_prompt_tokens + s.analysis_completion_tokens for s in sessions)
+    analysis_tokens = sum(
+        s.analysis_prompt_tokens + s.analysis_completion_tokens
+        for s in sessions
+        if s.status == SessionStatus.ANALYZED
+    )
 
     p = project_name
     tool_dist = await compute_tool_distribution(db, start, end, p)
@@ -710,7 +791,7 @@ async def compute_all(
         period_start=start,
         period_end=end,
         session_count=len(sessions),
-        analyzed_count=len(sessions),
+        analyzed_count=analyzed_count,
         total_tool_calls=total_tool_calls,
         total_tokens=total_tokens,
         total_prompt_tokens=total_prompt,
@@ -731,5 +812,6 @@ async def compute_all(
         plan_mode_stats=await compute_plan_mode_stats(db, start, end, p),
         has_claude_md=await detect_claude_md(db, start, end, p),
         project_breakdown=proj_breakdown,
+        weekly_trends=_compute_weekly_trends(sessions),
         analysis_tokens_used=analysis_tokens,
     )

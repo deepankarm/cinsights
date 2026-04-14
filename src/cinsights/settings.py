@@ -89,6 +89,18 @@ class LLMConfig(BaseModel):
         return infer_model(model_id, provider_factory=self._make_provider)
 
 
+class LimitsConfig(BaseModel):
+    """Context window and prompt size limits."""
+
+    max_timeline_spans: int = 200
+    timeline_head_tail: int = 30
+    max_digest_session_summaries: int = 30
+    max_digest_session_health: int = 50
+    small_project_threshold: int = 5
+    min_coverage_per_user_project: int = 2
+    min_coverage_per_project: int = 3
+
+
 class AppConfig(BaseModel):
     """Full ~/.cinsights/config.json model.
 
@@ -101,13 +113,18 @@ class AppConfig(BaseModel):
             "extra_headers": {}
           },
           "claude_code_homes": ["~/.claude-work", "~/.claude"],
-          "codex_homes": ["~/.codex"]
+          "codex_homes": ["~/.codex"],
+          "limits": {
+            "max_timeline_spans": 200,
+            "max_digest_session_summaries": 30
+          }
         }
     """
 
     llm: LLMConfig = Field(default_factory=LLMConfig)
     claude_code_homes: list[str] = Field(default_factory=lambda: ["~/.claude"])
     codex_homes: list[str] = Field(default_factory=lambda: ["~/.codex"])
+    limits: LimitsConfig = Field(default_factory=LimitsConfig)
 
     @classmethod
     def load(cls) -> "AppConfig":

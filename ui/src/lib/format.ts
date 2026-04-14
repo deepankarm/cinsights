@@ -36,6 +36,50 @@ export function fmtDuration(start: string, end: string | null): string {
 	return `${secs}s`;
 }
 
+export function fmtMinutes(m: number): string {
+	if (m >= 1440) return `${(m / 1440).toFixed(1)}d`;
+	if (m >= 60) return `${(m / 60).toFixed(1)}h`;
+	return `${m.toFixed(0)}m`;
+}
+
+export function barPct(value: number, max: number): number {
+	return Math.max(3, (value / max) * 100);
+}
+
+export function maxVal(obj: Record<string, number>): number {
+	return Math.max(...Object.values(obj), 1);
+}
+
+export function gradeColor(grade: string): string {
+	switch (grade) {
+		case 'A': return '#10b981';
+		case 'B': return '#84cc16';
+		case 'C': return '#eab308';
+		case 'D': return '#f97316';
+		case 'F': return '#ef4444';
+		default: return '#a1a1aa';
+	}
+}
+
+export function gradeBg(grade: string): string {
+	switch (grade) {
+		case 'A': return '#ecfdf5';
+		case 'B': return '#f7fee7';
+		case 'C': return '#fefce8';
+		case 'D': return '#fff7ed';
+		case 'F': return '#fef2f2';
+		default: return '#f4f4f5';
+	}
+}
+
+export function copyText(text: string, btn: HTMLButtonElement): void {
+	navigator.clipboard.writeText(text).then(() => {
+		const orig = btn.textContent;
+		btn.textContent = 'Copied!';
+		setTimeout(() => { btn.textContent = orig; }, 2000);
+	});
+}
+
 const avatarColors = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#06b6d4', '#ef4444', '#6366f1'];
 export function avatarColor(name: string): string {
 	let h = 0;

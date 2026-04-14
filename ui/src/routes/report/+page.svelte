@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { getDigests, getDigest } from '$lib/api';
-	import { renderMarkdown } from '$lib/markdown';
+	import { renderMarkdown, renderLinkedMarkdown as _renderLinked } from '$lib/markdown';
+	import { fmtTokens, fmtMinutes, barPct, maxVal, gradeColor, gradeBg, copyText } from '$lib/format';
 	import type { DigestDetail, DigestSectionRead, DigestStatsData } from '$lib/types';
 
 	let digest: DigestDetail | null = $state(null);
@@ -14,6 +16,12 @@
 	const projectFilter = $derived(page.url.searchParams.get('project'));
 
 	onMount(async () => {
+		// Redirect project-scoped reports to the unified project page
+		if (projectFilter) {
+			goto(`/projects/${encodeURIComponent(projectFilter)}`, { replaceState: true });
+			return;
+		}
+
 		try {
 			const digests = await getDigests(projectFilter ?? undefined);
 			if (digests.length > 0 && digests[0].status === 'complete') {
@@ -34,66 +42,31 @@
 		(stats?.session_summaries ?? []).map((s: { session_id: string }) => s.session_id) as string[]
 	);
 
-	function linkifySessions(text: string): string {
-		if (!sessionIds.length) return text;
-		return text.replace(/Session (\d+)('s)?/gi, (match, num, possessive) => {
-			const idx = parseInt(num) - 1;
-			if (idx >= 0 && idx < sessionIds.length) {
-				return `[${match}](/sessions/${sessionIds[idx]})`;
-			}
-			return match;
-		});
-	}
-
 	function renderLinkedMarkdown(text: string): string {
-		return renderMarkdown(linkifySessions(text));
+		return _renderLinked(text, sessionIds);
 	}
 
-	function formatTokens(n: number): string {
-		if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-		if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
-		return n.toString();
-	}
-
-	function barPct(value: number, max: number): number {
-		return Math.max(3, (value / max) * 100);
-	}
-
-	function maxVal(obj: Record<string, number>): number {
-		return Math.max(...Object.values(obj), 1);
-	}
-
-	function gradeColor(grade: string): string {
-		switch (grade) {
-			case 'A': return '#10b981';
-			case 'B': return '#84cc16';
-			case 'C': return '#eab308';
-			case 'D': return '#f97316';
-			case 'F': return '#ef4444';
-			default: return '#a1a1aa';
-		}
-	}
-
-	function gradeBg(grade: string): string {
-		switch (grade) {
-			case 'A': return '#ecfdf5';
-			case 'B': return '#f7fee7';
-			case 'C': return '#fefce8';
-			case 'D': return '#fff7ed';
-			case 'F': return '#fef2f2';
-			default: return '#f4f4f5';
-		}
-	}
-
-	function copyText(text: string, btn: HTMLButtonElement) {
-		navigator.clipboard.writeText(text).then(() => {
-			const orig = btn.textContent;
-			btn.textContent = 'Copied!';
-			setTimeout(() => { btn.textContent = orig; }, 2000);
-		});
-	}
+	import type { WeeklyTrend } from '$lib/types';
 
 	let stats = $derived(digest?.stats as DigestStatsData | null);
+
+	function sparkDelta(trends: WeeklyTrend[], field: keyof WeeklyTrend): { value: string; up: boolean } | null {
+		const vals = trends.map(t => t[field]).filter((v): v is number => v != null);
+		if (vals.length < 2) return null;
+		const d = (vals[vals.length - 1] as number) - (vals[0] as number);
+		return { value: (d > 0 ? '+' : '') + d.toFixed(1), up: d > 0 };
+	}
+	function sparkDeltaPct(trends: WeeklyTrend[], field: keyof WeeklyTrend): { value: string; up: boolean } | null {
+		const vals = trends.map(t => t[field]).filter((v): v is number => typeof v === 'number' && v > 0);
+		if (vals.length < 2) return null;
+		const d = (((vals[vals.length - 1] as number) - (vals[0] as number)) / (vals[0] as number)) * 100;
+		return { value: (d > 0 ? '+' : '') + d.toFixed(0) + '%', up: d > 0 };
+	}
+	function sparkPoints(trends: WeeklyTrend[], field: keyof WeeklyTrend): string {
+		const vals = trends.map(t => (t[field] as number) ?? 0);
+		const max = Math.max(...vals, 1);
+		return vals.map((v, i) => `${i * 20 + 10},${30 - (v / max) * 26}`).join(' ');
+	}
 	let atAGlance = $derived(getSection('at_a_glance')?.metadata as Record<string, string[]> | undefined);
 	let workAreas = $derived(getSection('work_areas')?.metadata as Array<{name: string; session_count: number; description: string}> | undefined);
 	let persona = $derived(getSection('developer_persona'));
@@ -106,7 +79,7 @@
 </script>
 
 <svelte:head>
-	<title>Insights Report - cinsights</title>
+	<title>Insights - cinsights</title>
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -145,11 +118,14 @@
 			<div>
 				<h1>
 					{#if digest.project_name}<span class="project-tag">{digest.project_name}</span>{/if}
-					Insights Report
+					Insights
 				</h1>
 				<p class="hero-date">
 					{new Date(digest.period_start).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} &ndash;
 					{new Date(digest.period_end).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+					{#if digest.sessions_since > 0}
+						<span class="staleness-badge">{digest.sessions_since} new session{digest.sessions_since === 1 ? '' : 's'} since</span>
+					{/if}
 				</p>
 			</div>
 		</div>
@@ -161,9 +137,16 @@
 					<span class="ss-num ss-indigo">{stats.session_count}</span>
 					<span class="ss-label">sessions</span>
 				</div>
+				{#if stats.analyzed_count < stats.session_count}
+					<div class="ss-dot"></div>
+					<div class="ss-item">
+						<span class="ss-num ss-violet">{stats.analyzed_count}</span>
+						<span class="ss-label">analyzed</span>
+					</div>
+				{/if}
 				<div class="ss-dot"></div>
 				<div class="ss-item">
-					<span class="ss-num ss-violet">{formatTokens(stats.total_tokens)}</span>
+					<span class="ss-num ss-violet">{fmtTokens(stats.total_tokens)}</span>
 					<span class="ss-label">tokens</span>
 				</div>
 				<div class="ss-dot"></div>
@@ -173,7 +156,7 @@
 				</div>
 				<div class="ss-dot"></div>
 				<div class="ss-item">
-					<span class="ss-num ss-teal">{stats.total_duration_minutes.toFixed(0)}m</span>
+					<span class="ss-num ss-teal">{fmtMinutes(stats.total_duration_minutes)}</span>
 					<span class="ss-label">duration</span>
 				</div>
 				<div class="ss-dot"></div>
@@ -196,6 +179,68 @@
 					</div>
 				{/if}
 			</div>
+
+			<!-- Coverage note -->
+			{#if stats.analyzed_count < stats.session_count}
+				<div class="coverage-note-bar">
+					{stats.analyzed_count} of {stats.session_count} sessions analyzed in depth &middot; Quantitative metrics from all sessions
+				</div>
+			{/if}
+
+			<!-- Weekly trend sparklines -->
+			{#if stats.weekly_trends && stats.weekly_trends.length > 1}
+				{@const trends = stats.weekly_trends}
+				{@const reDelta = sparkDelta(trends, 'avg_read_edit_ratio')}
+				{@const erDelta = sparkDelta(trends, 'avg_error_rate')}
+				{@const beDelta = sparkDelta(trends, 'avg_edits_without_read_pct')}
+				{@const tkDelta = sparkDeltaPct(trends, 'total_tokens')}
+				<div class="trend-sparklines">
+					<div class="spark-card">
+						<div class="spark-header">
+							<span class="spark-label">Read:Edit Ratio</span>
+							{#if reDelta}<span class="spark-delta" class:spark-up={reDelta.up} class:spark-down={!reDelta.up}>{reDelta.value}</span>{/if}
+						</div>
+						<svg class="spark-svg" viewBox="0 0 {trends.length * 20} 32" preserveAspectRatio="none">
+							<polyline fill="none" stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+								points={sparkPoints(trends, 'avg_read_edit_ratio')} />
+						</svg>
+						<div class="spark-range"><span>{trends[0].week.slice(5)}</span><span>{trends[trends.length - 1].week.slice(5)}</span></div>
+					</div>
+					<div class="spark-card">
+						<div class="spark-header">
+							<span class="spark-label">Error Rate</span>
+							{#if erDelta}<span class="spark-delta" class:spark-up={!erDelta.up} class:spark-down={erDelta.up}>{erDelta.value}%</span>{/if}
+						</div>
+						<svg class="spark-svg" viewBox="0 0 {trends.length * 20} 32" preserveAspectRatio="none">
+							<polyline fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+								points={sparkPoints(trends, 'avg_error_rate')} />
+						</svg>
+						<div class="spark-range"><span>{trends[0].week.slice(5)}</span><span>{trends[trends.length - 1].week.slice(5)}</span></div>
+					</div>
+					<div class="spark-card">
+						<div class="spark-header">
+							<span class="spark-label">Blind Edits</span>
+							{#if beDelta}<span class="spark-delta" class:spark-up={!beDelta.up} class:spark-down={beDelta.up}>{beDelta.value}%</span>{/if}
+						</div>
+						<svg class="spark-svg" viewBox="0 0 {trends.length * 20} 32" preserveAspectRatio="none">
+							<polyline fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+								points={sparkPoints(trends, 'avg_edits_without_read_pct')} />
+						</svg>
+						<div class="spark-range"><span>{trends[0].week.slice(5)}</span><span>{trends[trends.length - 1].week.slice(5)}</span></div>
+					</div>
+					<div class="spark-card">
+						<div class="spark-header">
+							<span class="spark-label">Tokens/week</span>
+							{#if tkDelta}<span class="spark-delta" class:spark-up={tkDelta.up} class:spark-down={!tkDelta.up}>{tkDelta.value}</span>{/if}
+						</div>
+						<svg class="spark-svg" viewBox="0 0 {trends.length * 20} 32" preserveAspectRatio="none">
+							<polyline fill="none" stroke="#0d9488" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+								points={sparkPoints(trends, 'total_tokens')} />
+						</svg>
+						<div class="spark-range"><span>{trends[0].week.slice(5)}</span><span>{trends[trends.length - 1].week.slice(5)}</span></div>
+					</div>
+				</div>
+			{/if}
 		{/if}
 	</div>
 
@@ -337,7 +382,7 @@
 								<div class="hbar-track">
 									<div class="hbar-fill hbar-c1" style="width:{barPct(t.tokens, Math.max(...stats.tokens_per_session.map(x => x.tokens), 1))}%"></div>
 								</div>
-								<span class="hbar-val">{formatTokens(t.tokens)}</span>
+								<span class="hbar-val">{fmtTokens(t.tokens)}</span>
 							</a>
 						{/each}
 					</div>
@@ -357,7 +402,7 @@
 						<span class="health-grade" style="color:{gradeColor(h.grade)}">{h.grade}</span>
 						<div class="health-info">
 							{#if sessionNum > 0}<span class="health-name">Session {sessionNum}</span>{/if}
-							<span class="health-meta">{h.duration_minutes}m &middot; {h.tool_count} tools &middot; {formatTokens(h.total_tokens ?? 0)}</span>
+							<span class="health-meta">{h.duration_minutes}m &middot; {h.tool_count} tools &middot; {fmtTokens(h.total_tokens ?? 0)}</span>
 						</div>
 					</a>
 				{/each}
@@ -392,7 +437,7 @@
 				{/if}
 				{#if persona}
 					<div>
-						<h2 class="sect-title">How you use Claude Code</h2>
+						<h2 class="sect-title">How you use coding agents</h2>
 						<div class="persona markdown-body">
 							{@html renderLinkedMarkdown(persona.content)}
 						</div>
@@ -600,6 +645,7 @@
 		letter-spacing: 0;
 	}
 	.hero-date { color: #a1a1aa; font-size: 14px; margin-top: 6px; }
+	.staleness-badge { display: inline-block; font-size: 11px; font-weight: 600; color: #b45309; background: #fef3c7; border: 1px solid #fcd34d; padding: 2px 8px; border-radius: 4px; margin-left: 8px; vertical-align: middle; }
 
 	/* ── Stats strip ── */
 	.stats-strip {
@@ -627,6 +673,34 @@
 	.ss-emerald { color: #10b981; }
 	.ss-amber { color: #d97706; }
 	.ss-rose { color: #ef4444; font-size: 14px; }
+
+	/* ── Coverage note ── */
+	.coverage-note-bar {
+		margin-top: 10px;
+		font-size: 12px;
+		color: #71717a;
+		text-align: center;
+	}
+
+	/* ── Trend sparklines ── */
+	.trend-sparklines {
+		display: grid;
+		grid-template-columns: repeat(4, 1fr);
+		gap: 10px;
+		margin-top: 14px;
+	}
+	.spark-card {
+		background: white;
+		border-radius: 12px;
+		padding: 14px 16px 10px;
+	}
+	.spark-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+	.spark-label { font-size: 11px; font-weight: 600; color: #71717a; text-transform: uppercase; letter-spacing: 0.04em; }
+	.spark-delta { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+	.spark-up { color: #10b981; }
+	.spark-down { color: #ef4444; }
+	.spark-svg { width: 100%; height: 32px; }
+	.spark-range { display: flex; justify-content: space-between; font-size: 9px; color: #a1a1aa; margin-top: 4px; }
 
 	/* ── Callout ── */
 	.callout {
@@ -941,5 +1015,6 @@
 		.chart-wide { grid-column: span 1; }
 		.glance-grid { grid-template-columns: 1fr; }
 		.duo-grid { grid-template-columns: 1fr; }
+		.trend-sparklines { grid-template-columns: repeat(2, 1fr); }
 	}
 </style>

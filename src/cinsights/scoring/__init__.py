@@ -55,9 +55,9 @@ def score_session(
 def select_for_analysis(
     scored: list[tuple[CodingSession, float, dict[str, float]]],
     min_score: float = 0.4,
-    min_per_user_project: int = 2,
-    min_per_project: int = 3,
-    small_project_threshold: int = 5,
+    min_per_user_project: int | None = None,
+    min_per_project: int | None = None,
+    small_project_threshold: int | None = None,
 ) -> tuple[list[CodingSession], list[CodingSession]]:
     """Split scored sessions into (to_analyze, to_skip).
 
@@ -70,30 +70,38 @@ def select_for_analysis(
     """
     from collections import defaultdict
 
+    from cinsights.settings import get_config
+    limits = get_config().limits
+    if min_per_user_project is None:
+        min_per_user_project = limits.min_coverage_per_user_project
+    if min_per_project is None:
+        min_per_project = limits.min_coverage_per_project
+    if small_project_threshold is None:
+        small_project_threshold = limits.small_project_threshold
+
     selected_ids: set[str] = set()
 
-    # Group by project for later passes
+    # Group by project and by (user, project)
     by_project: dict[str | None, list[tuple[CodingSession, float]]] = defaultdict(list)
+    by_user_project: dict[tuple[str, str | None], list[tuple[CodingSession, float]]] = defaultdict(list)
     for session, score, _ in scored:
         by_project[session.project_name].append((session, score))
+        key = (session.user_id or "unknown", session.project_name)
+        by_user_project[key].append((session, score))
 
-    # Pass 1: select everything above threshold
+    # Pass 1: small projects → analyze all (cost is negligible)
+    for proj, group in by_project.items():
+        if len(group) <= small_project_threshold:
+            for s, _ in group:
+                selected_ids.add(s.id)
+
+    # Pass 2: select everything above threshold
     for session, score, breakdown in scored:
         if score >= min_score:
             selected_ids.add(session.id)
 
-    # Pass 2: ensure minimum coverage per (user, project) — only for groups
-    # large enough to be meaningful. Small groups (≤ small_project_threshold)
-    # only get analyzed if they already have sessions above threshold.
-    by_user_project: dict[tuple[str, str | None], list[tuple[CodingSession, float]]] = defaultdict(list)
-    for session, score, _ in scored:
-        key = (session.user_id or "unknown", session.project_name)
-        by_user_project[key].append((session, score))
-
+    # Pass 3: ensure minimum coverage per (user, project) — unconditional
     for key, group in by_user_project.items():
-        if len(group) <= small_project_threshold:
-            # Small group: don't force coverage fills
-            continue
         already = sum(1 for s, _ in group if s.id in selected_ids)
         if already >= min_per_user_project:
             continue
@@ -103,10 +111,8 @@ def select_for_analysis(
         for s, _ in unselected[:need]:
             selected_ids.add(s.id)
 
-    # Pass 3: ensure minimum coverage per project globally — skip small projects
+    # Pass 4: ensure minimum coverage per project globally
     for proj, group in by_project.items():
-        if len(group) <= small_project_threshold:
-            continue
         already = sum(1 for s, _ in group if s.id in selected_ids)
         if already >= min_per_project:
             continue

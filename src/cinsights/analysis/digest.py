@@ -101,7 +101,11 @@ class DigestAnalyzer(LLMAnalyzer):
 
     async def analyze(self, stats: DigestStats) -> DigestAnalysisResult:
         """Run 3 concurrent LLM calls and combine results."""
+        from cinsights.settings import get_config
+        limits = get_config().limits
+
         stats_dict = stats.model_dump()
+        stats_dict["max_health"] = limits.max_digest_session_health
 
         # Run all 3 analyses concurrently
         narrative_task = self._call_llm(
