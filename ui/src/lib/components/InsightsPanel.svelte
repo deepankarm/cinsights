@@ -2,11 +2,41 @@
 	import type { DigestDetail, DigestSectionRead, DigestStatsData } from '$lib/types';
 	import { renderLinkedMarkdown } from '$lib/markdown';
 	import { fmtTokens, fmtMinutes, barPct, maxVal, gradeColor, gradeBg, copyText } from '$lib/format';
+	import { onMount } from 'svelte';
 
 	let { digest }: { digest: DigestDetail } = $props();
 
 	let showAllSessions = $state(false);
 	let expandedCards: Record<string, boolean> = $state({});
+	let savedExpandState: Record<string, boolean> = {};
+	let savedShowAll = false;
+
+	onMount(() => {
+		const handleExpand = () => {
+			savedExpandState = { ...expandedCards };
+			savedShowAll = showAllSessions;
+			// Expand all cards
+			const allKeys: Record<string, boolean> = {};
+			for (let i = 0; i < 20; i++) {
+				allKeys[`feat-${i}`] = true;
+				allKeys[`rec-${i}`] = true;
+				allKeys[`pat-${i}`] = true;
+				allKeys[`amb-${i}`] = true;
+			}
+			expandedCards = allKeys;
+			showAllSessions = true;
+		};
+		const handleCollapse = () => {
+			expandedCards = savedExpandState;
+			showAllSessions = savedShowAll;
+		};
+		window.addEventListener('export-expand', handleExpand);
+		window.addEventListener('export-collapse', handleCollapse);
+		return () => {
+			window.removeEventListener('export-expand', handleExpand);
+			window.removeEventListener('export-collapse', handleCollapse);
+		};
+	});
 
 	function getSection(type: string): DigestSectionRead | undefined {
 		return digest.sections.find((s) => s.section_type === type);

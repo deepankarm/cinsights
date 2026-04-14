@@ -6,7 +6,7 @@
 	import { fmtTokens, fmtDate, fmtDuration } from '$lib/format';
 	import DashboardView from '$lib/components/DashboardView.svelte';
 	import InsightsPanel from '$lib/components/InsightsPanel.svelte';
-	import ExportPDF from '$lib/components/ExportPDF.svelte';
+	import ExportHTML from '$lib/components/ExportHTML.svelte';
 
 	const projectName = $derived(decodeURIComponent(page.params.name));
 
@@ -77,7 +77,7 @@
 		<div class="banner-info">
 			<div class="banner-top">
 				<h1>{project.name}</h1>
-				<ExportPDF target={reportEl} filename="{project.name}-report" />
+				<ExportHTML target={reportEl} filename="{project.name}-report" />
 			</div>
 			<div class="banner-meta">
 				<span>{project.session_count} sessions</span>

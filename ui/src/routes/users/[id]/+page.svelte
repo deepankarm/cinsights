@@ -6,7 +6,7 @@
 	import { fmtTokens, fmtDate, fmtDuration, avatarColor } from '$lib/format';
 	import DashboardView from '$lib/components/DashboardView.svelte';
 	import InsightsPanel from '$lib/components/InsightsPanel.svelte';
-	import ExportPDF from '$lib/components/ExportPDF.svelte';
+	import ExportHTML from '$lib/components/ExportHTML.svelte';
 
 	const userId = $derived(decodeURIComponent(page.params.id));
 
@@ -80,7 +80,7 @@
 		<div class="banner-info">
 			<div class="banner-top">
 				<h1>{user.display_name}</h1>
-				<ExportPDF target={reportEl} filename="{user.display_name}-report" />
+				<ExportHTML target={reportEl} filename="{user.display_name}-report" />
 			</div>
 			<p class="user-email">{user.user_id}</p>
 			<div class="banner-tags">
