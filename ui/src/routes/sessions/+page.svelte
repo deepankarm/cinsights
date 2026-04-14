@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/state';
 	import { getSessions, getStats } from '$lib/api';
 	import type { SessionRead, StatsResponse } from '$lib/types';
 
@@ -8,9 +9,19 @@
 	let loading = $state(true);
 	let error: string | null = $state(null);
 
+	const filterUser = $derived(page.url.searchParams.get('user'));
+	const filterProject = $derived(page.url.searchParams.get('project'));
+	const filterLabel = $derived(
+		filterUser ? `User: ${filterUser.split('@')[0]}` :
+		filterProject ? `Project: ${filterProject}` : null
+	);
+
 	onMount(async () => {
 		try {
-			[sessions, stats] = await Promise.all([getSessions(), getStats()]);
+			[sessions, stats] = await Promise.all([
+				getSessions(0, 500, undefined, filterUser ?? undefined, filterProject ?? undefined),
+				getStats(),
+			]);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load data';
 		} finally {
@@ -27,14 +38,20 @@
 		return `${day} ${mon} ${h}:${m}`;
 	}
 
-	function formatDuration(start: string, end: string | null): string {
-		if (!end) return '-';
-		const ms = new Date(end).getTime() - new Date(start).getTime();
+	function formatDurationMs(ms: number): string {
 		if (ms < 1000) return '<1s';
 		const mins = Math.floor(ms / 60000);
 		const secs = Math.floor((ms % 60000) / 1000);
+		if (mins >= 60) return `${Math.floor(mins / 60)}h ${mins % 60}m`;
 		if (mins > 0) return `${mins}m ${secs}s`;
 		return `${secs}s`;
+	}
+
+	function formatActiveDuration(session: SessionRead): string {
+		if (session.active_duration_ms) return formatDurationMs(session.active_duration_ms);
+		if (!session.end_time) return '-';
+		const ms = new Date(session.end_time).getTime() - new Date(session.start_time).getTime();
+		return formatDurationMs(ms);
 	}
 
 	function formatTokens(n: number): string {
@@ -80,6 +97,7 @@
 	function statusColor(status: string): string {
 		switch (status) {
 			case 'analyzed': return '#16a34a';
+			case 'indexed': return '#8b5cf6';
 			case 'pending': return '#ca8a04';
 			case 'failed': return '#dc2626';
 			default: return '#64748b';
@@ -89,7 +107,8 @@
 	function statusIcon(status: string): string {
 		switch (status) {
 			case 'analyzed': return '●';
-			case 'pending': return '○';
+			case 'indexed': return '○';
+			case 'pending': return '◌';
 			case 'failed': return '✗';
 			default: return '·';
 		}
@@ -114,6 +133,13 @@
 {:else if error}
 	<div class="error">{error}</div>
 {:else}
+	{#if filterLabel}
+		<div class="filter-bar">
+			<span class="filter-label">{filterLabel}</span>
+			<span class="filter-count">{sessions.length} sessions</span>
+			<a href="/sessions" class="filter-clear">Clear filter</a>
+		</div>
+	{/if}
 	{#if stats}
 		<div class="stats-row">
 			<div class="stat-card">
@@ -167,7 +193,7 @@
 								<th class="col-agent">Agent</th>
 								<th class="col-time">Time</th>
 								<th class="col-model">Model</th>
-								<th class="col-duration">Duration</th>
+								<th class="col-duration">Active</th>
 								<th class="col-num">Tools</th>
 								<th class="col-num">Tokens</th>
 								<th class="col-num">Insights</th>
@@ -194,7 +220,7 @@
 									</td>
 									<td class="cell-dim">{formatDate(session.start_time)}</td>
 									<td class="cell-mono">{session.model ?? '-'}</td>
-									<td class="cell-mono">{formatDuration(session.start_time, session.end_time)}</td>
+									<td class="cell-mono">{formatActiveDuration(session)}</td>
 									<td class="cell-num">{session.tool_call_count || '-'}</td>
 									<td class="cell-num">{formatTokens(session.total_tokens)}</td>
 									<td class="cell-num">{session.insight_count || '-'}</td>
@@ -214,6 +240,21 @@
 {/if}
 
 <style>
+	.filter-bar {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 10px 16px;
+		background: #eff6ff;
+		border: 1px solid #bfdbfe;
+		border-radius: 8px;
+		margin-bottom: 16px;
+	}
+	.filter-label { font-size: 14px; font-weight: 600; color: #1e40af; }
+	.filter-count { font-size: 12px; color: #3b82f6; }
+	.filter-clear { font-size: 12px; color: #64748b; margin-left: auto; text-decoration: none; }
+	.filter-clear:hover { color: #dc2626; }
+
 	.loading,
 	.error {
 		text-align: center;

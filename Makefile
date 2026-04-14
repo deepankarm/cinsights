@@ -1,4 +1,4 @@
-.PHONY: dev serve analyze digest refresh analyze-entireio refresh-entireio analyze-local refresh-local build-ui test lint fix fmt check init clean sync restart help
+.PHONY: dev serve index score analyze digest refresh index-entireio index-local analyze-entireio refresh-entireio analyze-local refresh-local build-ui test lint fix fmt check init clean sync restart help
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -18,22 +18,34 @@ restart: build-ui ## Rebuild UI + restart server
 	@sleep 2
 	@echo "Running at http://localhost:8100"
 
-analyze: ## Run analysis on recent sessions (last 24h)
+index: ## Index sessions (zero LLM cost, includes scoring)
+	uv run cinsights index
+
+score: ## Re-score existing sessions and show ranked results
+	uv run cinsights score
+
+analyze: ## LLM-analyze scored sessions (costs tokens)
 	uv run cinsights analyze
 
-digest: ## Generate global + per-project insights reports (last 30 days, concurrent)
-	uv run cinsights digest --days 30
+digest: ## Generate digest: make digest ARGS="project <name>" or ARGS="user <id>"
+	uv run cinsights digest $(ARGS) --days 30
 
-refresh: ## Pull new sessions + analyze + regenerate all digests (the cron entrypoint)
-	uv run cinsights refresh --hours 24 --days 30
+refresh: ## index → analyze (the cron entrypoint)
+	uv run cinsights refresh --hours 24
 
-analyze-entireio: ## Analyze Entireio checkpoints from a repo (set REPO=/path/to/repo)
+index-entireio: ## Index Entireio checkpoints (set REPO=/path/to/repo)
+	uv run cinsights index --source entireio --repo $(REPO) --hours 8760
+
+index-local: ## Index local JSONL session files
+	uv run cinsights index --source local --hours 8760
+
+analyze-entireio: ## LLM-analyze Entireio sessions (set REPO=/path/to/repo)
 	uv run cinsights analyze --source entireio --repo $(REPO)
 
 refresh-entireio: ## Refresh from Entireio checkpoints (set REPO=/path/to/repo)
 	uv run cinsights refresh --source entireio --repo $(REPO) --hours 8760 --days 30
 
-analyze-local: ## Analyze local JSONL session files
+analyze-local: ## LLM-analyze local sessions
 	uv run cinsights analyze --source local
 
 refresh-local: ## Refresh from local JSONL files
