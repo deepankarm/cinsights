@@ -5,32 +5,33 @@ Everything you need to go from zero to your first insights report.
 ## Prerequisites
 
 - Python 3.11+ (3.12 recommended)
-- Node.js 20+
-- [uv](https://docs.astral.sh/uv/) package manager
+- Node.js 20+ (for the web UI)
 - An Anthropic API key (or another LLM provider key)
 
 ## Install
 
 ```bash
-git clone https://github.com/deepankarm/cinsights.git
-cd cinsights
-make init
+pip install cinsights
 ```
 
-This runs `uv sync` and installs the UI dependencies. The `cinsights` CLI is now available via `uv run`.
+Or with uvx (no install required):
+
+```bash
+uvx cinsights
+```
 
 ## Configure your LLM provider
 
 Interactive setup (prompts for each value):
 
 ```bash
-uv run cinsights setup
+cinsights setup
 ```
 
 Or one-shot:
 
 ```bash
-uv run cinsights setup --provider anthropic --model claude-haiku-4-5-20251001
+cinsights setup --provider anthropic --model claude-haiku-4-5-20251001
 ```
 
 API keys come from environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.) — they're never stored in the config file.
@@ -57,21 +58,21 @@ export ANTHROPIC_API_KEY=sk-ant-...
 
 # 1. Index sessions — discovers sessions, computes quality metrics, scores them.
 #    Zero LLM cost. (--hours 8760 scans ~1 year of history)
-uv run cinsights index --source local --hours 8760
+cinsights index --source local --hours 8760
 
 # 2. Analyze — LLM examines scored sessions above the threshold.
-uv run cinsights analyze --source local
+cinsights analyze --source local
 
 # 3. Digest — generates a cross-session report for a project.
-uv run cinsights digest project my-project --days 30
+cinsights digest project my-project --days 30
 
 # 4. Start the web UI
-uv run cinsights serve
+cinsights serve
 ```
 
 Open [http://localhost:8100](http://localhost:8100).
 
-Or run index + analyze together with `uv run cinsights refresh --source local --hours 8760`, then run digest separately.
+Or run index + analyze together with `cinsights refresh --source local --hours 8760`, then run digest separately.
 
 <!-- screenshot: web-ui-first-run -->
 
