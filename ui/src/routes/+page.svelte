@@ -12,6 +12,70 @@
 
 <DashboardView scope="org">
 	{#snippet extra({ users, projects })}
+		{#if projects.length > 0}
+			<div class="section">
+				<h2>Projects</h2>
+				<p class="section-desc">{projects.length} projects. Hover for details.</p>
+				<div class="project-cards">
+					{#each projects as p}
+						<a href="/projects/{encodeURIComponent(p.name)}" class="project-card"
+							onmouseenter={(e) => { hoveredProject = p; hoverPos = { x: e.clientX, y: e.clientY }; }}
+							onmousemove={(e) => { hoverPos = { x: e.clientX, y: e.clientY }; }}
+							onmouseleave={() => { hoveredProject = null; }}>
+							<div class="pc-top">
+								<div class="pc-name">{p.name}</div>
+								{#if p.has_digest}<span class="pc-badge">Insights</span>{/if}
+							</div>
+							<div class="pc-stats">
+								<div class="pc-stat">
+									<span class="pc-val">{p.session_count}</span>
+									<span class="pc-label">sessions</span>
+								</div>
+								<div class="pc-stat">
+									<span class="pc-val">{p.developer_count}</span>
+									<span class="pc-label">{p.developer_count === 1 ? 'dev' : 'devs'}</span>
+								</div>
+								<div class="pc-stat">
+									<span class="pc-val">{fmtTokens(p.total_tokens)}</span>
+									<span class="pc-label">tokens</span>
+								</div>
+							</div>
+							<div class="pc-footer">
+								{#if p.analyzed_count > 0}
+									<span class="pc-analyzed">{p.analyzed_count} analyzed</span>
+								{/if}
+							</div>
+						</a>
+					{/each}
+				</div>
+			</div>
+
+			{#if hoveredProject}
+				{@const p = hoveredProject}
+				{@const panelW = 300}
+				{@const panelH = 200}
+				{@const px = Math.min(hoverPos.x + 16, (typeof window !== 'undefined' ? window.innerWidth : 1200) - panelW - 20)}
+				{@const py = Math.min(hoverPos.y - panelH / 2, (typeof window !== 'undefined' ? window.innerHeight : 800) - panelH - 20)}
+				<div class="hover-panel proj-panel" style="left: {Math.max(8, px)}px; top: {Math.max(8, py)}px; width: {panelW}px">
+					<div class="pp-name">{p.name}</div>
+					<div class="pp-grid">
+						<div class="pp-item"><span class="pp-val">{p.session_count}</span><span class="pp-label">Sessions</span></div>
+						<div class="pp-item"><span class="pp-val">{p.analyzed_count}</span><span class="pp-label">Analyzed</span></div>
+						<div class="pp-item"><span class="pp-val">{p.session_count - p.analyzed_count}</span><span class="pp-label">Indexed</span></div>
+						<div class="pp-item"><span class="pp-val">{p.developer_count}</span><span class="pp-label">Developers</span></div>
+						<div class="pp-item"><span class="pp-val">{p.active_days}</span><span class="pp-label">Active days</span></div>
+						<div class="pp-item"><span class="pp-val">{fmtTokens(p.total_tokens)}</span><span class="pp-label">Tokens</span></div>
+					</div>
+					{#if p.top_tools.length > 0}
+						<div class="pp-tools">
+							{#each p.top_tools as t}<span class="pp-tool">{t}</span>{/each}
+						</div>
+					{/if}
+					{#if p.has_digest}<div class="pp-digest">Insights available</div>{/if}
+				</div>
+			{/if}
+		{/if}
+
 		{#if users.length > 0}
 			<div class="section">
 				<h2>Developers</h2>
@@ -75,70 +139,6 @@
 						<div class="hp-item"><span class="hp-val">{fmtNum(u.avg_turn_count)}</span><span class="hp-label">Turns/sess</span></div>
 						<div class="hp-item"><span class="hp-val">{fmtDur(u.avg_duration_ms)}</span><span class="hp-label">Avg duration</span></div>
 					</div>
-				</div>
-			{/if}
-		{/if}
-
-		{#if projects.length > 0}
-			<div class="section">
-				<h2>Projects</h2>
-				<p class="section-desc">{projects.length} projects. Hover for details.</p>
-				<div class="project-cards">
-					{#each projects as p}
-						<a href="/projects/{encodeURIComponent(p.name)}" class="project-card"
-							onmouseenter={(e) => { hoveredProject = p; hoverPos = { x: e.clientX, y: e.clientY }; }}
-							onmousemove={(e) => { hoverPos = { x: e.clientX, y: e.clientY }; }}
-							onmouseleave={() => { hoveredProject = null; }}>
-							<div class="pc-top">
-								<div class="pc-name">{p.name}</div>
-								{#if p.has_digest}<span class="pc-badge">Insights</span>{/if}
-							</div>
-							<div class="pc-stats">
-								<div class="pc-stat">
-									<span class="pc-val">{p.session_count}</span>
-									<span class="pc-label">sessions</span>
-								</div>
-								<div class="pc-stat">
-									<span class="pc-val">{p.developer_count}</span>
-									<span class="pc-label">{p.developer_count === 1 ? 'dev' : 'devs'}</span>
-								</div>
-								<div class="pc-stat">
-									<span class="pc-val">{fmtTokens(p.total_tokens)}</span>
-									<span class="pc-label">tokens</span>
-								</div>
-							</div>
-							<div class="pc-footer">
-								{#if p.analyzed_count > 0}
-									<span class="pc-analyzed">{p.analyzed_count} analyzed</span>
-								{/if}
-							</div>
-						</a>
-					{/each}
-				</div>
-			</div>
-
-			{#if hoveredProject}
-				{@const p = hoveredProject}
-				{@const panelW = 300}
-				{@const panelH = 200}
-				{@const px = Math.min(hoverPos.x + 16, (typeof window !== 'undefined' ? window.innerWidth : 1200) - panelW - 20)}
-				{@const py = Math.min(hoverPos.y - panelH / 2, (typeof window !== 'undefined' ? window.innerHeight : 800) - panelH - 20)}
-				<div class="hover-panel proj-panel" style="left: {Math.max(8, px)}px; top: {Math.max(8, py)}px; width: {panelW}px">
-					<div class="pp-name">{p.name}</div>
-					<div class="pp-grid">
-						<div class="pp-item"><span class="pp-val">{p.session_count}</span><span class="pp-label">Sessions</span></div>
-						<div class="pp-item"><span class="pp-val">{p.analyzed_count}</span><span class="pp-label">Analyzed</span></div>
-						<div class="pp-item"><span class="pp-val">{p.session_count - p.analyzed_count}</span><span class="pp-label">Indexed</span></div>
-						<div class="pp-item"><span class="pp-val">{p.developer_count}</span><span class="pp-label">Developers</span></div>
-						<div class="pp-item"><span class="pp-val">{p.active_days}</span><span class="pp-label">Active days</span></div>
-						<div class="pp-item"><span class="pp-val">{fmtTokens(p.total_tokens)}</span><span class="pp-label">Tokens</span></div>
-					</div>
-					{#if p.top_tools.length > 0}
-						<div class="pp-tools">
-							{#each p.top_tools as t}<span class="pp-tool">{t}</span>{/each}
-						</div>
-					{/if}
-					{#if p.has_digest}<div class="pp-digest">Insights available</div>{/if}
 				</div>
 			{/if}
 		{/if}
