@@ -35,13 +35,12 @@ export async function triggerAnalysis(id: string): Promise<SessionDetail> {
 }
 
 // Digest API
-export async function getDigests(project?: string): Promise<DigestRead[]> {
+export async function getDigests(project?: string, userId?: string): Promise<DigestRead[]> {
 	let url = '/api/digests/';
-	if (project) {
-		url += `?project=${encodeURIComponent(project)}`;
-	} else {
-		url += '?global_only=true';
-	}
+	const params: string[] = [];
+	if (project) params.push(`project=${encodeURIComponent(project)}`);
+	if (userId) params.push(`user_id=${encodeURIComponent(userId)}`);
+	if (params.length) url += `?${params.join('&')}`;
 	return fetchJSON(url);
 }
 

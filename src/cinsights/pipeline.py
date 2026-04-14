@@ -378,10 +378,10 @@ async def _run_one_digest(
     from cinsights.db.models import Digest, DigestSection, DigestSectionType, DigestStatus
     from cinsights.stats import compute_all
 
-    label = scope_project or "global"
+    label = scope_project or (f"user:{user_id}" if user_id else "global")
 
     async with sessionmaker() as db:
-        stats = await compute_all(db, start, end, project_name=scope_project)
+        stats = await compute_all(db, start, end, project_name=scope_project, user_id=user_id)
 
         if stats.session_count == 0:
             console.print(f"  [yellow]·[/yellow] {label} — no sessions, skipped")
@@ -1244,19 +1244,17 @@ async def _analyze_async(
 
 
 async def _digest_async(
+    scope_type: str,
+    scope_value: str,
     days: int,
-    user_id: str | None,
-    project: str | None,
     stats_only: bool,
     verbose: bool,
     run: _RunHandle | None = None,
 ) -> None:
-    """Generate global + per-project digests for the given window, concurrently.
+    """Generate a digest for a project or developer.
 
-    When ``project`` is ``None`` we discover every distinct project in scope
-    and run one digest per project plus a "global" digest, all in parallel via
-    ``asyncio.gather``. Each ``_run_one_digest`` opens its own AsyncSession so
-    the concurrency is real (not blocked on single-session serialization).
+    ``scope_type`` is ``"project"`` or ``"user"``. ``scope_value`` is the
+    project name or user ID respectively.
     """
     if verbose:
         logging.basicConfig(level=logging.DEBUG)
@@ -1266,35 +1264,18 @@ async def _digest_async(
     settings = get_settings()
 
     from cinsights.db.engine import get_sessionmaker
-    from cinsights.db.models import CodingSession, SessionStatus
 
     end = datetime.now(UTC)
     start = end - timedelta(days=days)
     sessionmaker = get_sessionmaker()
 
-    # Build scope list. Explicit --project always wins; otherwise we run a global
-    # digest *and* one per detected project, in parallel.
-    if project:
-        scopes: list[str | None] = [project]
+    if scope_type == "project":
+        scope_project, user_id = scope_value, None
+        label = scope_value
     else:
-        async with sessionmaker() as db:
-            project_rows_result = await db.exec(
-                select_fn(CodingSession.project_name)
-                .where(CodingSession.project_name.is_not(None))
-                .where(CodingSession.start_time >= start)
-                .where(CodingSession.start_time <= end)
-                .where(
-                    col(CodingSession.status).in_([
-                        SessionStatus.INDEXED, SessionStatus.ANALYZED,
-                    ])
-                )
-                .group_by(CodingSession.project_name)
-            )
-            project_rows = project_rows_result.all()
-        # Global first, then projects in stable order
-        scopes = [None, *sorted(p for p in project_rows if p)]
+        scope_project, user_id = None, scope_value
+        label = f"user:{scope_value}"
 
-    # Build the analyzer once and share it across scopes (just an HTTP client).
     analyzer = None
     if not stats_only:
         from cinsights.analysis.digest import DigestAnalyzer
@@ -1303,61 +1284,32 @@ async def _digest_async(
         analyzer = DigestAnalyzer(model=get_llm_config().build_model())
 
     console.print(
-        f"[bold]Running {len(scopes)} digest(s) for last {days} days (concurrent)...[/bold]\n"
+        f"[bold]Running digest for {label} (last {days} days)...[/bold]\n"
     )
 
-    tasks = [
-        _run_one_digest(
-            sessionmaker=sessionmaker,
-            analyzer=analyzer,
-            scope_project=scope,
-            user_id=user_id,
-            start=start,
-            end=end,
-            stats_only=stats_only,
-        )
-        for scope in scopes
-    ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    result = await _run_one_digest(
+        sessionmaker=sessionmaker,
+        analyzer=analyzer,
+        scope_project=scope_project,
+        user_id=user_id,
+        start=start,
+        end=end,
+        stats_only=stats_only,
+    )
 
-    # Summarize. Each non-exception result is (status, prompt_tokens, completion_tokens).
-    def _status_of(r: object) -> object:
-        return r[0] if isinstance(r, tuple) else r
+    if run is not None and isinstance(result, tuple) and result[0] is True:
+        run.digests_generated += 1
+        run.total_prompt_tokens += result[1]
+        run.total_completion_tokens += result[2]
 
-    succeeded = sum(1 for r in results if _status_of(r) is True)
-    skipped = sum(1 for r in results if _status_of(r) in ("empty", "stats_only", "unchanged"))
-    failed = [
-        (scope, r) for scope, r in zip(scopes, results, strict=True) if isinstance(r, Exception)
-    ]
-
-    if run is not None:
-        for r in results:
-            if isinstance(r, tuple) and r[0] is True:
-                run.digests_generated += 1
-                run.total_prompt_tokens += r[1]
-                run.total_completion_tokens += r[2]
-
-    console.print()
-    table = Table(title="Digest Summary")
-    table.add_column("Scope", style="bold")
-    table.add_column("Result")
-    for scope, result in zip(scopes, results, strict=True):
-        label = scope or "global"
-        status = _status_of(result)
-        if status is True:
-            table.add_row(label, "[green]✓ done[/green]")
-        elif status == "empty":
-            table.add_row(label, "[yellow]no sessions[/yellow]")
-        elif status == "stats_only":
-            table.add_row(label, "[cyan]· stats only[/cyan]")
-        elif status == "unchanged":
-            table.add_row(label, "[dim]· unchanged, reused[/dim]")
-        elif isinstance(result, Exception):
-            table.add_row(label, f"[red]✗ {result}[/red]")
-    console.print(table)
-
-    if not stats_only and succeeded:
-        console.print(f"\n  View at: [bold]http://localhost:{settings.port}/report[/bold]")
-
-    if failed and not succeeded and not skipped:
-        raise typer.Exit(1)
+    status = result[0] if isinstance(result, tuple) else result
+    if status is True:
+        console.print(f"  [green]✓[/green] {label} — done")
+        url_path = f"/projects/{scope_value}" if scope_type == "project" else f"/users/{scope_value}"
+        console.print(f"\n  View at: [bold]http://localhost:{settings.port}{url_path}[/bold]")
+    elif status == "empty":
+        console.print(f"  [yellow]·[/yellow] {label} — no sessions")
+    elif status == "stats_only":
+        console.print(f"  [cyan]·[/cyan] {label} — stats only")
+    elif status == "unchanged":
+        console.print(f"  [dim]·[/dim] {label} — unchanged, reused")
