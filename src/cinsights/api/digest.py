@@ -68,6 +68,8 @@ async def _count_sessions_since(db: AsyncSession, digest: Digest) -> int:
     )
     if digest.project_name:
         q = q.where(CodingSession.project_name == digest.project_name)
+    if digest.user_id:
+        q = q.where(CodingSession.user_id == digest.user_id)
     result = await db.exec(q)
     return result.one()
 
@@ -76,15 +78,19 @@ async def _count_sessions_since(db: AsyncSession, digest: Digest) -> int:
 async def list_digests(
     limit: int = 10,
     project: str | None = None,
-    global_only: bool = False,
+    user_id: str | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> list[DigestRead]:
-    """List digests, newest first. Filter by project or global scope."""
+    """List digests, newest first. Filter by project or user scope."""
     q = select(Digest).order_by(col(Digest.created_at).desc())
+    if user_id:
+        q = q.where(Digest.user_id == user_id)
+        if not project:
+            q = q.where(Digest.project_name.is_(None))
     if project:
         q = q.where(Digest.project_name == project)
-    elif global_only:
-        q = q.where(Digest.project_name.is_(None))
+        if not user_id:
+            q = q.where(Digest.user_id.is_(None))
     result = await db.exec(q.limit(limit))
     digests = result.all()
 

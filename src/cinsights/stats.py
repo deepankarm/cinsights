@@ -163,6 +163,7 @@ def _session_filter(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
     *,
     analyzed_only: bool = False,
 ) -> list[Any]:
@@ -184,6 +185,8 @@ def _session_filter(
         )
     if project_name:
         clauses.append(CodingSession.project_name == project_name)
+    if user_id:
+        clauses.append(CodingSession.user_id == user_id)
     return clauses
 
 
@@ -191,6 +194,7 @@ def _base_query(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
     *,
     analyzed_only: bool = False,
 ) -> SelectOfScalar[CodingSession]:
@@ -199,7 +203,7 @@ def _base_query(
     Pure: builds the Select expression, doesn't execute it.
     """
     q = select(CodingSession)
-    for clause in _session_filter(start, end, project_name, analyzed_only=analyzed_only):
+    for clause in _session_filter(start, end, project_name, user_id, analyzed_only=analyzed_only):
         q = q.where(clause)
     return q
 
@@ -209,6 +213,7 @@ def _tc_agg_query(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
     *,
     analyzed_only: bool = False,
 ) -> Any:
@@ -222,7 +227,7 @@ def _tc_agg_query(
         .select_from(ToolCall)
         .join(CodingSession, ToolCall.session_id == CodingSession.id)
     )
-    for clause in _session_filter(start, end, project_name, analyzed_only=analyzed_only):
+    for clause in _session_filter(start, end, project_name, user_id, analyzed_only=analyzed_only):
         q = q.where(clause)
     return q
 
@@ -232,9 +237,10 @@ async def compute_tool_distribution(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
 ) -> dict[str, int]:
     result = await db.exec(
-        _tc_agg_query((ToolCall.tool_name, func.count()), start, end, project_name)
+        _tc_agg_query((ToolCall.tool_name, func.count()), start, end, project_name, user_id)
         .group_by(ToolCall.tool_name)
         .order_by(func.count().desc())
     )
@@ -246,9 +252,10 @@ async def compute_error_breakdown(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
 ) -> tuple[dict[str, int], dict[str, int]]:
     tool_errors_result = await db.exec(
-        _tc_agg_query((ToolCall.tool_name, func.count()), start, end, project_name)
+        _tc_agg_query((ToolCall.tool_name, func.count()), start, end, project_name, user_id)
         .where(ToolCall.success == False)  # noqa: E712
         .group_by(ToolCall.tool_name)
         .order_by(func.count().desc())
@@ -256,7 +263,7 @@ async def compute_error_breakdown(
     tool_errors = tool_errors_result.all()
 
     failed_result = await db.exec(
-        _tc_agg_query((ToolCall.output_value,), start, end, project_name).where(
+        _tc_agg_query((ToolCall.output_value,), start, end, project_name, user_id).where(
             ToolCall.success == False  # noqa: E712 — SQLAlchemy filter
         )
     )
@@ -287,9 +294,10 @@ async def compute_language_distribution(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
 ) -> dict[str, int]:
     q = (
-        _tc_agg_query((ToolCall.input_value,), start, end, project_name)
+        _tc_agg_query((ToolCall.input_value,), start, end, project_name, user_id)
         .where(col(ToolCall.tool_name).in_(list(_FILE_TOOLS)))
         .where(ToolCall.input_value.isnot(None))
     )
@@ -314,8 +322,9 @@ async def compute_time_of_day(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
 ) -> dict[int, int]:
-    result = await db.exec(_base_query(start, end, project_name))
+    result = await db.exec(_base_query(start, end, project_name, user_id))
     sessions = result.all()
     hours: dict[int, int] = {}
     for s in sessions:
@@ -328,9 +337,10 @@ async def compute_session_health(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
 ) -> list[SessionHealthScore]:
     result = await db.exec(
-        _base_query(start, end, project_name).order_by(col(CodingSession.start_time).desc())
+        _base_query(start, end, project_name, user_id).order_by(col(CodingSession.start_time).desc())
     )
     sessions = result.all()
     if not sessions:
@@ -397,9 +407,10 @@ async def compute_permission_stats(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
 ) -> PermissionStats:
     """Count permission prompts and compute wait times."""
-    sessions_result = await db.exec(_base_query(start, end, project_name))
+    sessions_result = await db.exec(_base_query(start, end, project_name, user_id))
     session_ids = {s.id for s in sessions_result.all()}
 
     if not session_ids:
@@ -446,9 +457,10 @@ async def compute_plan_mode_stats(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
 ) -> PlanModeStats:
     """Count plan mode entries and agent stats."""
-    sessions_result = await db.exec(_base_query(start, end, project_name))
+    sessions_result = await db.exec(_base_query(start, end, project_name, user_id))
     session_ids = {s.id for s in sessions_result.all()}
 
     if not session_ids:
@@ -495,10 +507,11 @@ async def detect_claude_md(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
 ) -> bool:
     """Check if any session reads or edits a CLAUDE.md file."""
     q = (
-        _tc_agg_query((ToolCall.input_value,), start, end, project_name)
+        _tc_agg_query((ToolCall.input_value,), start, end, project_name, user_id)
         .where(col(ToolCall.tool_name).in_(["Read", "Edit", "Write"]))
         .where(ToolCall.input_value.isnot(None))
     )
@@ -525,9 +538,10 @@ async def detect_overlapping_sessions(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
 ) -> list[dict]:
     result = await db.exec(
-        _base_query(start, end, project_name)
+        _base_query(start, end, project_name, user_id)
         .where(CodingSession.end_time.isnot(None))
         .order_by(CodingSession.start_time)
     )
@@ -553,10 +567,11 @@ async def collect_session_summaries(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
 ) -> list[dict]:
     # Session summaries depend on Insight rows → ANALYZED only
     sessions_result = await db.exec(
-        _base_query(start, end, project_name, analyzed_only=True)
+        _base_query(start, end, project_name, user_id, analyzed_only=True)
         .order_by(CodingSession.start_time)
     )
     sessions = sessions_result.all()
@@ -694,6 +709,7 @@ async def compute_all(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
 ) -> DigestStats:
     """Compute all statistics for a digest period, optionally filtered by project.
 
@@ -704,7 +720,7 @@ async def compute_all(
     (separate sessions per request / per scope) for parallelism.
     """
     # All indexed+analyzed sessions for quantitative stats
-    sessions_result = await db.exec(_base_query(start, end, project_name))
+    sessions_result = await db.exec(_base_query(start, end, project_name, user_id))
     sessions = sessions_result.all()
     analyzed_count = sum(1 for s in sessions if s.status == SessionStatus.ANALYZED)
 
@@ -721,7 +737,7 @@ async def compute_all(
         .select_from(ToolCall)
         .join(CodingSession, ToolCall.session_id == CodingSession.id)
     )
-    for clause in _session_filter(start, end, project_name):
+    for clause in _session_filter(start, end, project_name, user_id):
         tc_count_q = tc_count_q.where(clause)
     tc_count_result = await db.exec(tc_count_q)
     total_tool_calls = tc_count_result.one()
@@ -732,11 +748,11 @@ async def compute_all(
         if s.status == SessionStatus.ANALYZED
     )
 
-    p = project_name
-    tool_dist = await compute_tool_distribution(db, start, end, p)
-    error_breakdown, error_types = await compute_error_breakdown(db, start, end, p)
-    lang_dist = await compute_language_distribution(db, start, end, p)
-    time_of_day = await compute_time_of_day(db, start, end, p)
+    p, u = project_name, user_id
+    tool_dist = await compute_tool_distribution(db, start, end, p, u)
+    error_breakdown, error_types = await compute_error_breakdown(db, start, end, p, u)
+    lang_dist = await compute_language_distribution(db, start, end, p, u)
+    time_of_day = await compute_time_of_day(db, start, end, p, u)
 
     session_durations = [
         {
@@ -804,13 +820,13 @@ async def compute_all(
         language_distribution=lang_dist,
         time_of_day=time_of_day,
         session_durations=session_durations,
-        session_health=await compute_session_health(db, start, end, p),
+        session_health=await compute_session_health(db, start, end, p, u),
         tokens_per_session=tokens_per_session,
-        overlapping_sessions=await detect_overlapping_sessions(db, start, end, p),
-        session_summaries=await collect_session_summaries(db, start, end, p),
-        permission_stats=await compute_permission_stats(db, start, end, p),
-        plan_mode_stats=await compute_plan_mode_stats(db, start, end, p),
-        has_claude_md=await detect_claude_md(db, start, end, p),
+        overlapping_sessions=await detect_overlapping_sessions(db, start, end, p, u),
+        session_summaries=await collect_session_summaries(db, start, end, p, u),
+        permission_stats=await compute_permission_stats(db, start, end, p, u),
+        plan_mode_stats=await compute_plan_mode_stats(db, start, end, p, u),
+        has_claude_md=await detect_claude_md(db, start, end, p, u),
         project_breakdown=proj_breakdown,
         weekly_trends=_compute_weekly_trends(sessions),
         analysis_tokens_used=analysis_tokens,

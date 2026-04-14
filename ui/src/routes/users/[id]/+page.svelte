@@ -1,15 +1,17 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
-	import { getUsers, type UserSummary } from '$lib/api';
-	import type { SessionRead } from '$lib/types';
+	import { getUsers, getDigests, getDigest, type UserSummary } from '$lib/api';
+	import type { SessionRead, DigestDetail } from '$lib/types';
 	import { fmtTokens, fmtDate, fmtDuration, avatarColor } from '$lib/format';
 	import DashboardView from '$lib/components/DashboardView.svelte';
+	import InsightsPanel from '$lib/components/InsightsPanel.svelte';
 	import ExportPDF from '$lib/components/ExportPDF.svelte';
 
 	const userId = $derived(decodeURIComponent(page.params.id));
 
 	let user: UserSummary | null = $state(null);
+	let digest: DigestDetail | null = $state(null);
 	let loading = $state(true);
 	let error: string | null = $state(null);
 	let expandedProjects: Set<string> = $state(new Set());
@@ -17,9 +19,17 @@
 
 	onMount(async () => {
 		try {
-			const users = await getUsers();
+			const [users, digests] = await Promise.all([
+				getUsers(),
+				getDigests(undefined, userId).catch(() => []),
+			]);
 			user = users.find(u => u.user_id === userId) ?? null;
 			if (!user) error = `User not found: ${userId}`;
+
+			const completed = digests.find(d => d.status === 'complete');
+			if (completed) {
+				digest = await getDigest(completed.id);
+			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load user';
 		} finally {
@@ -134,6 +144,19 @@
 					</div>
 				</div>
 			{/if}
+
+			{#if digest}
+				<div class="section">
+					<h2>Insights</h2>
+					<InsightsPanel {digest} />
+				</div>
+			{:else}
+				<div class="section">
+					<div class="empty-insights">
+						No insights yet. Run <code>cinsights digest user {userId} --days 30</code> to generate.
+					</div>
+				</div>
+			{/if}
 		{/snippet}
 	</DashboardView>
 	</div>
@@ -197,4 +220,6 @@
 	.sr-tools { color: #64748b; }
 	.sr-tokens { font-family: monospace; color: #475569; text-align: right; }
 	.sr-status { font-size: 11px; text-align: right; }
+	.empty-insights { text-align: center; padding: 40px; color: #94a3b8; font-size: 14px; background: white; border-radius: 12px; }
+	.empty-insights code { background: #f4f4f5; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
 </style>

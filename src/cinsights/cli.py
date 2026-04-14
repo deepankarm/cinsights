@@ -118,23 +118,28 @@ def analyze(
 
 @app.command()
 def digest(
+    scope_type: str = typer.Argument(help="Scope: 'project' or 'user'."),
+    scope_value: str = typer.Argument(help="Project name or user ID."),
     days: int = typer.Option(7, help="Analyze sessions from the last N days."),
-    user_id: str | None = typer.Option(None, help="Filter by user ID."),
-    project: str | None = typer.Option(None, help="Filter by project name."),
     stats_only: bool = typer.Option(False, "--stats-only", help="Only compute stats (no LLM)."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
 ) -> None:
-    """Generate a cross-session insights report."""
+    """Generate insights for a project or developer.
+
+    Usage: cinsights digest project <name> | cinsights digest user <id>
+    """
+    if scope_type not in ("project", "user"):
+        raise typer.BadParameter(f"scope_type must be 'project' or 'user', got '{scope_type}'")
 
     async def _entry() -> None:
         async with _track_run("digest") as run:
-            run.extra["project"] = project
-            run.extra["user_id"] = user_id
+            run.extra["scope_type"] = scope_type
+            run.extra[scope_type] = scope_value
             run.extra["days"] = days
             await _digest_async(
+                scope_type=scope_type,
+                scope_value=scope_value,
                 days=days,
-                user_id=user_id,
-                project=project,
                 stats_only=stats_only,
                 verbose=verbose,
                 run=run,
@@ -155,7 +160,7 @@ def refresh(
     repo: str | None = typer.Option(None, help="Repo path for entireio source."),
     min_score: float = typer.Option(0.4, "--min-score", help="Only analyze sessions with score >= this."),
 ) -> None:
-    """Refresh everything: index → analyze (scored) → digest."""
+    """Refresh: index → analyze (scored). Run digest separately per project/user."""
     _apply_source_overrides(source, repo)
 
     async def _entry() -> None:
@@ -181,15 +186,6 @@ def refresh(
                 trace_ids=None,
                 run=run,
                 min_score=min_score,
-            )
-            console.print()
-            await _digest_async(
-                days=days,
-                user_id=None,
-                project=None,
-                stats_only=False,
-                verbose=verbose,
-                run=run,
             )
 
     asyncio.run(_entry())

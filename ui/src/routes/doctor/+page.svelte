@@ -82,15 +82,27 @@
 		return Math.max(...dist.map(b => b.count), 1);
 	}
 
-	function runContext(run: RefreshRunRead): string {
+	function runScope(run: RefreshRunRead): string {
 		const m = run.metadata;
 		if (!m) return '';
-		const parts: string[] = [];
-		if (m.project) parts.push(m.project as string);
-		if (m.user_id) parts.push(`user: ${m.user_id}`);
-		if (m.source) parts.push(m.source as string);
-		if (m.days) parts.push(`${m.days}d`);
-		return parts.join(' · ');
+		if (m.project) return m.project as string;
+		if (m.user) return m.user as string;
+		return '';
+	}
+
+	function runScopeType(run: RefreshRunRead): string {
+		const m = run.metadata;
+		if (!m) return '';
+		if (m.scope_type) return m.scope_type as string;
+		if (m.project) return 'project';
+		if (m.user) return 'user';
+		return '';
+	}
+
+	function runDays(run: RefreshRunRead): string {
+		const m = run.metadata;
+		if (!m?.days) return '';
+		return `${m.days}d`;
 	}
 
 	function runModel(run: RefreshRunRead): string {
@@ -215,26 +227,26 @@
 		{#each visibleRuns as run}
 			<div class="run-row" class:run-failed={run.status === 'failed'}>
 				<span class="run-status" style="background: {statusColor(run.status)}"></span>
-				<div class="run-main">
-					<div class="run-top">
-						<span class="run-cmd" style="color: {cmdColor(run.command)}">{run.command}</span>
-						{#if runContext(run)}
-							<span class="run-ctx">{runContext(run)}</span>
-						{/if}
-						{#if runModel(run)}
-							<span class="run-model">{runModel(run)}</span>
-						{/if}
-					</div>
-					<div class="run-bottom">
-						<span class="run-time">{fmtDate(run.started_at)}</span>
-						<span class="run-dur">{fmtSecs(run.wall_seconds)}</span>
-						{#if run.sessions_analyzed > 0}<span class="run-detail">{run.sessions_analyzed} sessions analyzed</span>{/if}
-						{#if run.digests_generated > 0}<span class="run-detail">{run.digests_generated} {run.digests_generated === 1 ? 'digest' : 'digests'} generated</span>{/if}
-						{#if run.total_prompt_tokens + run.total_completion_tokens > 0}
-							<span class="run-tokens">{fmtTokens(run.total_prompt_tokens + run.total_completion_tokens)} tokens</span>
-						{/if}
-					</div>
-				</div>
+				<span class="run-cmd" style="color: {cmdColor(run.command)}">{run.command}</span>
+				{#if runScopeType(run)}
+					<span class="run-scope-type">{runScopeType(run)}</span>
+				{/if}
+				{#if runScope(run)}
+					<span class="run-scope">{runScope(run)}</span>
+				{/if}
+				{#if runDays(run)}
+					<span class="run-days">{runDays(run)}</span>
+				{/if}
+				<span class="run-time">{fmtDate(run.started_at)}</span>
+				<span class="run-dur">{fmtSecs(run.wall_seconds)}</span>
+				{#if run.sessions_analyzed > 0}<span class="run-detail">{run.sessions_analyzed} sessions</span>{/if}
+				{#if run.digests_generated > 0}<span class="run-detail">{run.digests_generated} digest</span>{/if}
+				{#if run.total_prompt_tokens + run.total_completion_tokens > 0}
+					<span class="run-tokens">{fmtTokens(run.total_prompt_tokens + run.total_completion_tokens)}</span>
+				{/if}
+				{#if runModel(run)}
+					<span class="run-model">{runModel(run)}</span>
+				{/if}
 				{#if run.error_message}
 					<button class="run-err-toggle" onclick={() => toggleError(run.id)}>
 						{expandedErrors.has(run.id) ? 'Hide' : 'Error'}
@@ -419,20 +431,19 @@
 	.filter-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
 	.filter-bar select { padding: 6px 10px; border: 1px solid #e8e5e0; border-radius: 8px; font-size: 12px; background: white; color: #232326; cursor: pointer; }
 	.runs-list { display: flex; flex-direction: column; gap: 2px; }
-	.run-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: white; border-radius: 8px; font-size: 12px; color: #52525b; }
+	.run-row { display: flex; align-items: center; gap: 8px; padding: 7px 12px; background: white; border-radius: 8px; font-size: 12px; color: #52525b; }
 	.run-row:hover { background: #f8fafc; }
 	.run-row.run-failed { background: #fef2f2; }
-	.run-status { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-	.run-main { flex: 1; min-width: 0; }
-	.run-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-	.run-cmd { font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
-	.run-ctx { font-size: 12px; font-weight: 600; color: #232326; }
-	.run-model { font-size: 10px; color: #a1a1aa; font-family: monospace; background: #f4f4f5; padding: 1px 6px; border-radius: 3px; }
-	.run-bottom { display: flex; align-items: center; gap: 10px; margin-top: 2px; flex-wrap: wrap; }
-	.run-time { font-size: 11px; color: #a1a1aa; }
-	.run-dur { font-size: 11px; font-family: monospace; color: #475569; }
-	.run-detail { font-size: 11px; color: #475569; }
-	.run-tokens { font-size: 11px; font-family: monospace; color: #94a3b8; }
+	.run-status { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+	.run-cmd { font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; flex-shrink: 0; }
+	.run-scope-type { font-size: 10px; color: #a1a1aa; flex-shrink: 0; }
+	.run-scope { font-size: 12px; font-weight: 600; color: #232326; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+	.run-days { font-size: 10px; color: #94a3b8; font-family: monospace; flex-shrink: 0; }
+	.run-model { font-size: 10px; color: #a1a1aa; font-family: monospace; background: #f4f4f5; padding: 1px 5px; border-radius: 3px; flex-shrink: 0; }
+	.run-time { font-size: 11px; color: #a1a1aa; margin-left: auto; flex-shrink: 0; }
+	.run-dur { font-size: 11px; font-family: monospace; color: #475569; flex-shrink: 0; }
+	.run-detail { font-size: 11px; color: #475569; flex-shrink: 0; }
+	.run-tokens { font-size: 11px; font-family: monospace; color: #94a3b8; flex-shrink: 0; }
 	.run-err-toggle { background: none; border: 1px solid #fca5a5; border-radius: 4px; padding: 2px 8px; font-size: 10px; color: #dc2626; cursor: pointer; flex-shrink: 0; }
 	.run-error { padding: 8px 12px 8px 28px; font-size: 11px; color: #991b1b; background: #fef2f2; border-radius: 0 0 8px 8px; margin-top: -2px; font-family: monospace; white-space: pre-wrap; word-break: break-all; }
 	.show-more { display: block; margin: 12px auto 0; background: white; border: 1px solid #e8e5e0; border-radius: 10px; padding: 10px 24px; font-size: 13px; font-weight: 500; color: #70707a; cursor: pointer; transition: all 0.15s; }

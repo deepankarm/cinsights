@@ -27,11 +27,11 @@ score: ## Re-score existing sessions and show ranked results
 analyze: ## LLM-analyze scored sessions (costs tokens)
 	uv run cinsights analyze
 
-digest: ## Generate global + per-project insights reports (last 30 days, concurrent)
-	uv run cinsights digest --days 30
+digest: ## Generate digest: make digest ARGS="project <name>" or ARGS="user <id>"
+	uv run cinsights digest $(ARGS) --days 30
 
-refresh: ## index → analyze → digest (the cron entrypoint)
-	uv run cinsights refresh --hours 24 --days 30
+refresh: ## index → analyze (the cron entrypoint)
+	uv run cinsights refresh --hours 24
 
 index-entireio: ## Index Entireio checkpoints (set REPO=/path/to/repo)
 	uv run cinsights index --source entireio --repo $(REPO) --hours 8760
