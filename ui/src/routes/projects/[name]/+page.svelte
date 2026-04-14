@@ -6,6 +6,7 @@
 	import { fmtTokens, fmtDate, fmtDuration } from '$lib/format';
 	import DashboardView from '$lib/components/DashboardView.svelte';
 	import InsightsPanel from '$lib/components/InsightsPanel.svelte';
+	import ExportPDF from '$lib/components/ExportPDF.svelte';
 
 	const projectName = $derived(decodeURIComponent(page.params.name));
 
@@ -14,6 +15,7 @@
 	let loading = $state(true);
 	let error: string | null = $state(null);
 	let expandedUsers: Set<string> = $state(new Set());
+	let reportEl: HTMLElement = $state(null!);
 	let showAllUsers = $state(false);
 
 	onMount(async () => {
@@ -70,9 +72,13 @@
 {:else if error}
 	<div class="loading" style="color: #dc2626">{error}</div>
 {:else if project}
+	<div bind:this={reportEl}>
 	<div class="project-banner">
 		<div class="banner-info">
-			<h1>{project.name}</h1>
+			<div class="banner-top">
+				<h1>{project.name}</h1>
+				<ExportPDF target={reportEl} filename="{project.name}-report" />
+			</div>
 			<div class="banner-meta">
 				<span>{project.session_count} sessions</span>
 				<span>{project.total_tool_calls.toLocaleString()} tool calls</span>
@@ -164,6 +170,7 @@
 			{/if}
 		{/snippet}
 	</DashboardView>
+	</div>
 {/if}
 
 <style>
@@ -171,6 +178,7 @@
 
 	.project-banner { margin-bottom: 20px; }
 	.banner-info { flex: 1; }
+	.banner-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 	h1 { font-size: 24px; font-weight: 800; color: #232326; line-height: 1.2; font-family: monospace; }
 	.banner-meta { display: flex; gap: 16px; font-size: 13px; color: #64748b; margin: 6px 0 10px; }
 	.banner-tags { display: flex; flex-wrap: wrap; gap: 4px; }

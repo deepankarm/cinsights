@@ -5,6 +5,7 @@
 	import type { SessionRead } from '$lib/types';
 	import { fmtTokens, fmtDate, fmtDuration, avatarColor } from '$lib/format';
 	import DashboardView from '$lib/components/DashboardView.svelte';
+	import ExportPDF from '$lib/components/ExportPDF.svelte';
 
 	const userId = $derived(decodeURIComponent(page.params.id));
 
@@ -12,6 +13,7 @@
 	let loading = $state(true);
 	let error: string | null = $state(null);
 	let expandedProjects: Set<string> = $state(new Set());
+	let reportEl: HTMLElement = $state(null!);
 
 	onMount(async () => {
 		try {
@@ -62,10 +64,14 @@
 {:else if error}
 	<div class="loading" style="color: #dc2626">{error}</div>
 {:else if user}
+	<div bind:this={reportEl}>
 	<div class="user-banner">
 		<span class="avatar-lg" style="background: {avatarColor(user.display_name)}">{user.display_name[0].toUpperCase()}</span>
 		<div class="banner-info">
-			<h1>{user.display_name}</h1>
+			<div class="banner-top">
+				<h1>{user.display_name}</h1>
+				<ExportPDF target={reportEl} filename="{user.display_name}-report" />
+			</div>
 			<p class="user-email">{user.user_id}</p>
 			<div class="banner-tags">
 				{#each user.agents as a}<span class="tag agent">{a}</span>{/each}
@@ -130,6 +136,7 @@
 			{/if}
 		{/snippet}
 	</DashboardView>
+	</div>
 {/if}
 
 <style>
@@ -138,6 +145,7 @@
 	.user-banner { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 20px; }
 	.banner-info { flex: 1; }
 	.avatar-lg { width: 52px; height: 52px; border-radius: 14px; display: flex; align-items: center; justify-content: center; color: white; font-weight: 800; font-size: 24px; flex-shrink: 0; }
+	.banner-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 	h1 { font-size: 24px; font-weight: 800; color: #232326; line-height: 1.2; }
 	.user-email { font-size: 13px; color: #94a3b8; margin-bottom: 8px; }
 	.banner-tags { display: flex; flex-wrap: wrap; gap: 4px; }
