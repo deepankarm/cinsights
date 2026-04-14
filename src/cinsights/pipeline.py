@@ -860,15 +860,24 @@ async def _score_async(
 
     # Compute per-session cost estimate
     from cinsights.costs import estimate_total_cost
+    import math
+
+    # Cache per-session cost
+    _cost_cache: dict[str, float] = {}
+    for sid, cs in session_objs.items():
+        if cs.estimated_analysis_tokens:
+            c = estimate_total_cost(cs.estimated_analysis_tokens)
+            if c is not None:
+                _cost_cache[sid] = c
 
     def _est_cost(sessions: list[CS]) -> float:
-        total = 0.0
-        for s in sessions:
-            if s.estimated_analysis_tokens:
-                c = estimate_total_cost(s.estimated_analysis_tokens)
-                if c is not None:
-                    total += c
-        return total
+        return sum(_cost_cache.get(s.id, 0.0) for s in sessions)
+
+    def _fmt_cost(cost: float) -> str:
+        if not cost:
+            return "-"
+        rounded = math.ceil(cost * 2) / 2  # round up to nearest $0.50
+        return f"~${rounded:.1f}" if rounded == int(rounded * 2) / 2 else f"~${rounded:.2f}"
 
     sim_thresholds = [0.6, 0.5, 0.4, 0.3, 0.2]
     sim_table = Table(title="What would be analyzed? (threshold → sessions selected)")
@@ -885,7 +894,7 @@ async def _score_async(
         fills = len(to_analyze) - by_score_only
         pct = len(to_analyze) / total_count * 100 if total_count else 0
         cost = _est_cost(to_analyze)
-        cost_str = f"${cost:.2f}" if cost else "-"
+        cost_str = _fmt_cost(cost)
         if t == min_score:
             sim_table.add_row(
                 f"[bold]{t:.1f}[/bold]",
@@ -913,7 +922,7 @@ async def _score_async(
 
     # Build nested project → user stats
     by_proj_user: dict[str, dict[str, dict]] = defaultdict(
-        lambda: defaultdict(lambda: {"total": 0, "selected": 0, "analyzed": 0, "top_score": 0.0})
+        lambda: defaultdict(lambda: {"total": 0, "selected": 0, "analyzed": 0, "top_score": 0.0, "est_cost": 0.0})
     )
     for sid, uid, proj, status, score, _ in scored_rows:
         p = proj or "Unknown"
@@ -923,6 +932,7 @@ async def _score_async(
         d["top_score"] = max(d["top_score"], score)
         if sid in selected_ids:
             d["selected"] += 1
+            d["est_cost"] += _cost_cache.get(sid, 0.0)
         if status == "analyzed":
             d["analyzed"] += 1
 
@@ -945,6 +955,7 @@ async def _score_async(
     cov_table.add_column("Analyzed", justify="right")
     cov_table.add_column("Ana %", justify="right")
     cov_table.add_column("Top Score", justify="right")
+    cov_table.add_column("Est. Cost", justify="right")
 
     sorted_projects = sorted(by_proj_user, key=lambda p: sum(u["total"] for u in by_proj_user[p].values()), reverse=True)
     for i, proj in enumerate(sorted_projects):
@@ -954,24 +965,29 @@ async def _score_async(
         ps = sum(u["selected"] for u in users.values())
         pa = sum(u["analyzed"] for u in users.values())
         pts = max(u["top_score"] for u in users.values())
+        pc = sum(u["est_cost"] for u in users.values())
         style = _score_style(pts)
 
+        pc_str = f"${pc:.2f}" if pc else "-"
         cov_table.add_row(
             f"[bold]{proj}[/bold]", "",
             f"[bold]{pt}[/bold]", f"[bold]{ps}[/bold]", f"[bold]{_pct(ps, pt)}[/bold]",
             f"[bold]{pa}[/bold]", f"[bold]{_pct(pa, pt)}[/bold]",
             f"[bold][{style}]{pts:.2f}[/{style}][/bold]",
+            f"[bold]{pc_str}[/bold]",
         )
         # User rows within project
         sorted_users = sorted(users, key=lambda u: users[u]["total"], reverse=True)
         for uid in sorted_users:
             d = users[uid]
             style = _score_style(d["top_score"])
+            uc_str = f"${d['est_cost']:.2f}" if d["est_cost"] else "-"
             cov_table.add_row(
                 "", f"  {uid}",
                 str(d["total"]), str(d["selected"]), _pct(d["selected"], d["total"]),
                 str(d["analyzed"]), _pct(d["analyzed"], d["total"]),
                 f"[{style}]{d['top_score']:.2f}[/{style}]",
+                uc_str,
             )
         if i < len(sorted_projects) - 1:
             cov_table.add_section()
@@ -982,7 +998,7 @@ async def _score_async(
     unanalyzed = [s for s in to_analyze_ms if s.status.value == "indexed"]
     if unanalyzed:
         cost = _est_cost(unanalyzed)
-        cost_str = f", est. [bold]${cost:.2f}[/bold]" if cost else ""
+        cost_str = f", est. [bold]{_fmt_cost(cost)}[/bold]" if cost else ""
         console.print(
             f"\n  At [bold]--min-score {min_score}[/bold]: {len(to_analyze_ms)} sessions selected "
             f"({len(unanalyzed)} unanalyzed{cost_str})"
