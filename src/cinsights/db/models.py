@@ -64,6 +64,7 @@ class CodingSession(SQLModel, table=True):
     # Scoring
     interestingness_score: float | None = None
     skip_reason: str | None = None
+    estimated_analysis_tokens: int | None = None  # Estimated prompt tokens for LLM analysis
 
     analysis_prompt_tokens: int = 0  # Tokens used by cinsights analysis
     analysis_completion_tokens: int = 0
