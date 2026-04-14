@@ -109,7 +109,8 @@ async def _store_indexed(
             project_name=project_name,
             start_time=trace.start_time,
             end_time=trace.end_time,
-            model=root.model_name if root else None,
+            model=(root.model_name if root and root.model_name else None)
+                or next((s.model_name for s in turn_spans if s.model_name), None),
             total_tokens=total_tokens,
             prompt_tokens=total_prompt,
             completion_tokens=total_completion,
@@ -159,14 +160,11 @@ async def _store_indexed(
             if detected and not existing:
                 coding_session.agent_type = detected
 
-    # Clear old tool calls and insights if re-indexing
+    # Clear old tool calls if re-indexing (preserve insights — they require LLM cost to regenerate)
     if force or existing:
         old_tcs = await db.exec(select_fn(ToolCall).where(ToolCall.session_id == trace_id))
         for tc in old_tcs.all():
             await db.delete(tc)
-        old_ins = await db.exec(select_fn(Insight).where(Insight.session_id == trace_id))
-        for ins in old_ins.all():
-            await db.delete(ins)
         await db.flush()
 
     # Store tool calls
@@ -1081,11 +1079,30 @@ async def _analyze_async(
         )
 
         work_items = []
-        for cs in candidates:
-            spans = await asyncio.to_thread(source.get_spans_by_session, cs.id)
-            if spans:
-                from cinsights.sources.base import TraceData
+        # Build source instances per source type to load spans
+        from cinsights.sources.base import TraceData
+        from cinsights.sources.factory import create_source as _create_source
 
+        source_cache: dict[str, TraceSource] = {str(settings.source): source}
+
+        def _get_source(source_name: str) -> TraceSource | None:
+            if source_name in source_cache:
+                return source_cache[source_name]
+            try:
+                from copy import copy
+
+                s = copy(settings)
+                s.source = SourceType(source_name)
+                src = _create_source(s)
+                source_cache[source_name] = src
+                return src
+            except Exception:
+                return None
+
+        for cs in candidates:
+            src = _get_source(cs.source) or source
+            spans = await asyncio.to_thread(src.get_spans_by_session, cs.id)
+            if spans:
                 trace = TraceData(
                     trace_id=cs.id,
                     start_time=spans[0].start_time,

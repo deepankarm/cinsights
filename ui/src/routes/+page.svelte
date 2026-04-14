@@ -4,6 +4,7 @@
 	import DashboardView from '$lib/components/DashboardView.svelte';
 
 	let hoveredUser: UserSummary | null = $state(null);
+	let hoveredProject: ProjectRead | null = $state(null);
 	let hoverPos = $state({ x: 0, y: 0 });
 </script>
 
@@ -81,21 +82,65 @@
 		{#if projects.length > 0}
 			<div class="section">
 				<h2>Projects</h2>
+				<p class="section-desc">{projects.length} projects. Hover for details.</p>
 				<div class="project-cards">
 					{#each projects as p}
-						<a href="/projects/{encodeURIComponent(p.name)}" class="project-link">
-							<div class="project-mini">
-								<div class="pm-name">{p.name}</div>
-								<div class="pm-stats">
-									<span>{p.session_count} sessions</span>
-									<span>{p.total_tool_calls.toLocaleString()} tools</span>
+						<a href="/projects/{encodeURIComponent(p.name)}" class="project-card"
+							onmouseenter={(e) => { hoveredProject = p; hoverPos = { x: e.clientX, y: e.clientY }; }}
+							onmousemove={(e) => { hoverPos = { x: e.clientX, y: e.clientY }; }}
+							onmouseleave={() => { hoveredProject = null; }}>
+							<div class="pc-top">
+								<div class="pc-name">{p.name}</div>
+								{#if p.has_digest}<span class="pc-badge">Insights</span>{/if}
+							</div>
+							<div class="pc-stats">
+								<div class="pc-stat">
+									<span class="pc-val">{p.session_count}</span>
+									<span class="pc-label">sessions</span>
 								</div>
-								{#if p.has_digest}<span class="pm-badge">Report ready</span>{/if}
+								<div class="pc-stat">
+									<span class="pc-val">{p.developer_count}</span>
+									<span class="pc-label">{p.developer_count === 1 ? 'dev' : 'devs'}</span>
+								</div>
+								<div class="pc-stat">
+									<span class="pc-val">{fmtTokens(p.total_tokens)}</span>
+									<span class="pc-label">tokens</span>
+								</div>
+							</div>
+							<div class="pc-footer">
+								{#if p.analyzed_count > 0}
+									<span class="pc-analyzed">{p.analyzed_count} analyzed</span>
+								{/if}
 							</div>
 						</a>
 					{/each}
 				</div>
 			</div>
+
+			{#if hoveredProject}
+				{@const p = hoveredProject}
+				{@const panelW = 300}
+				{@const panelH = 200}
+				{@const px = Math.min(hoverPos.x + 16, (typeof window !== 'undefined' ? window.innerWidth : 1200) - panelW - 20)}
+				{@const py = Math.min(hoverPos.y - panelH / 2, (typeof window !== 'undefined' ? window.innerHeight : 800) - panelH - 20)}
+				<div class="hover-panel proj-panel" style="left: {Math.max(8, px)}px; top: {Math.max(8, py)}px; width: {panelW}px">
+					<div class="pp-name">{p.name}</div>
+					<div class="pp-grid">
+						<div class="pp-item"><span class="pp-val">{p.session_count}</span><span class="pp-label">Sessions</span></div>
+						<div class="pp-item"><span class="pp-val">{p.analyzed_count}</span><span class="pp-label">Analyzed</span></div>
+						<div class="pp-item"><span class="pp-val">{p.session_count - p.analyzed_count}</span><span class="pp-label">Indexed</span></div>
+						<div class="pp-item"><span class="pp-val">{p.developer_count}</span><span class="pp-label">Developers</span></div>
+						<div class="pp-item"><span class="pp-val">{p.active_days}</span><span class="pp-label">Active days</span></div>
+						<div class="pp-item"><span class="pp-val">{fmtTokens(p.total_tokens)}</span><span class="pp-label">Tokens</span></div>
+					</div>
+					{#if p.top_tools.length > 0}
+						<div class="pp-tools">
+							{#each p.top_tools as t}<span class="pp-tool">{t}</span>{/each}
+						</div>
+					{/if}
+					{#if p.has_digest}<div class="pp-digest">Insights available</div>{/if}
+				</div>
+			{/if}
 		{/if}
 	{/snippet}
 </DashboardView>
@@ -132,10 +177,30 @@
 	.hp-label { display: block; font-size: 8px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.04em; }
 
 	.project-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
-	.project-link { text-decoration: none; }
-	.project-mini { background: white; border: 1px solid #e8e5e0; border-radius: 10px; padding: 14px; transition: border-color 0.15s; }
-	.project-mini:hover { border-color: #3b82f6; }
-	.pm-name { font-size: 14px; font-weight: 700; color: #232326; font-family: monospace; margin-bottom: 4px; }
-	.pm-stats { display: flex; gap: 10px; font-size: 11px; color: #70707a; }
-	.pm-badge { display: inline-block; margin-top: 6px; font-size: 10px; font-weight: 600; color: #16a34a; background: #f0fdf4; border: 1px solid #bbf7d0; padding: 1px 6px; border-radius: 4px; }
+	.project-card {
+		display: flex; flex-direction: column; background: white; border: 1px solid #e8e5e0;
+		border-radius: 12px; padding: 16px; text-decoration: none;
+		transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s; min-height: 120px;
+	}
+	.project-card:hover { border-color: #3b82f6; box-shadow: 0 4px 16px rgba(59,130,246,0.08); transform: translateY(-1px); }
+	.pc-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+	.pc-name { font-size: 14px; font-weight: 700; color: #232326; font-family: 'SF Mono', 'Fira Code', monospace; }
+	.pc-badge { font-size: 9px; font-weight: 700; color: #16a34a; background: #f0fdf4; border: 1px solid #bbf7d0; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
+	.pc-stats { display: flex; gap: 4px; margin-bottom: auto; }
+	.pc-stat { flex: 1; text-align: center; }
+	.pc-val { display: block; font-size: 16px; font-weight: 800; color: #232326; letter-spacing: -0.5px; }
+	.pc-label { display: block; font-size: 9px; color: #a1a1aa; text-transform: uppercase; letter-spacing: 0.04em; }
+	.pc-footer { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
+	.pc-analyzed { font-size: 10px; font-weight: 600; color: #6366f1; background: #eef2ff; padding: 2px 7px; border-radius: 4px; }
+	.pc-insights { font-size: 10px; font-weight: 600; color: #16a34a; background: #f0fdf4; border: 1px solid #bbf7d0; padding: 2px 6px; border-radius: 4px; }
+
+	.proj-panel { }
+	.pp-name { font-size: 15px; font-weight: 700; color: #232326; font-family: monospace; margin-bottom: 10px; }
+	.pp-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }
+	.pp-item { text-align: center; padding: 3px 0; }
+	.pp-val { display: block; font-size: 14px; font-weight: 700; color: #232326; }
+	.pp-label { display: block; font-size: 8px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.04em; }
+	.pp-tools { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+	.pp-tool { font-size: 10px; font-weight: 600; font-family: monospace; color: #475569; background: #f1f5f9; padding: 2px 6px; border-radius: 3px; }
+	.pp-digest { font-size: 10px; font-weight: 600; color: #16a34a; }
 </style>

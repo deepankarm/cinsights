@@ -12,6 +12,7 @@ export interface SessionRead {
 	status: 'indexed' | 'pending' | 'analyzed' | 'failed';
 	tool_call_count: number;
 	insight_count: number;
+	active_duration_ms: number | null;
 }
 
 export interface ToolCallRead {
