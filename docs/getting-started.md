@@ -5,7 +5,6 @@ Everything you need to go from zero to your first insights report.
 ## Prerequisites
 
 - Python 3.11+ (3.12 recommended)
-- Node.js 20+ (for the web UI)
 - An Anthropic API key (or another LLM provider key)
 
 ## Install
