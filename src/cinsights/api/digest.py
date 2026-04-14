@@ -5,7 +5,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlmodel import col, select
+from sqlmodel import col, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from cinsights.db.engine import get_db
@@ -55,14 +55,13 @@ class DigestDetail(BaseModel):
     sessions_since: int = 0
 
 
-from sqlmodel import func as sql_func
 
 
 async def _count_sessions_since(db: AsyncSession, digest: Digest) -> int:
     """Count sessions indexed/analyzed after the digest was completed."""
     if not digest.completed_at:
         return 0
-    q = select(sql_func.count()).select_from(CodingSession).where(
+    q = select(func.count()).select_from(CodingSession).where(
         CodingSession.created_at > digest.completed_at,
         col(CodingSession.status).in_([SessionStatus.INDEXED, SessionStatus.ANALYZED]),
     )

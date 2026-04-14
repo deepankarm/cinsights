@@ -407,18 +407,18 @@ async def get_coverage(db: AsyncSession = Depends(get_db)) -> CoverageResponse:
         CodingSession.interestingness_score.isnot(None)
     )
     scores = (await db.exec(score_q)).all()
-    buckets = {"0.0–0.2": 0, "0.2–0.4": 0, "0.4–0.6": 0, "0.6–0.8": 0, "0.8–1.0": 0}
+    buckets = {"0.0-0.2": 0, "0.2-0.4": 0, "0.4-0.6": 0, "0.6-0.8": 0, "0.8-1.0": 0}
     for s in scores:
         if s < 0.2:
-            buckets["0.0–0.2"] += 1
+            buckets["0.0-0.2"] += 1
         elif s < 0.4:
-            buckets["0.2–0.4"] += 1
+            buckets["0.2-0.4"] += 1
         elif s < 0.6:
-            buckets["0.4–0.6"] += 1
+            buckets["0.4-0.6"] += 1
         elif s < 0.8:
-            buckets["0.6–0.8"] += 1
+            buckets["0.6-0.8"] += 1
         else:
-            buckets["0.8–1.0"] += 1
+            buckets["0.8-1.0"] += 1
 
     return CoverageResponse(
         projects=projects,

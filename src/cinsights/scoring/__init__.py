@@ -90,18 +90,18 @@ def select_for_analysis(
         by_user_project[key].append((session, score))
 
     # Pass 1: small projects → analyze all (cost is negligible)
-    for proj, group in by_project.items():
+    for _proj, group in by_project.items():
         if len(group) <= small_project_threshold:
             for s, _ in group:
                 selected_ids.add(s.id)
 
     # Pass 2: select everything above threshold
-    for session, score, breakdown in scored:
+    for session, score, _breakdown in scored:
         if score >= min_score:
             selected_ids.add(session.id)
 
     # Pass 3: ensure minimum coverage per (user, project) — unconditional
-    for key, group in by_user_project.items():
+    for _key, group in by_user_project.items():
         already = sum(1 for s, _ in group if s.id in selected_ids)
         if already >= min_per_user_project:
             continue
@@ -112,7 +112,7 @@ def select_for_analysis(
             selected_ids.add(s.id)
 
     # Pass 4: ensure minimum coverage per project globally
-    for proj, group in by_project.items():
+    for _proj, group in by_project.items():
         already = sum(1 for s, _ in group if s.id in selected_ids)
         if already >= min_per_project:
             continue

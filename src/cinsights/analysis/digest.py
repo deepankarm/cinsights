@@ -49,7 +49,7 @@ class FrictionItem(BaseModel):
     severity: str = Field(description="critical, warning, or info")
     estimated_impact: str = Field(
         default="",
-        description="Rough time/cost impact with reasoning, e.g. '~2-4 hours/month based on 12 occurrences × ~15min recovery each. Calculation is approximate.'"
+        description="Rough time/cost impact with reasoning, e.g. '~2-4 hours/month based on 12 occurrences x ~15min recovery each. Calculation is approximate.'"
     )
 
 
