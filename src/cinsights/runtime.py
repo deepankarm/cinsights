@@ -56,6 +56,7 @@ class _RunHandle:
 
     __slots__ = (
         "digests_generated",
+        "extra",
         "id",
         "sessions_analyzed",
         "total_completion_tokens",
@@ -68,6 +69,7 @@ class _RunHandle:
         self.digests_generated = 0
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0
+        self.extra: dict[str, str | int | float | None] = {}
 
 
 @asynccontextmanager
@@ -93,12 +95,23 @@ async def _track_run(command: str) -> AsyncIterator[_RunHandle]:
     started = datetime.now(UTC)
     started_perf = time.perf_counter()
 
+    try:
+        from cinsights.settings import get_config
+        config = get_config()
+        run_metadata = _json.dumps({
+            "model": config.llm.model,
+            "provider": config.llm.provider,
+        })
+    except Exception:
+        run_metadata = None
+
     async with sessionmaker() as db:
         run = RefreshRun(
             tenant_id=settings.tenant_id,
             command=RefreshRunCommand(command),
             started_at=started,
             status=RefreshRunStatus.RUNNING,
+            metadata_json=run_metadata,
         )
         db.add(run)
         await db.commit()
@@ -135,5 +148,11 @@ async def _track_run(command: str) -> AsyncIterator[_RunHandle]:
                 run.total_completion_tokens = handle.total_completion_tokens
                 if error:
                     run.error_message = error[:2000]
+                if handle.extra and run.metadata_json:
+                    merged = _json.loads(run.metadata_json)
+                    merged.update(handle.extra)
+                    run.metadata_json = _json.dumps(merged)
+                elif handle.extra:
+                    run.metadata_json = _json.dumps(handle.extra)
                 db.add(run)
                 await db.commit()

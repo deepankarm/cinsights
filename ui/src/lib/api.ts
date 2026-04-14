@@ -161,6 +161,83 @@ export interface UserSummary {
 	sources: string[];
 }
 
+// Doctor API
+export interface RefreshRunRead {
+	id: string;
+	command: string;
+	started_at: string;
+	completed_at: string | null;
+	status: string;
+	sessions_analyzed: number;
+	digests_generated: number;
+	total_prompt_tokens: number;
+	total_completion_tokens: number;
+	wall_seconds: number | null;
+	db_size_bytes: number | null;
+	error_message: string | null;
+	metadata: Record<string, string | number | null> | null;
+}
+
+export interface DbSizePoint { timestamp: string; bytes: number; }
+
+export interface ConfigLimit { key: string; value: number; description: string; }
+export interface ConfigSnapshot { model: string; provider: string; limits: ConfigLimit[]; }
+
+export interface SystemHealthResponse {
+	total_sessions: number;
+	indexed_sessions: number;
+	analyzed_sessions: number;
+	failed_sessions: number;
+	total_projects: number;
+	total_developers: number;
+	db_size_bytes: number | null;
+	db_size_history: DbSizePoint[];
+	last_refresh: RefreshRunRead | null;
+	last_analyze: RefreshRunRead | null;
+	last_digest: RefreshRunRead | null;
+	config: ConfigSnapshot;
+}
+
+export interface CommandCost { command: string; prompt_tokens: number; completion_tokens: number; estimated_cost_usd: number | null; run_count: number; }
+export interface ProjectCost { project_name: string; prompt_tokens: number; completion_tokens: number; estimated_cost_usd: number | null; session_count: number; }
+export interface DailyCost { date: string; prompt_tokens: number; completion_tokens: number; }
+
+export interface CostSummaryResponse {
+	total_prompt_tokens: number;
+	total_completion_tokens: number;
+	estimated_cost_usd: number | null;
+	by_command: CommandCost[];
+	by_project: ProjectCost[];
+	daily_trend: DailyCost[];
+}
+
+export interface ProjectCoverage { project_name: string; total_sessions: number; indexed: number; analyzed: number; failed: number; coverage_pct: number; avg_interestingness: number | null; }
+export interface ScoreBucket { bucket: string; count: number; }
+
+export interface CoverageResponse {
+	projects: ProjectCoverage[];
+	score_distribution: ScoreBucket[];
+}
+
+export async function getDoctorHealth(): Promise<SystemHealthResponse> {
+	return fetchJSON('/api/doctor/health');
+}
+
+export async function getDoctorRuns(command?: string, status?: string, skip = 0, limit = 50): Promise<RefreshRunRead[]> {
+	const params: string[] = [`skip=${skip}`, `limit=${limit}`];
+	if (command) params.push(`command=${command}`);
+	if (status) params.push(`status=${status}`);
+	return fetchJSON(`/api/doctor/runs?${params.join('&')}`);
+}
+
+export async function getDoctorCost(): Promise<CostSummaryResponse> {
+	return fetchJSON('/api/doctor/cost');
+}
+
+export async function getDoctorCoverage(): Promise<CoverageResponse> {
+	return fetchJSON('/api/doctor/coverage');
+}
+
 export async function getUsers(start?: string, end?: string, project?: string): Promise<UserSummary[]> {
 	let url = '/api/users/';
 	const params: string[] = [];

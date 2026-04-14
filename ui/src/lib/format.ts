@@ -80,6 +80,37 @@ export function copyText(text: string, btn: HTMLButtonElement): void {
 	});
 }
 
+export function fmtBytes(n: number): string {
+	if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)} GB`;
+	if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)} MB`;
+	if (n >= 1_000) return `${(n / 1_000).toFixed(0)} KB`;
+	return `${n} B`;
+}
+
+export function fmtCost(usd: number | null): string {
+	if (usd == null) return '-';
+	if (usd < 0.01) return '<$0.01';
+	return `$${usd.toFixed(2)}`;
+}
+
+export function fmtAgo(iso: string): string {
+	const ms = Date.now() - new Date(iso).getTime();
+	const mins = Math.floor(ms / 60000);
+	if (mins < 1) return 'just now';
+	if (mins < 60) return `${mins}m ago`;
+	const hrs = Math.floor(mins / 60);
+	if (hrs < 24) return `${hrs}h ago`;
+	const days = Math.floor(hrs / 24);
+	return `${days}d ago`;
+}
+
+export function fmtSecs(s: number | null): string {
+	if (s == null) return '-';
+	if (s < 60) return `${s.toFixed(0)}s`;
+	if (s < 3600) return `${(s / 60).toFixed(1)}m`;
+	return `${(s / 3600).toFixed(1)}h`;
+}
+
 const avatarColors = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#06b6d4', '#ef4444', '#6366f1'];
 export function avatarColor(name: string): string {
 	let h = 0;
