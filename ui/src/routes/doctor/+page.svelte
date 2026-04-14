@@ -233,7 +233,8 @@
 				<th>Time</th>
 				<th>Duration</th>
 				<th>Work</th>
-				<th>Tokens</th>
+				<th>Input</th>
+				<th>Output</th>
 				<th>Cost</th>
 				<th>Model</th>
 				<th></th>
@@ -254,7 +255,8 @@
 					<td class="run-work">
 						{#if run.sessions_analyzed > 0}{run.sessions_analyzed} sessions{:else if run.digests_generated > 0}{run.digests_generated} digest{:else}-{/if}
 					</td>
-					<td class="run-tokens">{run.total_prompt_tokens + run.total_completion_tokens > 0 ? fmtTokens(run.total_prompt_tokens + run.total_completion_tokens) : '-'}</td>
+					<td class="run-tokens">{run.total_prompt_tokens > 0 ? fmtTokens(run.total_prompt_tokens) : '-'}</td>
+				<td class="run-tokens">{run.total_completion_tokens > 0 ? fmtTokens(run.total_completion_tokens) : '-'}</td>
 					<td class="run-cost">{fmtCost(run.estimated_cost_usd)}</td>
 					<td class="run-model">{runModel(run)}</td>
 					<td>
@@ -266,7 +268,7 @@
 					</td>
 				</tr>
 				{#if run.error_message && expandedErrors.has(run.id)}
-					<tr><td colspan="10" class="run-error-cell"><div class="run-error">{run.error_message}</div></td></tr>
+					<tr><td colspan="11" class="run-error-cell"><div class="run-error">{run.error_message}</div></td></tr>
 				{/if}
 			{/each}
 		</tbody>
