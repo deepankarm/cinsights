@@ -205,6 +205,11 @@ async def _store_indexed(
         if value is not None:
             setattr(coding_session, key, value)
 
+    # Estimate analysis cost from actual span data
+    from cinsights.costs import estimate_session_analysis_tokens
+
+    coding_session.estimated_analysis_tokens = estimate_session_analysis_tokens(spans)
+
     return coding_session
 
 
@@ -519,6 +524,41 @@ async def _discover_work_items(
                     else:
                         console.print(f"  [yellow]No spans for {tid[:16]}...[/yellow]")
             progress.update(task, description=f"Found {len(work_items)} session(s) with spans")
+    elif force:
+        # Force mode: re-index all DB sessions belonging to the current source.
+        from cinsights.sources.base import TraceData
+
+        async with sessionmaker() as db:
+            all_sessions = (
+                await db.exec(
+                    select_fn(CodingSession)
+                    .where(CodingSession.source == str(settings.source))
+                    .order_by(col(CodingSession.start_time).desc())
+                    .limit(limit)
+                )
+            ).all()
+            session_ids = [cs.id for cs in all_sessions]
+
+        console.print(f"  Force re-indexing {len(session_ids)} {settings.source} session(s)...")
+
+        not_found = 0
+        for sid in session_ids:
+            spans = await asyncio.to_thread(source.get_spans_by_session, sid)
+            if not spans:
+                not_found += 1
+                continue
+            trace = TraceData(
+                trace_id=sid,
+                start_time=spans[0].start_time,
+                end_time=spans[-1].end_time,
+                spans=spans,
+            )
+            work_items.append((sid, sid, trace, spans))
+
+        if not_found:
+            console.print(
+                f"  [dim]{not_found} session(s) not found in source, skipped[/dim]"
+            )
     else:
         start_time = datetime.now(UTC) - timedelta(hours=hours)
 
@@ -543,7 +583,7 @@ async def _discover_work_items(
         async with sessionmaker() as db:
             for d in discovered[:limit]:
                 existing = await db.get(CodingSession, d.session_id)
-                if existing and existing.status == SessionStatus.ANALYZED and not force:
+                if existing and existing.status == SessionStatus.ANALYZED:
                     prior = max(existing.span_count, 1)
                     growth = (d.span_count - existing.span_count) / prior
                     last_seen = existing.last_span_time
@@ -818,6 +858,18 @@ async def _score_async(
                 session_objs[sid] = cs
                 scored_tuples.append((cs, score, {}))
 
+    # Compute per-session cost estimate
+    from cinsights.costs import estimate_total_cost
+
+    def _est_cost(sessions: list[CS]) -> float:
+        total = 0.0
+        for s in sessions:
+            if s.estimated_analysis_tokens:
+                c = estimate_total_cost(s.estimated_analysis_tokens)
+                if c is not None:
+                    total += c
+        return total
+
     sim_thresholds = [0.6, 0.5, 0.4, 0.3, 0.2]
     sim_table = Table(title="What would be analyzed? (threshold → sessions selected)")
     sim_table.add_column("--min-score", justify="right")
@@ -825,12 +877,15 @@ async def _score_async(
     sim_table.add_column("+ coverage fills", justify="right")
     sim_table.add_column("Total", justify="right", style="bold")
     sim_table.add_column("% of all")
+    sim_table.add_column("Est. cost", justify="right")
 
     for t in sim_thresholds:
         to_analyze, _ = select_for_analysis(scored_tuples, min_score=t, min_per_user_project=2)
         by_score_only = sum(1 for _, _, _, _, s, _ in scored_rows if s >= t)
         fills = len(to_analyze) - by_score_only
         pct = len(to_analyze) / total_count * 100 if total_count else 0
+        cost = _est_cost(to_analyze)
+        cost_str = f"${cost:.2f}" if cost else "-"
         if t == min_score:
             sim_table.add_row(
                 f"[bold]{t:.1f}[/bold]",
@@ -838,6 +893,7 @@ async def _score_async(
                 f"+{fills}" if fills > 0 else "-",
                 f"[bold]{len(to_analyze)}[/bold]",
                 f"{pct:.0f}%",
+                f"[bold]{cost_str}[/bold]",
             )
         else:
             sim_table.add_row(
@@ -846,6 +902,7 @@ async def _score_async(
                 f"+{fills}" if fills > 0 else "-",
                 str(len(to_analyze)),
                 f"{pct:.0f}%",
+                cost_str,
             )
 
     console.print(sim_table)
@@ -854,66 +911,81 @@ async def _score_async(
     to_analyze_ms, _ = select_for_analysis(scored_tuples, min_score=min_score, min_per_user_project=2)
     selected_ids = {s.id for s in to_analyze_ms}
 
-    by_user: dict[str, dict] = defaultdict(lambda: {"total": 0, "selected": 0, "analyzed": 0, "top_score": 0.0})
-    for sid, uid, proj, status, score, _ in scored_rows:
-        u = uid or "unknown"
-        by_user[u]["total"] += 1
-        by_user[u]["top_score"] = max(by_user[u]["top_score"], score)
-        if sid in selected_ids:
-            by_user[u]["selected"] += 1
-        if status == "analyzed":
-            by_user[u]["analyzed"] += 1
-
-    user_table = Table(title=f"Coverage by User (at --min-score {min_score})")
-    user_table.add_column("User", max_width=25)
-    user_table.add_column("Total", justify="right")
-    user_table.add_column("Selected", justify="right")
-    user_table.add_column("Already analyzed", justify="right")
-    user_table.add_column("Top score", justify="right")
-
-    for uid in sorted(by_user, key=lambda u: by_user[u]["total"], reverse=True):
-        d = by_user[uid]
-        score_style = "bold red" if d["top_score"] >= 0.6 else "yellow" if d["top_score"] >= min_score else "dim"
-        user_table.add_row(
-            uid, str(d["total"]), str(d["selected"]), str(d["analyzed"]),
-            f"[{score_style}]{d['top_score']:.2f}[/{score_style}]",
-        )
-
-    console.print(user_table)
-
-    by_proj: dict[str, dict] = defaultdict(lambda: {"total": 0, "selected": 0, "analyzed": 0, "top_score": 0.0})
+    # Build nested project → user stats
+    by_proj_user: dict[str, dict[str, dict]] = defaultdict(
+        lambda: defaultdict(lambda: {"total": 0, "selected": 0, "analyzed": 0, "top_score": 0.0})
+    )
     for sid, uid, proj, status, score, _ in scored_rows:
         p = proj or "Unknown"
-        by_proj[p]["total"] += 1
-        by_proj[p]["top_score"] = max(by_proj[p]["top_score"], score)
+        u = uid or "unknown"
+        d = by_proj_user[p][u]
+        d["total"] += 1
+        d["top_score"] = max(d["top_score"], score)
         if sid in selected_ids:
-            by_proj[p]["selected"] += 1
+            d["selected"] += 1
         if status == "analyzed":
-            by_proj[p]["analyzed"] += 1
+            d["analyzed"] += 1
 
-    proj_table = Table(title=f"Coverage by Project (at --min-score {min_score})")
-    proj_table.add_column("Project", max_width=25)
-    proj_table.add_column("Total", justify="right")
-    proj_table.add_column("Selected", justify="right")
-    proj_table.add_column("Already analyzed", justify="right")
-    proj_table.add_column("Top score", justify="right")
+    def _pct(n: int, total: int) -> str:
+        return f"{n / total * 100:.0f}%" if total else "-"
 
-    for proj in sorted(by_proj, key=lambda p: by_proj[p]["total"], reverse=True):
-        d = by_proj[proj]
-        score_style = "bold red" if d["top_score"] >= 0.6 else "yellow" if d["top_score"] >= min_score else "dim"
-        proj_table.add_row(
-            proj, str(d["total"]), str(d["selected"]), str(d["analyzed"]),
-            f"[{score_style}]{d['top_score']:.2f}[/{score_style}]",
+    def _score_style(score: float) -> str:
+        if score >= 0.6:
+            return "bold red"
+        if score >= min_score:
+            return "yellow"
+        return "dim"
+
+    cov_table = Table(title=f"Coverage (at --min-score {min_score})")
+    cov_table.add_column("Project", max_width=20)
+    cov_table.add_column("User", max_width=22)
+    cov_table.add_column("Total", justify="right")
+    cov_table.add_column("Selected", justify="right")
+    cov_table.add_column("Sel %", justify="right")
+    cov_table.add_column("Analyzed", justify="right")
+    cov_table.add_column("Ana %", justify="right")
+    cov_table.add_column("Top Score", justify="right")
+
+    sorted_projects = sorted(by_proj_user, key=lambda p: sum(u["total"] for u in by_proj_user[p].values()), reverse=True)
+    for i, proj in enumerate(sorted_projects):
+        users = by_proj_user[proj]
+        # Project totals
+        pt = sum(u["total"] for u in users.values())
+        ps = sum(u["selected"] for u in users.values())
+        pa = sum(u["analyzed"] for u in users.values())
+        pts = max(u["top_score"] for u in users.values())
+        style = _score_style(pts)
+
+        cov_table.add_row(
+            f"[bold]{proj}[/bold]", "",
+            f"[bold]{pt}[/bold]", f"[bold]{ps}[/bold]", f"[bold]{_pct(ps, pt)}[/bold]",
+            f"[bold]{pa}[/bold]", f"[bold]{_pct(pa, pt)}[/bold]",
+            f"[bold][{style}]{pts:.2f}[/{style}][/bold]",
         )
+        # User rows within project
+        sorted_users = sorted(users, key=lambda u: users[u]["total"], reverse=True)
+        for uid in sorted_users:
+            d = users[uid]
+            style = _score_style(d["top_score"])
+            cov_table.add_row(
+                "", f"  {uid}",
+                str(d["total"]), str(d["selected"]), _pct(d["selected"], d["total"]),
+                str(d["analyzed"]), _pct(d["analyzed"], d["total"]),
+                f"[{style}]{d['top_score']:.2f}[/{style}]",
+            )
+        if i < len(sorted_projects) - 1:
+            cov_table.add_section()
 
-    console.print(proj_table)
+    console.print(cov_table)
 
     # --- 4. Recommendation ---
-    unanalyzed_selected = sum(1 for s in to_analyze_ms if s.status.value == "indexed")
-    if unanalyzed_selected:
+    unanalyzed = [s for s in to_analyze_ms if s.status.value == "indexed"]
+    if unanalyzed:
+        cost = _est_cost(unanalyzed)
+        cost_str = f", est. [bold]${cost:.2f}[/bold]" if cost else ""
         console.print(
             f"\n  At [bold]--min-score {min_score}[/bold]: {len(to_analyze_ms)} sessions selected "
-            f"({unanalyzed_selected} unanalyzed)"
+            f"({len(unanalyzed)} unanalyzed{cost_str})"
             f"\n  Run [cyan]cinsights analyze --min-score {min_score}[/cyan] to analyze them."
         )
 
