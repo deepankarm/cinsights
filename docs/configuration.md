@@ -6,7 +6,7 @@ Start with defaults. The only thing you need to set on day one is your API key.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | — | Anthropic API key (required for default LLM config) |
+| `ANTHROPIC_API_KEY` | - | Anthropic API key (required for default LLM config) |
 | `CINSIGHTS_SOURCE` | `phoenix` | Data source: `phoenix`, `local`, or `entireio` |
 | `CINSIGHTS_DATABASE_URL` | `sqlite:///cinsights.db` | Database connection string |
 | `CINSIGHTS_BUDGET_MODE` | `balanced` | Scoring budget: `frugal`, `balanced`, `thorough`, `all` |
@@ -14,7 +14,7 @@ Start with defaults. The only thing you need to set on day one is your API key.
 | `CINSIGHTS_MIN_SESSION_TOOL_COUNT` | `10` | Minimum tool calls to include session in digest evidence |
 | `CINSIGHTS_PHOENIX_ENDPOINT` | `http://localhost:6006` | Phoenix API URL |
 | `CINSIGHTS_PHOENIX_PROJECT` | `claude-code` | Phoenix project name |
-| `CINSIGHTS_ENTIREIO_REPO_PATH` | — | Path to git repo with Entire.io checkpoints |
+| `CINSIGHTS_ENTIREIO_REPO_PATH` | - | Path to git repo with Entire.io checkpoints |
 | `CINSIGHTS_ENTIREIO_BRANCH` | `entire/checkpoints/v1` | Checkpoint branch name |
 | `CINSIGHTS_HOST` | `127.0.0.1` | Web server bind address |
 | `CINSIGHTS_PORT` | `8100` | Web server port |
@@ -48,11 +48,11 @@ You can also set these in a `.env` file in the project root.
 }
 ```
 
-**`llm`** — Provider and model. Uses pydantic-ai's `provider:model` namespace, so any provider that pydantic-ai supports works. API keys come from environment variables, never stored here.
+**`llm`** - Provider and model. Uses pydantic-ai's `provider:model` namespace, so any provider that pydantic-ai supports works. API keys come from environment variables, never stored here.
 
-**`claude_code_homes` / `codex_homes`** — Directories to scan when using the [local source](sources/local.md).
+**`claude_code_homes` / `codex_homes`** - Directories to scan when using the [local source](sources/local.md).
 
-**`limits`** — Context window and coverage tuning. Defaults are sized for Haiku-class models. Increase `max_timeline_spans` if using a model with a larger context window.
+**`limits`** - Context window and coverage tuning. Defaults are sized for Haiku-class models. Increase `max_timeline_spans` if using a model with a larger context window.
 
 ## LLM provider setup
 
@@ -74,7 +74,7 @@ Validate current config:
 cinsights setup --validate
 ```
 
-Any provider that pydantic-ai supports works — Anthropic, OpenAI, Google, etc. For custom gateways or proxies, use `--base-url` and `--extra-headers`.
+Any provider that pydantic-ai supports works - Anthropic, OpenAI, Google, etc. For custom gateways or proxies, use `--base-url` and `--extra-headers`.
 
 ## CLI reference
 
@@ -92,12 +92,22 @@ Makefile shortcuts: `make index`, `make analyze`, `make refresh`, `make index-lo
 
 ## Running on a schedule
 
-cinsights works well as a cron job. Example — refresh daily at 9am, then generate digests:
+cinsights works well as a cron job. Example - refresh daily at 9am, then generate digests:
 
 ```bash
 # Index + analyze last 24h of sessions
-0 9 * * * cd /path/to/cinsights && uv run cinsights refresh --hours 24
+0 9 * * * cd /path/to/cinsights && cinsights refresh --hours 24
 
 # Generate project digest (run after refresh)
-5 9 * * * cd /path/to/cinsights && uv run cinsights digest project my-app --days 30
+5 9 * * * cd /path/to/cinsights && cinsights digest project my-app --days 30
 ```
+
+---
+
+**[← Previous: Concepts](./concepts.md)**
+
+<div align="right">
+
+**[Next: Local Source →](./sources/local.md)**
+
+</div>

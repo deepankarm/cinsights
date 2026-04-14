@@ -1,6 +1,6 @@
 # Local source
 
-Reads session files directly from your machine. No external services needed.
+Reads session files directly from your machine. No external services needed. This is the quickest way to try cinsights - if you've used Claude Code or Codex, you already have the data.
 
 ## What it reads
 
@@ -52,7 +52,17 @@ Makefile shortcuts: `make index-local`, `make refresh-local`.
 
 ## Limitations
 
-- **Single machine** — reads files from this machine only. No syncing across machines.
-- **Session retention** — Claude Code can prune old session files. Historical data depends on what's still on disk.
+- **Single machine** - reads files from this machine only. No syncing across machines.
+- **Session retention** - Claude Code can prune old session files. Historical data depends on what's still on disk.
 
-For cross-machine or cross-agent coverage, use [Entire.io](entireio.md).
+For cross-machine or cross-agent coverage, use [Entire.io](entireio.md). For centralized team observability, use [Phoenix](phoenix.md).
+
+---
+
+**[← Previous: Configuration](../configuration.md)**
+
+<div align="right">
+
+**[Next: Entire.io Source →](./entireio.md)**
+
+</div>

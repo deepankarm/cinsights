@@ -1,18 +1,19 @@
 # Entire.io source
 
-Cross-agent session capture. Indexes sessions from Claude Code, Cursor, and Codex through Entire.io's git-based checkpoints.
+Cross-agent session capture that works end-to-end today. Indexes sessions from Claude Code, Cursor, and Codex through Entire.io's git-based checkpoints.
 
 ## What is Entire.io
 
-[Entire.io](https://entire.io) captures coding agent checkpoints as commits on a git branch (`entire/checkpoints/v1`). Each checkpoint contains session metadata, conversation JSONL, and file diffs. When integrated into a repo, it records sessions from all supported agents automatically.
+[Entire.io](https://entire.io) captures coding agent checkpoints as commits on a git branch (`entire/checkpoints/v1`). Each checkpoint contains session metadata, conversation JSONL, and file diffs. It already supports multiple coding agents and captures sessions automatically when integrated into a repo.
 
-Git tracks *what* changed. Entire captures *how* — the reasoning, tool calls, and iterations that produced those changes. cinsights analyzes that data.
+Git tracks *what* changed. Entire captures *how* - the reasoning, tool calls, and iterations that produced those changes. cinsights analyzes that data.
 
 ## Why use it
 
-- **Cross-agent** — one unified view of Claude Code, Cursor, and Codex sessions in the same project
-- **Cross-machine** — checkpoints are git commits, so they sync wherever the repo is pushed
-- **Historical** — checkpoints persist even after local session files are pruned
+- **Cross-agent** - one unified view of Claude Code, Cursor, and Codex sessions in the same project
+- **Cross-machine** - checkpoints are git commits, so they sync wherever the repo is pushed
+- **Historical** - checkpoints persist even after local session files are pruned
+- **Already works** - Entire.io supports many coding agents out of the box, no custom integration needed
 
 ## Setup
 
@@ -60,3 +61,13 @@ cinsights refresh --source entireio --repo /path/to/repo-a --hours 8760
 cinsights refresh --source entireio --repo /path/to/repo-b --hours 8760
 cinsights digest project repo-a --days 30
 ```
+
+---
+
+**[← Previous: Local Source](./local.md)**
+
+<div align="right">
+
+**[Next: Phoenix Source →](./phoenix.md)**
+
+</div>
