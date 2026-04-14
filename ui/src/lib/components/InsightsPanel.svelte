@@ -48,7 +48,7 @@
 	);
 
 	function rlm(text: string): string {
-		return renderLinkedMarkdown(text, sessionIds);
+		return renderLinkedMarkdown(text.replaceAll('\\n', '\n'), sessionIds);
 	}
 
 	let atAGlance = $derived(getSection('at_a_glance')?.metadata as Record<string, string[]> | undefined);
