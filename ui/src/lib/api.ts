@@ -53,6 +53,9 @@ export async function getDigest(id: string): Promise<DigestDetail> {
 export interface ProjectRead {
 	name: string;
 	session_count: number;
+	analyzed_count: number;
+	developer_count: number;
+	active_days: number;
 	total_tokens: number;
 	total_tool_calls: number;
 	top_tools: string[];

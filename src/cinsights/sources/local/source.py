@@ -170,6 +170,22 @@ class LocalSource:
         if agent != AgentType.CLAUDE_CODE:
             return None
 
+        # Skip sub-agent sessions (prompt suggestions, compactions, etc.)
+        # Sub-agents have isSidechain=true in their JSONL lines.
+        import json as json_mod
+
+        for line in head.split(b"\n"):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json_mod.loads(line)
+                if rec.get("isSidechain") is True:
+                    return None
+                break  # First parseable non-sidechain line means it's a real session
+            except (json_mod.JSONDecodeError, ValueError):
+                continue
+
         stem = jsonl_file.stem
         session_id = f"local:{agent}:{stem}"
         mtime = datetime.fromtimestamp(jsonl_file.stat().st_mtime, tz=UTC)

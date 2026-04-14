@@ -38,14 +38,20 @@
 		return `${day} ${mon} ${h}:${m}`;
 	}
 
-	function formatDuration(start: string, end: string | null): string {
-		if (!end) return '-';
-		const ms = new Date(end).getTime() - new Date(start).getTime();
+	function formatDurationMs(ms: number): string {
 		if (ms < 1000) return '<1s';
 		const mins = Math.floor(ms / 60000);
 		const secs = Math.floor((ms % 60000) / 1000);
+		if (mins >= 60) return `${Math.floor(mins / 60)}h ${mins % 60}m`;
 		if (mins > 0) return `${mins}m ${secs}s`;
 		return `${secs}s`;
+	}
+
+	function formatActiveDuration(session: SessionRead): string {
+		if (session.active_duration_ms) return formatDurationMs(session.active_duration_ms);
+		if (!session.end_time) return '-';
+		const ms = new Date(session.end_time).getTime() - new Date(session.start_time).getTime();
+		return formatDurationMs(ms);
 	}
 
 	function formatTokens(n: number): string {
@@ -187,7 +193,7 @@
 								<th class="col-agent">Agent</th>
 								<th class="col-time">Time</th>
 								<th class="col-model">Model</th>
-								<th class="col-duration">Duration</th>
+								<th class="col-duration">Active</th>
 								<th class="col-num">Tools</th>
 								<th class="col-num">Tokens</th>
 								<th class="col-num">Insights</th>
@@ -214,7 +220,7 @@
 									</td>
 									<td class="cell-dim">{formatDate(session.start_time)}</td>
 									<td class="cell-mono">{session.model ?? '-'}</td>
-									<td class="cell-mono">{formatDuration(session.start_time, session.end_time)}</td>
+									<td class="cell-mono">{formatActiveDuration(session)}</td>
 									<td class="cell-num">{session.tool_call_count || '-'}</td>
 									<td class="cell-num">{formatTokens(session.total_tokens)}</td>
 									<td class="cell-num">{session.insight_count || '-'}</td>

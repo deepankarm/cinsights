@@ -54,6 +54,7 @@ class SessionRead(BaseModel):
     status: SessionStatus
     tool_call_count: int
     insight_count: int
+    active_duration_ms: float | None = None
 
 
 class SessionDetail(BaseModel):
@@ -93,7 +94,17 @@ async def list_sessions(
     db: AsyncSession = Depends(get_db),
 ) -> list[SessionRead]:
     """List sessions with pagination and optional filters."""
-    query = select(CodingSession).order_by(col(CodingSession.start_time).desc())
+    from sqlalchemy import case
+
+    status_order = case(
+        (CodingSession.status == "analyzed", 0),
+        (CodingSession.status == "indexed", 1),
+        else_=2,
+    )
+    query = select(CodingSession).order_by(
+        status_order,
+        col(CodingSession.start_time).desc(),
+    )
     if status:
         query = query.where(CodingSession.status == status)
     if user_id:
@@ -124,6 +135,18 @@ async def list_sessions(
     )
     insight_counts: dict[str, int] = {sid: cnt for sid, cnt in ins_result.all()}
 
+    import json as json_mod
+
+    def _active_ms(s: CodingSession) -> float | None:
+        if not s.context_growth_json:
+            return None
+        try:
+            turns = json_mod.loads(s.context_growth_json)
+            total = sum(t.get("duration_ms", 0) for t in turns)
+            return total if total > 0 else None
+        except Exception:
+            return None
+
     return [
         SessionRead(
             id=s.id,
@@ -139,6 +162,7 @@ async def list_sessions(
             status=s.status,
             tool_call_count=tool_counts.get(s.id, 0),
             insight_count=insight_counts.get(s.id, 0),
+            active_duration_ms=_active_ms(s),
         )
         for s in sessions
     ]
