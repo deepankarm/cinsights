@@ -1,4 +1,12 @@
+<div align="center">
+
 # cinsights
+
+<img src="logo.svg" width="120" height="120" alt="cinsights logo">
+
+**Coding agent insights for teams.**
+
+</div>
 
 AI coding agents are transforming how teams build software. But when your team uses Claude Code, Cursor, and Codex across dozens of projects, a fundamental question goes unanswered: *is it actually working?*
 
