@@ -4,7 +4,7 @@
 
 <img src=".github/images/logo.svg" width="120" height="120" alt="cinsights logo">
 
-**Coding agent insights for teams.**
+**Coding agent insights for teams**
 
 </div>
 
