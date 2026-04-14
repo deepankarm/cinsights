@@ -71,6 +71,7 @@ export interface DigestRead {
 	status: string;
 	created_at: string;
 	completed_at: string | null;
+	sessions_since: number;
 }
 
 export interface DigestSectionRead {
@@ -96,10 +97,24 @@ export interface DigestDetail {
 	analysis_completion_tokens: number;
 	created_at: string;
 	completed_at: string | null;
+	sessions_since: number;
+}
+
+export interface WeeklyTrend {
+	week: string;
+	session_count: number;
+	avg_read_edit_ratio: number | null;
+	avg_edits_without_read_pct: number | null;
+	avg_error_rate: number | null;
+	avg_research_mutation_ratio: number | null;
+	avg_write_vs_edit_pct: number | null;
+	avg_context_pressure: number | null;
+	total_tokens: number;
 }
 
 export interface DigestStatsData {
 	session_count: number;
+	analyzed_count: number;
 	total_tool_calls: number;
 	total_tokens: number;
 	total_duration_minutes: number;
@@ -133,6 +148,7 @@ export interface DigestStatsData {
 		plan_agent_tokens: number;
 	};
 	has_claude_md: boolean;
+	weekly_trends: WeeklyTrend[];
 	analysis_tokens_used: number;
 	session_summaries: Array<{
 		session_id: string;

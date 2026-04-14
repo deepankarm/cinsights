@@ -41,6 +41,7 @@ class LLMAnalyzer:
             self.model,
             output_type=output_type,
             system_prompt=system_prompt,
+            retries=3,
             model_settings=ModelSettings(max_tokens=max_tokens),
             instrument=False,
         )

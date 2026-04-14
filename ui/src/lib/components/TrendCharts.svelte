@@ -169,20 +169,20 @@
 						onmouseleave={() => chartLeave(ch.id)}>
 						<defs>
 							<linearGradient id="g-{ch.id}" x1="0" y1="0" x2="0" y2="1">
-								<stop offset="0%" stop-color={ch.color} stop-opacity="0.12" />
-								<stop offset="100%" stop-color={ch.color} stop-opacity="0" />
+								<stop offset="0%" stop-color={ch.color} stop-opacity="0.25" />
+								<stop offset="100%" stop-color={ch.color} stop-opacity="0.03" />
 							</linearGradient>
 						</defs>
 						{#each ys.ticks as tick}
-							<line x1={PAD.l} x2={W - PAD.r} y1={ys.yOf(tick)} y2={ys.yOf(tick)} stroke="#eee" />
+							<line x1={PAD.l} x2={W - PAD.r} y1={ys.yOf(tick)} y2={ys.yOf(tick)} stroke="#f0f0f0" stroke-dasharray="4,4" />
 							<text x={PAD.l - 6} y={ys.yOf(tick) + 4} text-anchor="end" fill="#b0b0b0" font-size="10">{tick}{ch.suffix}</text>
 						{/each}
 						<path d={areaPath(trends, ch.key)} fill="url(#g-{ch.id})" />
-						<path d={linePath(trends, ch.key)} fill="none" stroke={ch.color} stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+						<path d={linePath(trends, ch.key)} fill="none" stroke={ch.color} stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
 						{#if hi != null}
-							<line x1={xOf(hi)} x2={xOf(hi)} y1={PAD.t} y2={PAD.t + iH} stroke={ch.color} stroke-width="1" stroke-dasharray="3,3" opacity="0.5" />
+							<line x1={xOf(hi)} x2={xOf(hi)} y1={PAD.t} y2={PAD.t + iH} stroke={ch.color} stroke-width="1" stroke-dasharray="4,4" opacity="0.3" />
 							{#if hVal != null}
-								<circle cx={xOf(hi)} cy={ys.yOf(hVal)} r="4" fill={ch.color} />
+								<circle cx={xOf(hi)} cy={ys.yOf(hVal)} r="5" fill="white" stroke={ch.color} stroke-width="2.5" />
 							{/if}
 						{/if}
 						{#each xLabels(trends) as xl}
@@ -197,16 +197,22 @@
 						onmouseleave={() => chartLeave(ch.id)}>
 						{#each barTicks as tick}
 							{@const ty = PAD.t + iH - (tick / maxB) * iH}
-							<line x1={PAD.l} x2={W - PAD.r} y1={ty} y2={ty} stroke="#eee" />
+							<line x1={PAD.l} x2={W - PAD.r} y1={ty} y2={ty} stroke="#f0f0f0" stroke-dasharray="4,4" />
 							<text x={PAD.l - 6} y={ty + 4} text-anchor="end" fill="#b0b0b0" font-size="10">
 								{ch.key === 'total_tokens' ? fmtTokens(tick) : tick}
 							</text>
 						{/each}
+						<defs>
+							<linearGradient id="bg-{ch.id}" x1="0" y1="0" x2="0" y2="1">
+								<stop offset="0%" stop-color={ch.color} stop-opacity="0.9" />
+								<stop offset="100%" stop-color={ch.color} stop-opacity="0.5" />
+							</linearGradient>
+						</defs>
 						{#each trends as pt, i}
 							{@const v = (pt[ch.key] as number) ?? 0}
 							{@const bH = (v / maxB) * iH}
 							<rect x={xOf(i) - barW / 2} y={PAD.t + iH - bH} width={barW} height={bH}
-								fill={ch.color} opacity={hi === i ? 1 : 0.6} rx="1" />
+								fill="url(#bg-{ch.id})" opacity={hi === i ? 1 : 0.7} rx="3" />
 						{/each}
 						{#if hi != null}
 							<line x1={xOf(hi)} x2={xOf(hi)} y1={PAD.t} y2={PAD.t + iH} stroke={ch.color} stroke-width="1" stroke-dasharray="3,3" opacity="0.4" />
@@ -280,15 +286,20 @@
 
 <style>
 	.charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 28px; }
-	.chart-card { background: white; border-radius: 16px; padding: 20px 22px; border: 1px solid #e8e5e0; transition: box-shadow 0.25s ease; }
-	.chart-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.04); }
-	.chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1px; }
-	.chart-header h3 { font-size: 14px; font-weight: 700; color: #232326; }
+	.chart-card {
+		background: white;
+		border-radius: 16px;
+		padding: 22px 24px;
+		transition: transform 0.2s ease, box-shadow 0.2s ease;
+	}
+	.chart-card:hover { transform: translateY(-1px); box-shadow: 0 6px 24px rgba(0,0,0,0.06); }
+	.chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px; }
+	.chart-header h3 { font-size: 13px; font-weight: 700; color: #232326; text-transform: uppercase; letter-spacing: 0.03em; }
 	.chart-header-right { display: flex; align-items: center; gap: 6px; }
-	.chart-hover-val { font-size: 12px; color: #475569; }
-	.chart-desc { font-size: 11px; color: #a1a1aa; margin-bottom: 8px; }
+	.chart-hover-val { font-size: 12px; color: #475569; font-weight: 600; font-variant-numeric: tabular-nums; }
+	.chart-desc { font-size: 11px; color: #a1a1aa; margin-bottom: 10px; }
 	.chart-total { font-size: 11px; font-weight: 600; color: #8b5cf6; }
-	.trend-badge { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 5px; }
+	.trend-badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
 	.trend-badge.up { background: #ecfdf5; color: #16a34a; }
 	.trend-badge.down { background: #fef2f2; color: #dc2626; }
 	.trend-svg { width: 100%; height: auto; cursor: crosshair; }
@@ -304,9 +315,9 @@
 	.bp-container { padding: 16px 0 4px; }
 	.bp-labels { display: flex; justify-content: space-between; font-size: 10px; color: #64748b; margin-bottom: 8px; }
 	.bp-median-label { font-weight: 700; color: #232326; }
-	.bp-track { position: relative; height: 28px; background: #f1f5f9; border-radius: 4px; }
+	.bp-track { position: relative; height: 28px; background: #f1f5f9; border-radius: 6px; }
 	.bp-whisker { position: absolute; top: 12px; height: 4px; background: #94a3b8; border-radius: 2px; }
-	.bp-box { position: absolute; top: 4px; height: 20px; background: #3b82f6; border-radius: 4px; opacity: 0.7; }
+	.bp-box { position: absolute; top: 4px; height: 20px; background: linear-gradient(90deg, #3b82f6, #93c5fd); border-radius: 6px; }
 	.bp-median-line { position: absolute; top: 0; width: 2px; height: 100%; background: #1e40af; border-radius: 1px; }
 
 	@media (max-width: 768px) { .charts-grid { grid-template-columns: 1fr; } }

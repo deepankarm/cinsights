@@ -375,7 +375,7 @@ async def _run_one_digest(
     """
     import json as json_mod
 
-    from cinsights.db.models import Digest, DigestSection, DigestStatus
+    from cinsights.db.models import Digest, DigestSection, DigestSectionType, DigestStatus
     from cinsights.stats import compute_all
 
     label = scope_project or "global"
@@ -428,6 +428,30 @@ async def _run_one_digest(
                 )
                 return ("unchanged", 0, 0)
 
+        # Extract previous digest summary before deleting for delta narratives.
+        previous_summary = None
+        if latest_complete:
+            prev_sections_result = await db.exec(
+                select_fn(DigestSection)
+                .where(DigestSection.digest_id == latest_complete.id)
+                .where(
+                    col(DigestSection.section_type).in_([
+                        DigestSectionType.AT_A_GLANCE,
+                        DigestSectionType.FRICTION_ANALYSIS,
+                    ])
+                )
+            )
+            prev_parts = []
+            for sec in prev_sections_result.all():
+                prev_parts.append(f"### {sec.title}\n{sec.content}")
+            if prev_parts:
+                prev_date = latest_complete.completed_at
+                date_str = f"{prev_date:%Y-%m-%d}" if prev_date else "unknown"
+                previous_summary = (
+                    f"Previous digest ({date_str}, {latest_complete.session_count} sessions):\n"
+                    + "\n\n".join(prev_parts)
+                )
+
         # Stats changed (or no prior digest). Delete every existing digest in this
         # scope (running, failed, or stale-complete) before creating a new one.
         existing_result = await db.exec(scope_q)
@@ -441,6 +465,10 @@ async def _run_one_digest(
             await db.delete(old)
         if existing_digests:
             await db.flush()
+
+        # Attach previous digest context to stats for the LLM
+        if previous_summary:
+            stats.previous_digest_summary = previous_summary
 
         settings = get_settings()
         digest_record = Digest(
@@ -1056,26 +1084,39 @@ async def _analyze_async(
             settings, source, sessionmaker, hours, limit, force, trace_ids,
         )
     else:
-        # Select INDEXED sessions above score threshold
+        # Select INDEXED sessions using scoring + coverage fills
+        from cinsights.scoring import select_for_analysis
+
         query = (
             select_fn(CodingSession)
             .where(CodingSession.status == SessionStatus.INDEXED)
-            .where(CodingSession.interestingness_score >= min_score)
+            .where(CodingSession.interestingness_score.isnot(None))
             .order_by(col(CodingSession.interestingness_score).desc())
-            .limit(limit)
         )
 
         async with sessionmaker() as db:
             result = await db.exec(query)
-            candidates = result.all()
+            all_indexed = result.all()
 
-        if not candidates:
-            console.print(f"[yellow]No INDEXED sessions with score ≥ {min_score}.[/yellow]")
+        if not all_indexed:
+            console.print(f"[yellow]No scored INDEXED sessions found.[/yellow]")
             console.print("  Run [cyan]cinsights index[/cyan] first to discover and score sessions.")
             return
 
+        # Build scored tuples and apply selection with coverage fills
+        scored_tuples = [(s, s.interestingness_score or 0.0, {}) for s in all_indexed]
+        candidates, _ = select_for_analysis(scored_tuples, min_score=min_score)
+        candidates = candidates[:limit]
+
+        if not candidates:
+            console.print(f"[yellow]No sessions selected at --min-score {min_score}.[/yellow]")
+            return
+
+        by_score = sum(1 for s in candidates if (s.interestingness_score or 0) >= min_score)
+        by_fill = len(candidates) - by_score
         console.print(
-            f"\n[bold]Found {len(candidates)} INDEXED session(s) with score ≥ {min_score}[/bold]\n"
+            f"\n[bold]Selected {len(candidates)} INDEXED session(s)[/bold] "
+            f"({by_score} by score ≥ {min_score}, {by_fill} by coverage fills)\n"
         )
 
         work_items = []
@@ -1242,7 +1283,11 @@ async def _digest_async(
                 .where(CodingSession.project_name.is_not(None))
                 .where(CodingSession.start_time >= start)
                 .where(CodingSession.start_time <= end)
-                .where(CodingSession.status == SessionStatus.ANALYZED)
+                .where(
+                    col(CodingSession.status).in_([
+                        SessionStatus.INDEXED, SessionStatus.ANALYZED,
+                    ])
+                )
                 .group_by(CodingSession.project_name)
             )
             project_rows = project_rows_result.all()

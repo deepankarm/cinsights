@@ -9,7 +9,7 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from cinsights.db.engine import get_db
-from cinsights.db.models import CodingSession, Digest, DigestSection
+from cinsights.db.models import CodingSession, Digest, DigestSection, SessionStatus
 
 router = APIRouter(prefix="/api/digests", tags=["digests"])
 
@@ -35,6 +35,7 @@ class DigestRead(BaseModel):
     analysis_completion_tokens: int
     created_at: datetime
     completed_at: datetime | None
+    sessions_since: int = 0
 
 
 class DigestDetail(BaseModel):
@@ -51,6 +52,24 @@ class DigestDetail(BaseModel):
     analysis_completion_tokens: int
     created_at: datetime
     completed_at: datetime | None
+    sessions_since: int = 0
+
+
+from sqlmodel import func as sql_func
+
+
+async def _count_sessions_since(db: AsyncSession, digest: Digest) -> int:
+    """Count sessions indexed/analyzed after the digest was completed."""
+    if not digest.completed_at:
+        return 0
+    q = select(sql_func.count()).select_from(CodingSession).where(
+        CodingSession.created_at > digest.completed_at,
+        col(CodingSession.status).in_([SessionStatus.INDEXED, SessionStatus.ANALYZED]),
+    )
+    if digest.project_name:
+        q = q.where(CodingSession.project_name == digest.project_name)
+    result = await db.exec(q)
+    return result.one()
 
 
 @router.get("/", response_model=list[DigestRead])
@@ -69,22 +88,26 @@ async def list_digests(
     result = await db.exec(q.limit(limit))
     digests = result.all()
 
-    return [
-        DigestRead(
-            id=d.id,
-            user_id=d.user_id,
-            project_name=d.project_name,
-            period_start=d.period_start,
-            period_end=d.period_end,
-            session_count=d.session_count,
-            status=d.status,
-            analysis_prompt_tokens=d.analysis_prompt_tokens,
-            analysis_completion_tokens=d.analysis_completion_tokens,
-            created_at=d.created_at,
-            completed_at=d.completed_at,
+    reads = []
+    for d in digests:
+        sessions_since = await _count_sessions_since(db, d)
+        reads.append(
+            DigestRead(
+                id=d.id,
+                user_id=d.user_id,
+                project_name=d.project_name,
+                period_start=d.period_start,
+                period_end=d.period_end,
+                session_count=d.session_count,
+                status=d.status,
+                analysis_prompt_tokens=d.analysis_prompt_tokens,
+                analysis_completion_tokens=d.analysis_completion_tokens,
+                created_at=d.created_at,
+                completed_at=d.completed_at,
+                sessions_since=sessions_since,
+            )
         )
-        for d in digests
-    ]
+    return reads
 
 
 @router.get("/{digest_id}", response_model=DigestDetail)
@@ -122,6 +145,8 @@ async def get_digest(digest_id: str, db: AsyncSession = Depends(get_db)) -> Dige
                 if h.get("session_id") in live:
                     h["total_tokens"] = live[h["session_id"]]
 
+    sessions_since = await _count_sessions_since(db, digest)
+
     return DigestDetail(
         id=digest.id,
         user_id=digest.user_id,
@@ -146,4 +171,5 @@ async def get_digest(digest_id: str, db: AsyncSession = Depends(get_db)) -> Dige
         analysis_completion_tokens=digest.analysis_completion_tokens,
         created_at=digest.created_at,
         completed_at=digest.completed_at,
+        sessions_since=sessions_since,
     )
