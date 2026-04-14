@@ -7,7 +7,6 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-import typer
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -57,7 +56,6 @@ async def _store_indexed(
     """
     from cinsights.db.models import (
         CodingSession,
-        Insight,
         SessionStatus,
         ToolCall,
     )
@@ -872,15 +870,16 @@ async def _score_async(
     scored_tuples: list[tuple[CS, float, dict[str, float]]] = []
 
     async with sessionmaker() as db:
-        for sid, uid, proj, status, score, _ in scored_rows:
+        for sid, _uid, _proj, _status, score, _ in scored_rows:
             cs = await db.get(CS, sid)
             if cs:
                 session_objs[sid] = cs
                 scored_tuples.append((cs, score, {}))
 
     # Compute per-session cost estimate
-    from cinsights.costs import estimate_total_cost
     import math
+
+    from cinsights.costs import estimate_total_cost
 
     # Cache per-session cost
     _cost_cache: dict[str, float] = {}
@@ -1093,7 +1092,7 @@ async def _analyze_async(
             all_indexed = result.all()
 
         if not all_indexed:
-            console.print(f"[yellow]No scored INDEXED sessions found.[/yellow]")
+            console.print("[yellow]No scored INDEXED sessions found.[/yellow]")
             console.print("  Run [cyan]cinsights index[/cyan] first to discover and score sessions.")
             return
 
@@ -1198,7 +1197,7 @@ async def _analyze_async(
     analyzed = 0
     failed = 0
     async with sessionmaker() as db:
-        for (trace_id, session_id, trace, spans), result, project_guess in zip(
+        for (trace_id, _session_id, _trace, _spans), result, project_guess in zip(
             work_items, analysis_results, project_guesses, strict=True
         ):
             try:

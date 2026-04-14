@@ -63,7 +63,7 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
-ignore = ["B008"]  # Depends() in FastAPI defaults is idiomatic
+ignore = ["B008", "E501"]  # B008: Depends() in FastAPI; E501: line length enforced by formatter
 
 [tool.ruff.lint.per-file-ignores]
 "src/cinsights/prompts/*.py" = ["E501"]  # Long lines in prompt strings
