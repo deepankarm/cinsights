@@ -122,6 +122,28 @@ class ProjectBreakdown(BaseModel):
     has_claude_md: bool
 
 
+class CostContext(BaseModel):
+    """Token and time cost aggregates for the digest period."""
+
+    total_estimated_cost_usd: float | None = None
+    avg_cost_per_session_usd: float | None = None
+    avg_duration_per_session_min: float = 0.0
+    total_errors: int = 0
+    error_rework_estimate_min: float = 0.0
+
+
+class Benchmarks(BaseModel):
+    """Project-wide averages for comparison in per-developer digests."""
+
+    scope_label: str = ""
+    avg_error_rate: float | None = None
+    avg_read_edit_ratio: float | None = None
+    avg_edits_without_read_pct: float | None = None
+    avg_turn_count: float | None = None
+    avg_duration_ms: float | None = None
+    developer_count: int = 0
+
+
 class DigestStats(BaseModel):
     """All computed statistics for a digest period."""
 
@@ -157,6 +179,9 @@ class DigestStats(BaseModel):
     weekly_trends: list[WeeklyTrend]
     previous_digest_summary: str | None = None
     analysis_tokens_used: int
+
+    cost_context: CostContext = CostContext()
+    benchmarks: Benchmarks | None = None
 
 
 def _session_filter(
@@ -704,6 +729,62 @@ def _compute_weekly_trends(sessions: list[CodingSession]) -> list[WeeklyTrend]:
     return trends
 
 
+def _compute_cost_context(
+    sessions: list[CodingSession],
+    total_duration: float,
+    error_breakdown: dict[str, int],
+) -> CostContext:
+    """Compute cost/time aggregates for the digest period."""
+    from cinsights.costs import estimate_cost
+
+    total_prompt = sum(s.prompt_tokens for s in sessions)
+    total_completion = sum(s.completion_tokens for s in sessions)
+    total_cost = estimate_cost(total_prompt, total_completion)
+    n = len(sessions) or 1
+    total_errors = sum(error_breakdown.values())
+
+    return CostContext(
+        total_estimated_cost_usd=total_cost,
+        avg_cost_per_session_usd=round(total_cost / n, 4) if total_cost else None,
+        avg_duration_per_session_min=round(total_duration / n, 1),
+        total_errors=total_errors,
+        error_rework_estimate_min=round(total_errors * 2.0, 1),
+    )
+
+
+async def _compute_benchmarks(
+    db: AsyncSession,
+    start: datetime,
+    end: datetime,
+    project_name: str | None,
+    user_id: str | None,
+) -> Benchmarks | None:
+    """Compute project-wide averages for comparison in per-developer digests."""
+    if not user_id:
+        return None
+
+    all_sessions_result = await db.exec(_base_query(start, end, project_name))
+    all_sessions = all_sessions_result.all()
+    if not all_sessions:
+        return None
+
+    developers = {s.user_id for s in all_sessions if s.user_id}
+
+    def _avg(field: str) -> float | None:
+        vals = [getattr(s, field) for s in all_sessions if getattr(s, field) is not None]
+        return round(sum(vals) / len(vals), 3) if vals else None
+
+    return Benchmarks(
+        scope_label=project_name or "all projects",
+        avg_error_rate=_avg("error_rate"),
+        avg_read_edit_ratio=_avg("read_edit_ratio"),
+        avg_edits_without_read_pct=_avg("edits_without_read_pct"),
+        avg_turn_count=_avg("turn_count"),
+        avg_duration_ms=None,
+        developer_count=len(developers),
+    )
+
+
 async def compute_all(
     db: AsyncSession,
     start: datetime,
@@ -830,4 +911,6 @@ async def compute_all(
         project_breakdown=proj_breakdown,
         weekly_trends=_compute_weekly_trends(sessions),
         analysis_tokens_used=analysis_tokens,
+        cost_context=_compute_cost_context(sessions, total_duration, error_breakdown),
+        benchmarks=await _compute_benchmarks(db, start, end, project_name, user_id),
     )

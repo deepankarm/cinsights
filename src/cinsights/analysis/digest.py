@@ -47,6 +47,10 @@ class FrictionItem(BaseModel):
     description: str = Field(description="2-3 sentence explanation of the pattern")
     examples: list[str] = Field(description="Specific evidence from sessions")
     severity: str = Field(description="critical, warning, or info")
+    estimated_impact: str = Field(
+        default="",
+        description="Rough time/cost impact with reasoning, e.g. '~2-4 hours/month based on 12 occurrences × ~15min recovery each. Calculation is approximate.'"
+    )
 
 
 class ClaudeMdSuggestion(BaseModel):
@@ -55,10 +59,10 @@ class ClaudeMdSuggestion(BaseModel):
 
 
 class FeatureRecommendation(BaseModel):
-    feature: str = Field(description="Feature name: Custom Skills, Hooks, Headless Mode, etc.")
+    feature: str = Field(description="Feature name: Custom Skills, Hooks, Headless Mode, Sub-agents, Plan Mode")
     title: str = Field(description="One-line recommendation title")
-    why_for_you: str = Field(description="Personalized explanation citing evidence")
-    setup_code: str | None = Field(default=None, description="Optional setup code block")
+    why_for_you: str = Field(description="Personalized explanation citing evidence from sessions")
+    setup_code: str | None = Field(default=None, description="Working config, skill prompt, or hook definition — ready to use")
 
 
 class ActionsResult(BaseModel):
@@ -73,17 +77,19 @@ class WinItem(BaseModel):
     evidence: str = Field(description="Which sessions demonstrate this")
 
 
-class WorkflowPattern(BaseModel):
+class Recommendation(BaseModel):
     name: str
-    description: str
-    rationale: str
-    starter_prompt: str = Field(description="Copy-paste prompt for Claude Code")
+    description: str = Field(description="What to do and why")
+    rationale: str = Field(description="Evidence from sessions")
+    starter_prompt: str | None = Field(default=None, description="Copy-paste prompt if applicable")
+    difficulty: str = Field(default="moderate", description="'quick' (do today), 'moderate' (this week), or 'ambitious' (project)")
 
 
 class ForwardResult(BaseModel):
     impressive_wins: list[WinItem]
-    workflow_patterns: list[WorkflowPattern]
-    ambitious_workflows: list[WorkflowPattern]
+    recommendations: list[Recommendation] = Field(
+        description="3-6 workflow improvements, ordered from quick wins to ambitious ideas"
+    )
 
 
 class DigestAnalysisResult(BaseModel):

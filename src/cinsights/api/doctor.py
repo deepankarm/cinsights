@@ -36,6 +36,7 @@ class RefreshRunRead(BaseModel):
     digests_generated: int
     total_prompt_tokens: int
     total_completion_tokens: int
+    estimated_cost_usd: float | None
     wall_seconds: float | None
     db_size_bytes: int | None
     error_message: str | None
@@ -131,6 +132,8 @@ class CoverageResponse(BaseModel):
 
 
 def _run_to_read(run: RefreshRun, digest_context: str | None = None) -> RefreshRunRead:
+    from cinsights.costs import estimate_cost
+
     metadata = json.loads(run.metadata_json) if run.metadata_json else {}
     if digest_context and "project" not in metadata:
         metadata["project"] = digest_context
@@ -144,6 +147,7 @@ def _run_to_read(run: RefreshRun, digest_context: str | None = None) -> RefreshR
         digests_generated=run.digests_generated,
         total_prompt_tokens=run.total_prompt_tokens,
         total_completion_tokens=run.total_completion_tokens,
+        estimated_cost_usd=estimate_cost(run.total_prompt_tokens, run.total_completion_tokens),
         wall_seconds=run.wall_seconds,
         db_size_bytes=run.db_size_bytes,
         error_message=run.error_message,

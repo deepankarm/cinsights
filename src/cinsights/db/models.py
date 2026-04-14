@@ -177,11 +177,10 @@ class DigestSectionType(StrEnum):
     FRICTION_ANALYSIS = "friction_analysis"
     CLAUDE_MD_SUGGESTIONS = "claude_md_suggestions"
     FEATURE_RECOMMENDATIONS = "feature_recommendations"
+    RECOMMENDATIONS = "recommendations"
     WORKFLOW_PATTERNS = "workflow_patterns"
     AMBITIOUS_WORKFLOWS = "ambitious_workflows"
-    # FUN_ENDING is dead — the field was removed from the LLM output. Kept here so
-    # the SQLite enum CHECK constraint stays valid for legacy rows; drop in a
-    # later migration once we recreate the column.
+    # Legacy values kept for SQLite CHECK constraint compatibility.
     FUN_ENDING = "fun_ending"
 
 

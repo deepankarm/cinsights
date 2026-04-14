@@ -283,7 +283,7 @@ async def _store_digest_sections(
         (DigestSectionType.WORK_AREAS, "What You Work On", "", _dump(result.narrative.work_areas)),
         (
             DigestSectionType.DEVELOPER_PERSONA,
-            "How You Use Claude Code",
+            "How You Use Coding Agents",
             result.narrative.developer_persona,
             None,
         ),
@@ -307,21 +307,15 @@ async def _store_digest_sections(
         ),
         (
             DigestSectionType.FEATURE_RECOMMENDATIONS,
-            "CC Features to Try",
+            "Features to Try",
             "",
             _dump(result.actions.feature_recommendations),
         ),
         (
-            DigestSectionType.WORKFLOW_PATTERNS,
-            "New Ways to Use Claude Code",
+            DigestSectionType.RECOMMENDATIONS,
+            "Recommendations",
             "",
-            _dump(result.forward.workflow_patterns),
-        ),
-        (
-            DigestSectionType.AMBITIOUS_WORKFLOWS,
-            "On the Horizon",
-            "",
-            _dump(result.forward.ambitious_workflows),
+            _dump(result.forward.recommendations),
         ),
     ]
 
