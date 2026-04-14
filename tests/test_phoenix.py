@@ -38,7 +38,7 @@ def _mock_spans_df(sessions: dict[str, int]) -> pd.DataFrame:
 
 
 def test_discover_sessions():
-    with patch("cinsights.sources.phoenix.Client") as mock_cls:
+    with patch("cinsights.sources.phoenix.source.Client") as mock_cls:
         mock_client = MagicMock()
         mock_cls.return_value = mock_client
         mock_client.spans.get_spans_dataframe.return_value = _mock_spans_df(
@@ -55,7 +55,7 @@ def test_discover_sessions():
 
 
 def test_discover_sessions_time_filter():
-    with patch("cinsights.sources.phoenix.Client") as mock_cls:
+    with patch("cinsights.sources.phoenix.source.Client") as mock_cls:
         mock_client = MagicMock()
         mock_cls.return_value = mock_client
         mock_client.spans.get_spans_dataframe.return_value = _mock_spans_df({"old-session": 2})
@@ -67,7 +67,7 @@ def test_discover_sessions_time_filter():
 
 
 def test_get_sessions_returns_data():
-    with patch("cinsights.sources.phoenix.Client") as mock_cls:
+    with patch("cinsights.sources.phoenix.source.Client") as mock_cls:
         mock_client = MagicMock()
         mock_cls.return_value = mock_client
         mock_client.spans.get_spans_dataframe.return_value = _mock_spans_df({"sess-1": 3})
@@ -79,7 +79,7 @@ def test_get_sessions_returns_data():
 
 
 def test_get_spans_by_session():
-    with patch("cinsights.sources.phoenix.Client") as mock_cls:
+    with patch("cinsights.sources.phoenix.source.Client") as mock_cls:
         mock_client = MagicMock()
         mock_cls.return_value = mock_client
         mock_client.spans.get_spans_dataframe.return_value = _mock_spans_df(
@@ -93,7 +93,7 @@ def test_get_spans_by_session():
 
 
 def test_get_spans_returns_data():
-    with patch("cinsights.sources.phoenix.Client") as mock_cls:
+    with patch("cinsights.sources.phoenix.source.Client") as mock_cls:
         mock_client = MagicMock()
         mock_cls.return_value = mock_client
         mock_client.spans.get_spans.return_value = [
@@ -117,7 +117,7 @@ def test_get_spans_returns_data():
 
 
 def test_get_trace_not_found():
-    with patch("cinsights.sources.phoenix.Client") as mock_cls:
+    with patch("cinsights.sources.phoenix.source.Client") as mock_cls:
         mock_client = MagicMock()
         mock_cls.return_value = mock_client
         mock_client.traces.get_traces.return_value = []
