@@ -99,6 +99,9 @@ def analyze(
 
     async def _entry() -> None:
         async with _track_run("analyze") as run:
+            run.extra["source"] = source
+            run.extra["min_score"] = min_score
+            run.extra["limit"] = limit
             await _analyze_async(
                 hours=24,
                 limit=limit,
@@ -125,6 +128,9 @@ def digest(
 
     async def _entry() -> None:
         async with _track_run("digest") as run:
+            run.extra["project"] = project
+            run.extra["user_id"] = user_id
+            run.extra["days"] = days
             await _digest_async(
                 days=days,
                 user_id=user_id,
@@ -154,6 +160,8 @@ def refresh(
 
     async def _entry() -> None:
         async with _track_run("refresh") as run:
+            run.extra["source"] = source
+            run.extra["min_score"] = min_score
             await _index_async(
                 hours=hours,
                 limit=limit,

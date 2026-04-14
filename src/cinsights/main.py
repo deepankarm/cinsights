@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from cinsights.api.digest import router as digest_router
+from cinsights.api.doctor import router as doctor_router
 from cinsights.api.projects import router as projects_router
 from cinsights.api.sessions import router as sessions_router
 from cinsights.api.stats import router as stats_router
@@ -43,6 +44,7 @@ app.add_middleware(
 
 app.include_router(sessions_router)
 app.include_router(digest_router)
+app.include_router(doctor_router)
 app.include_router(stats_router)
 app.include_router(projects_router)
 app.include_router(trends_router)
