@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import { getSession, triggerAnalysis } from '$lib/api';
 	import { renderMarkdown } from '$lib/markdown';
+	import { fmtTokens } from '$lib/format';
 	import type { SessionDetail } from '$lib/types';
 
 	let session: SessionDetail | null = $state(null);
@@ -12,183 +13,131 @@
 	let toolsExpanded = $state(false);
 	let hoverIdx: number | null = $state(null);
 	let durHoverIdx: number | null = $state(null);
+	let copied = $state(false);
 
 	const id = $derived(page.params.id);
 
-	const CHART_W = 720;
-	const CHART_H = 220;
-	const CHART_PAD = { l: 52, r: 16, t: 14, b: 28 };
+	const W = 720, H = 180;
+	const PAD = { l: 52, r: 16, t: 16, b: 28 };
+	const iW = W - PAD.l - PAD.r;
+	const iH = H - PAD.t - PAD.b;
 
-	function handleChartMove(e: MouseEvent & { currentTarget: SVGSVGElement }, len: number) {
-		const rect = e.currentTarget.getBoundingClientRect();
-		const xView = ((e.clientX - rect.left) / rect.width) * CHART_W;
-		const innerW = CHART_W - CHART_PAD.l - CHART_PAD.r;
-		const frac = (xView - CHART_PAD.l) / innerW;
-		const idx = Math.round(frac * (len - 1));
-		hoverIdx = Math.max(0, Math.min(len - 1, idx));
+	function xOf(i: number, n: number): number { return PAD.l + (i / Math.max(n - 1, 1)) * iW; }
+
+	function chartMove(e: MouseEvent, n: number, setter: (v: number) => void) {
+		const rect = (e.currentTarget as SVGElement).getBoundingClientRect();
+		const relX = ((e.clientX - rect.left) / rect.width) * W;
+		const idx = Math.round(((relX - PAD.l) / iW) * (n - 1));
+		setter(Math.max(0, Math.min(n - 1, idx)));
 	}
 
 	onMount(async () => {
-		try {
-			session = await getSession(id);
-		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load session';
-		} finally {
-			loading = false;
-		}
+		try { session = await getSession(id); }
+		catch (e) { error = e instanceof Error ? e.message : 'Failed to load session'; }
+		finally { loading = false; }
 	});
 
 	async function reanalyze() {
 		if (!session) return;
 		analyzing = true;
-		try {
-			session = await triggerAnalysis(session.id);
-		} catch (e) {
-			error = e instanceof Error ? e.message : 'Analysis failed';
-		} finally {
-			analyzing = false;
-		}
+		try { session = await triggerAnalysis(session.id); }
+		catch (e) { error = e instanceof Error ? e.message : 'Analysis failed'; }
+		finally { analyzing = false; }
 	}
 
-	function formatDate(iso: string): string {
-		return new Date(iso).toLocaleString();
+	function copyId() {
+		if (!session) return;
+		navigator.clipboard.writeText(session.id);
+		copied = true;
+		setTimeout(() => { copied = false; }, 1500);
 	}
 
-	function formatDuration(start: string, end: string | null): string {
-		if (!end) return '-';
-		const ms = new Date(end).getTime() - new Date(start).getTime();
-		const mins = Math.floor(ms / 60000);
-		const secs = Math.floor((ms % 60000) / 1000);
-		if (mins > 0) return `${mins}m ${secs}s`;
-		return `${secs}s`;
-	}
-
-	function formatTokens(n: number): string {
-		if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-		if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-		return n.toString();
-	}
-
-	function formatSecs(ms: number): string {
+	function fmtSecs(ms: number): string {
 		const s = ms / 1000;
+		if (s >= 3600) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
 		if (s >= 60) return `${Math.floor(s / 60)}m ${Math.floor(s % 60)}s`;
 		return `${s.toFixed(1)}s`;
 	}
 
-	function categoryColor(cat: string): string {
-		switch (cat) {
-			case 'friction':
-				return '#dc2626';
-			case 'win':
-				return '#16a34a';
-			case 'recommendation':
-				return '#2563eb';
-			case 'pattern':
-				return '#7c3aed';
-			case 'skill_proposal':
-				return '#0891b2';
-			case 'summary':
-				return '#0f172a';
-			default:
-				return '#64748b';
-		}
+	function fmtDate(iso: string): string {
+		const d = new Date(iso);
+		const day = d.getDate().toString().padStart(2, '0');
+		const mon = d.toLocaleString('en', { month: 'short' });
+		const h = d.getHours().toString().padStart(2, '0');
+		const m = d.getMinutes().toString().padStart(2, '0');
+		return `${day} ${mon} ${h}:${m}`;
 	}
 
-	function categoryBg(cat: string): string {
-		switch (cat) {
-			case 'friction':
-				return '#fef2f2';
-			case 'win':
-				return '#f0fdf4';
-			case 'recommendation':
-				return '#eff6ff';
-			case 'pattern':
-				return '#faf5ff';
-			case 'skill_proposal':
-				return '#ecfeff';
-			case 'summary':
-				return '#f8fafc';
-			default:
-				return '#f8fafc';
-		}
+	function wallMs(): number {
+		if (!session?.end_time) return 0;
+		return new Date(session.end_time).getTime() - new Date(session.start_time).getTime();
 	}
 
-	function categoryBorder(cat: string): string {
-		switch (cat) {
-			case 'friction':
-				return '#fca5a5';
-			case 'win':
-				return '#86efac';
-			case 'recommendation':
-				return '#93c5fd';
-			case 'pattern':
-				return '#c4b5fd';
-			case 'skill_proposal':
-				return '#67e8f9';
-			case 'summary':
-				return '#cbd5e1';
-			default:
-				return '#e2e8f0';
-		}
-	}
-
-	function severityIcon(severity: string): string {
-		switch (severity) {
-			case 'critical':
-				return '!!';
-			case 'warning':
-				return '!';
-			default:
-				return '';
-		}
-	}
-
-	function categoryLabel(cat: string): string {
-		return cat.replace('_', ' ');
-	}
-
-	const activeTime = $derived.by(() => {
-		if (!session?.context_growth) return null;
-		const totalMs = session.context_growth.reduce((sum, p) => sum + (p.duration_ms ?? 0), 0);
-		if (totalMs === 0) return null;
-		return formatSecs(totalMs);
+	const activeMs = $derived.by(() => {
+		if (!session?.context_growth) return 0;
+		return session.context_growth.reduce((s, p) => s + (p.duration_ms ?? 0), 0);
 	});
 
-	const firstEditCall = $derived.by(() => {
+	const turnCount = $derived(session?.context_growth?.length ?? 0);
+
+	const errorCount = $derived(session?.tool_calls.filter(tc => !tc.success).length ?? 0);
+	const errorRate = $derived(session?.tool_calls.length ? (errorCount / session.tool_calls.length * 100) : 0);
+
+	const firstEditMs = $derived.by(() => {
 		if (!session) return null;
-		const edits = session.tool_calls
-			.filter((tc) => tc.tool_name === 'Write' || tc.tool_name === 'Edit')
-			.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-		return edits[0] ?? null;
+		const edit = session.tool_calls
+			.filter(tc => tc.tool_name === 'Write' || tc.tool_name === 'Edit')
+			.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())[0];
+		if (!edit) return null;
+		const ms = new Date(edit.timestamp).getTime() - new Date(session.start_time).getTime();
+		return ms > 0 ? ms : null;
 	});
 
-	const firstEditMs = $derived(
-		firstEditCall && session
-			? new Date(firstEditCall.timestamp).getTime() - new Date(session.start_time).getTime()
-			: null
-	);
+	const toolsPerTurn = $derived(turnCount > 0 ? (session?.tool_calls.length ?? 0) / turnCount : 0);
 
-	// Group insights by category for display order
+	// Top 5 tools
+	const topTools = $derived.by(() => {
+		if (!session) return [];
+		const counts: Record<string, number> = {};
+		for (const tc of session.tool_calls) counts[tc.tool_name] = (counts[tc.tool_name] ?? 0) + 1;
+		return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+	});
+
+	function categoryColor(cat: string): string {
+		const m: Record<string, string> = { friction: '#dc2626', win: '#16a34a', recommendation: '#2563eb', pattern: '#7c3aed', skill_proposal: '#0891b2', summary: '#0f172a' };
+		return m[cat] ?? '#64748b';
+	}
+	function categoryBg(cat: string): string {
+		const m: Record<string, string> = { friction: '#fef2f2', win: '#f0fdf4', recommendation: '#eff6ff', pattern: '#faf5ff', skill_proposal: '#ecfeff', summary: '#f8fafc' };
+		return m[cat] ?? '#f8fafc';
+	}
+	function categoryBorder(cat: string): string {
+		const m: Record<string, string> = { friction: '#fca5a5', win: '#86efac', recommendation: '#93c5fd', pattern: '#c4b5fd', skill_proposal: '#67e8f9', summary: '#cbd5e1' };
+		return m[cat] ?? '#e2e8f0';
+	}
+	function severityIcon(s: string): string { return s === 'critical' ? '!!' : s === 'warning' ? '!' : ''; }
+	function categoryLabel(c: string): string { return c.replace('_', ' '); }
+
 	const categoryOrder = ['summary', 'friction', 'win', 'recommendation', 'skill_proposal', 'pattern'];
-
-	function sortedInsights(insights: SessionDetail['insights']) {
-		return [...insights].sort(
-			(a, b) => categoryOrder.indexOf(a.category) - categoryOrder.indexOf(b.category)
-		);
+	function sortedInsights(ins: SessionDetail['insights']) {
+		return [...ins].sort((a, b) => categoryOrder.indexOf(a.category) - categoryOrder.indexOf(b.category));
 	}
 </script>
 
 <svelte:head>
 	<title>Session Detail - cinsights</title>
-	<link
-		rel="stylesheet"
-		href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css"
-	/>
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css" />
 </svelte:head>
 
 <div class="nav-row">
-	<a href="/sessions" class="back-link">&larr; Back to sessions</a>
-	<a href="/report" class="back-link">View Report &rarr;</a>
+	<a href="/sessions" class="back-link">&larr; Sessions</a>
+	{#if session}
+		<div style="display:flex; gap:10px; align-items:center;">
+			<button class="reanalyze-btn" onclick={reanalyze} disabled={analyzing}>
+				{analyzing ? 'Analyzing...' : 'Re-analyze'}
+			</button>
+		</div>
+	{/if}
 </div>
 
 {#if loading}
@@ -196,384 +145,205 @@
 {:else if error}
 	<div class="error">{error}</div>
 {:else if session}
-	<!-- Session Metadata -->
-	<div class="meta-card">
-		<div class="meta-row">
-			<div class="meta-item">
-				<span class="meta-label">Session</span>
-				<span class="meta-value mono">{session.id.slice(0, 8)}</span>
-			</div>
-			<div class="meta-item">
-				<span class="meta-label">User</span>
-				<span class="meta-value mono">{session.user_id ?? '-'}</span>
-			</div>
-			<div class="meta-item">
-				<span class="meta-label">Project</span>
-				<span class="meta-value mono">{session.project_name ?? '-'}</span>
-			</div>
-			<div class="meta-item">
-				<span class="meta-label">Model</span>
-				<span class="meta-value mono">{session.model ?? '-'}</span>
-			</div>
-			<div class="meta-item">
-				<span class="meta-label">Active Time</span>
-				<span class="meta-value">{activeTime ?? formatDuration(session.start_time, session.end_time)}</span>
-			</div>
-			<div class="meta-item">
-				<span class="meta-label">Started</span>
-				<span class="meta-value">{formatDate(session.start_time)}</span>
-			</div>
-			<div class="meta-item">
-				<span class="meta-label">Time Span</span>
-				<span class="meta-value">{formatDuration(session.start_time, session.end_time)}</span>
-			</div>
-			<div class="meta-item">
-				<span class="meta-label">Tokens</span>
-				<span class="meta-value">{formatTokens(session.total_tokens)}</span>
-			</div>
-			<div class="meta-item">
-				<span class="meta-label">Tool Calls</span>
-				<span class="meta-value">{session.tool_calls.length}</span>
-			</div>
-			<div class="meta-item">
-				<span class="meta-label">Status</span>
-				<span
-					class="meta-value"
-					style="text-transform: uppercase; font-size: 12px; font-weight: 600;"
-				>
-					{session.status}
-				</span>
-			</div>
-			{#if firstEditMs != null && firstEditMs > 0}
-				<div class="meta-item">
-					<span class="meta-label">First Edit</span>
-					<span class="meta-value">{formatSecs(firstEditMs)} in</span>
-				</div>
-			{/if}
+	<!-- Session ID + tags row -->
+	<div class="session-header">
+		<div class="sh-left">
+			<button class="session-id-btn" onclick={copyId} title="Copy full session ID">
+				<span class="mono">{session.id}</span>
+				<span class="copy-icon">{copied ? '✓' : '⎘'}</span>
+			</button>
+			<span class="status-pill" style="background: {session.status === 'analyzed' ? '#ecfdf5' : '#f5f3ff'}; color: {session.status === 'analyzed' ? '#16a34a' : '#7c3aed'}">
+				{session.status}
+			</span>
 		</div>
-		<button class="reanalyze-btn" onclick={reanalyze} disabled={analyzing}>
-			{analyzing ? 'Analyzing...' : 'Re-analyze'}
-		</button>
+		<div class="sh-right">
+			{#if session.user_id}
+				<a href="/sessions?user={session.user_id}" class="tag-link user">{session.user_id.split('@')[0]}</a>
+			{/if}
+			{#if session.project_name}
+				<a href="/projects/{session.project_name}" class="tag-link project">{session.project_name}</a>
+			{/if}
+			<span class="tag-static">{fmtDate(session.start_time)}</span>
+		</div>
 	</div>
 
-	<!-- Context Growth -->
-	{#if session.context_growth && session.context_growth.length > 1}
-		{@const pts = session.context_growth}
-		{@const n = pts.length}
-		{@const maxY = Math.max(...pts.map((p) => p.prompt_tokens), 1)}
-		{@const innerW = CHART_W - CHART_PAD.l - CHART_PAD.r}
-		{@const innerH = CHART_H - CHART_PAD.t - CHART_PAD.b}
-		{@const xOf = (i: number) => CHART_PAD.l + (i / (n - 1)) * innerW}
-		{@const yOf = (v: number) => CHART_PAD.t + innerH - (v / maxY) * innerH}
-		{@const step = Math.max(1, Math.ceil(n / 8))}
-		{@const tickIdxs = pts
-			.map((_, i) => i)
-			.filter((i) => i === 0 || i === n - 1 || i % step === 0)}
-		{@const linePath = pts
-			.map(
-				(p, i) =>
-					`${i === 0 ? 'M' : 'L'} ${xOf(i).toFixed(1)} ${yOf(p.prompt_tokens).toFixed(1)}`
-			)
-			.join(' ')}
-		{@const baselineY = (CHART_PAD.t + innerH).toFixed(1)}
-		{@const areaPath = `${linePath} L ${xOf(n - 1).toFixed(1)} ${baselineY} L ${xOf(0).toFixed(1)} ${baselineY} Z`}
-		{@const compactionIdxs = pts
-			.map((p, i) => (i > 0 && p.prompt_tokens < pts[i - 1].prompt_tokens * 0.85 ? i : -1))
-			.filter((i) => i >= 0)}
-		{@const hover = hoverIdx !== null ? pts[hoverIdx] : null}
-		<div class="section">
-			<h2>Context Growth</h2>
-			<div class="context-chart">
-				<div class="chart-inner">
-					<svg
-						viewBox="0 0 {CHART_W} {CHART_H}"
-						class="context-svg"
-						role="img"
-						aria-label="Context growth over turns"
-						onmousemove={(e) => handleChartMove(e, n)}
-						onmouseleave={() => (hoverIdx = null)}
-					>
-						<defs>
-							<linearGradient id="ctxArea" x1="0" y1="0" x2="0" y2="1">
-								<stop offset="0%" stop-color="#6366f1" stop-opacity="0.35" />
-								<stop offset="100%" stop-color="#6366f1" stop-opacity="0" />
-							</linearGradient>
-						</defs>
-
-						<!-- Gridlines + Y labels -->
-						{#each [0, 0.5, 1] as frac}
-							{@const gy = CHART_PAD.t + innerH * (1 - frac)}
-							<line
-								x1={CHART_PAD.l}
-								x2={CHART_W - CHART_PAD.r}
-								y1={gy}
-								y2={gy}
-								stroke="#f1f5f9"
-								stroke-width="1"
-							/>
-							<text x={CHART_PAD.l - 6} y={gy + 3} text-anchor="end" class="axis-text">
-								{formatTokens(Math.round(maxY * frac))}
-							</text>
-						{/each}
-
-						<!-- Area + line -->
-						<path d={areaPath} fill="url(#ctxArea)" />
-						<path
-							d={linePath}
-							fill="none"
-							stroke="#6366f1"
-							stroke-width="1.5"
-							stroke-linejoin="round"
-						/>
-
-						<!-- Compaction markers -->
-						{#each compactionIdxs as i}
-							<circle
-								cx={xOf(i)}
-								cy={yOf(pts[i].prompt_tokens)}
-								r="3"
-								fill="#f59e0b"
-								stroke="white"
-								stroke-width="1"
-							/>
-						{/each}
-
-						<!-- X ticks -->
-						{#each tickIdxs as i}
-							<text x={xOf(i)} y={CHART_H - 10} text-anchor="middle" class="axis-text">
-								{pts[i].turn}
-							</text>
-						{/each}
-
-						<!-- Hover marker -->
-						{#if hover && hoverIdx !== null}
-							<line
-								x1={xOf(hoverIdx)}
-								x2={xOf(hoverIdx)}
-								y1={CHART_PAD.t}
-								y2={CHART_PAD.t + innerH}
-								stroke="#94a3b8"
-								stroke-width="1"
-								stroke-dasharray="2 2"
-							/>
-							<circle
-								cx={xOf(hoverIdx)}
-								cy={yOf(hover.prompt_tokens)}
-								r="3.5"
-								fill="#6366f1"
-								stroke="white"
-								stroke-width="1.5"
-							/>
-						{/if}
-
-						<!-- Invisible hit area covering full plot (ensures mousemove fires across gaps) -->
-						<rect
-							x={CHART_PAD.l}
-							y={CHART_PAD.t}
-							width={innerW}
-							height={innerH}
-							fill="transparent"
-						/>
-					</svg>
-
-					{#if hover && hoverIdx !== null}
-						{@const leftPct = (xOf(hoverIdx) / CHART_W) * 100}
-						{@const topPct = (yOf(hover.prompt_tokens) / CHART_H) * 100}
-						<div
-							class="chart-tooltip"
-							class:flip-left={leftPct < 15}
-							class:flip-right={leftPct > 85}
-							style="left: {leftPct}%; top: {topPct}%;"
-						>
-							<div class="tt-turn">Turn {hover.turn}</div>
-							<div class="tt-row">
-								<span class="tt-dot prompt"></span>{formatTokens(hover.prompt_tokens)} prompt
-							</div>
-							<div class="tt-row">
-								<span class="tt-dot completion"></span>{formatTokens(hover.completion_tokens)} completion
-							</div>
-						</div>
-					{/if}
-				</div>
+	<!-- Hero Metrics -->
+	<div class="hero">
+		<div class="hero-metric">
+			<div class="hero-value" style="color: #6366f1">{activeMs ? fmtSecs(activeMs) : fmtSecs(wallMs())}</div>
+			<div class="hero-label">Active Time</div>
+			<div class="hero-sub">{fmtSecs(wallMs())} wall clock</div>
+		</div>
+		<div class="hero-metric">
+			<div class="hero-value" style="color: #8b5cf6">{turnCount}</div>
+			<div class="hero-label">Turns</div>
+			<div class="hero-sub">{toolsPerTurn.toFixed(1)} tools/turn</div>
+		</div>
+		<div class="hero-metric">
+			<div class="hero-value" style="color: #3b82f6">{fmtTokens(session.total_tokens)}</div>
+			<div class="hero-label">Total Tokens</div>
+			<div class="hero-sub">{fmtTokens(session.prompt_tokens)} in / {fmtTokens(session.completion_tokens)} out</div>
+		</div>
+		<div class="hero-metric">
+			<div class="hero-value" style="color: {errorRate > 15 ? '#dc2626' : errorRate > 5 ? '#f59e0b' : '#10b981'}">{session.tool_calls.length}</div>
+			<div class="hero-label">Tool Calls</div>
+			<div class="hero-sub">{errorCount} errors ({errorRate.toFixed(0)}%)</div>
+		</div>
+		{#if firstEditMs != null}
+			<div class="hero-metric">
+				<div class="hero-value" style="color: #0d9488">{fmtSecs(firstEditMs)}</div>
+				<div class="hero-label">First Edit</div>
+				<div class="hero-sub">time to first mutation</div>
 			</div>
+		{/if}
+		<div class="hero-metric">
+			<div class="hero-value" style="color: #64748b">{session.model ?? '-'}</div>
+			<div class="hero-label">Model</div>
+			<div class="hero-sub">{session.insights.length} insights</div>
+		</div>
+	</div>
+
+	<!-- Tool distribution mini -->
+	{#if topTools.length > 0}
+		<div class="tool-dist">
+			{#each topTools as [name, count]}
+				<span class="td-chip"><span class="td-name">{name}</span><span class="td-count">{count}</span></span>
+			{/each}
+			{#if (session.tool_calls.length - topTools.reduce((s, [,c]) => s + c, 0)) > 0}
+				<span class="td-chip other"><span class="td-name">other</span><span class="td-count">{session.tool_calls.length - topTools.reduce((s, [,c]) => s + c, 0)}</span></span>
+			{/if}
 		</div>
 	{/if}
 
-	<!-- Turn Duration -->
-	{#if session.context_growth && session.context_growth.some((p) => p.duration_ms != null)}
-		{@const pts = session.context_growth.filter((p) => p.duration_ms != null)}
+	<!-- Charts row -->
+	{#if session.context_growth && session.context_growth.length > 1}
+		{@const pts = session.context_growth}
 		{@const n = pts.length}
-		{#if n > 1}
-			{@const durations = pts.map((p) => p.duration_ms!)}
-			{@const maxD = Math.max(...durations, 1)}
-			{@const sortedD = [...durations].sort((a, b) => a - b)}
-			{@const median = sortedD[Math.floor(sortedD.length / 2)]}
-			{@const innerW = CHART_W - CHART_PAD.l - CHART_PAD.r}
-			{@const innerH = CHART_H - CHART_PAD.t - CHART_PAD.b}
-			{@const xOf = (i: number) => CHART_PAD.l + (i / (n - 1)) * innerW}
-			{@const yOf = (v: number) => CHART_PAD.t + innerH - (v / maxD) * innerH}
-			{@const step = Math.max(1, Math.ceil(n / 8))}
-			{@const tickIdxs = pts
-				.map((_, i) => i)
-				.filter((i) => i === 0 || i === n - 1 || i % step === 0)}
-			{@const linePath = pts
-				.map(
-					(p, i) =>
-						`${i === 0 ? 'M' : 'L'} ${xOf(i).toFixed(1)} ${yOf(p.duration_ms!).toFixed(1)}`
-				)
-				.join(' ')}
-			{@const baselineY = (CHART_PAD.t + innerH).toFixed(1)}
-			{@const areaPath = `${linePath} L ${xOf(n - 1).toFixed(1)} ${baselineY} L ${xOf(0).toFixed(1)} ${baselineY} Z`}
-			{@const slowIdxs = pts
-				.map((p, i) => (p.duration_ms! > median * 2 ? i : -1))
-				.filter((i) => i >= 0)}
-			{@const durHover = durHoverIdx !== null ? pts[durHoverIdx] : null}
-			<div class="section">
-				<h2>Turn Duration</h2>
-				<div class="context-chart">
-					<div class="chart-inner">
-						<svg
-							viewBox="0 0 {CHART_W} {CHART_H}"
-							class="context-svg"
-							role="img"
-							aria-label="Turn duration over turns"
-							onmousemove={(e) => {
-								const rect = e.currentTarget.getBoundingClientRect();
-								const xView = ((e.clientX - rect.left) / rect.width) * CHART_W;
-								const frac = (xView - CHART_PAD.l) / innerW;
-								const idx = Math.round(frac * (n - 1));
-								durHoverIdx = Math.max(0, Math.min(n - 1, idx));
-							}}
-							onmouseleave={() => (durHoverIdx = null)}
-						>
-							<defs>
-								<linearGradient id="durArea" x1="0" y1="0" x2="0" y2="1">
-									<stop offset="0%" stop-color="#10b981" stop-opacity="0.35" />
-									<stop offset="100%" stop-color="#10b981" stop-opacity="0" />
-								</linearGradient>
-							</defs>
-
-							{#each [0, 0.5, 1] as frac}
-								{@const gy = CHART_PAD.t + innerH * (1 - frac)}
-								<line
-									x1={CHART_PAD.l}
-									x2={CHART_W - CHART_PAD.r}
-									y1={gy}
-									y2={gy}
-									stroke="#f1f5f9"
-									stroke-width="1"
-								/>
-								<text x={CHART_PAD.l - 6} y={gy + 3} text-anchor="end" class="axis-text">
-									{formatSecs(maxD * frac)}
-								</text>
-							{/each}
-
-							<path d={areaPath} fill="url(#durArea)" />
-							<path
-								d={linePath}
-								fill="none"
-								stroke="#10b981"
-								stroke-width="1.5"
-								stroke-linejoin="round"
-							/>
-
-							{#each slowIdxs as i}
-								<circle
-									cx={xOf(i)}
-									cy={yOf(pts[i].duration_ms!)}
-									r="3"
-									fill="#ef4444"
-									stroke="white"
-									stroke-width="1"
-								/>
-							{/each}
-
-							{#each tickIdxs as i}
-								<text x={xOf(i)} y={CHART_H - 10} text-anchor="middle" class="axis-text">
-									{pts[i].turn}
-								</text>
-							{/each}
-
-							{#if durHover && durHoverIdx !== null}
-								<line
-									x1={xOf(durHoverIdx)}
-									x2={xOf(durHoverIdx)}
-									y1={CHART_PAD.t}
-									y2={CHART_PAD.t + innerH}
-									stroke="#94a3b8"
-									stroke-width="1"
-									stroke-dasharray="2 2"
-								/>
-								<circle
-									cx={xOf(durHoverIdx)}
-									cy={yOf(durHover.duration_ms!)}
-									r="3.5"
-									fill="#10b981"
-									stroke="white"
-									stroke-width="1.5"
-								/>
-							{/if}
-
-							<rect
-								x={CHART_PAD.l}
-								y={CHART_PAD.t}
-								width={innerW}
-								height={innerH}
-								fill="transparent"
-							/>
-						</svg>
-
-						{#if durHover && durHoverIdx !== null}
-							{@const leftPct = (xOf(durHoverIdx) / CHART_W) * 100}
-							{@const topPct = (yOf(durHover.duration_ms!) / CHART_H) * 100}
-							<div
-								class="chart-tooltip"
-								class:flip-left={leftPct < 15}
-								class:flip-right={leftPct > 85}
-								style="left: {leftPct}%; top: {topPct}%;"
-							>
-								<div class="tt-turn">Turn {durHover.turn}</div>
-								<div class="tt-row">
-									<span class="tt-dot duration"></span>{formatSecs(durHover.duration_ms!)}
-								</div>
-								{#if durHover.duration_ms! > median * 2}
-									<div class="tt-row slow">&gt;2x median</div>
-								{/if}
-							</div>
+		{@const maxY = Math.max(...pts.map(p => p.prompt_tokens), 1)}
+		{@const yOf = (v: number) => PAD.t + iH - (v / maxY) * iH}
+		{@const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, n).toFixed(1)} ${yOf(p.prompt_tokens).toFixed(1)}`).join(' ')}
+		{@const areaPath = `${linePath} L ${xOf(n-1, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
+		{@const compactionIdxs = pts.map((p, i) => (i > 0 && p.prompt_tokens < pts[i-1].prompt_tokens * 0.85 ? i : -1)).filter(i => i >= 0)}
+		{@const hover = hoverIdx !== null ? pts[hoverIdx] : null}
+		<div class="charts-grid">
+			<!-- Context Growth -->
+			<div class="chart-card">
+				<div class="chart-header">
+					<h3>Context Growth</h3>
+					<div class="chart-header-right">
+						{#if hover && hoverIdx !== null}
+							<span class="chart-hover-val">Turn {hover.turn}: {fmtTokens(hover.prompt_tokens)}</span>
+						{/if}
+						{#if compactionIdxs.length > 0}
+							<span class="trend-badge down">{compactionIdxs.length} compaction{compactionIdxs.length > 1 ? 's' : ''}</span>
 						{/if}
 					</div>
 				</div>
+				<div class="chart-desc">Prompt tokens per turn</div>
+				<div style="position:relative">
+					<svg viewBox="0 0 {W} {H}" class="trend-svg"
+						onmousemove={(e) => chartMove(e, n, v => hoverIdx = v)}
+						onmouseleave={() => hoverIdx = null}>
+						<defs>
+							<linearGradient id="ctxG" x1="0" y1="0" x2="0" y2="1">
+								<stop offset="0%" stop-color="#6366f1" stop-opacity="0.25" />
+								<stop offset="100%" stop-color="#6366f1" stop-opacity="0" />
+							</linearGradient>
+						</defs>
+						{#each [0, 0.5, 1] as frac}
+							{@const gy = PAD.t + iH * (1 - frac)}
+							<line x1={PAD.l} x2={W - PAD.r} y1={gy} y2={gy} stroke="#f1f5f9" stroke-width="1" />
+							<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtTokens(Math.round(maxY * frac))}</text>
+						{/each}
+						<path d={areaPath} fill="url(#ctxG)" />
+						<path d={linePath} fill="none" stroke="#6366f1" stroke-width="1.5" stroke-linejoin="round" />
+						{#each compactionIdxs as i}
+							<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#f59e0b" stroke="white" stroke-width="1" />
+						{/each}
+						{#if hoverIdx !== null}
+							<line x1={xOf(hoverIdx, n)} x2={xOf(hoverIdx, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
+							<circle cx={xOf(hoverIdx, n)} cy={yOf(pts[hoverIdx].prompt_tokens)} r="3.5" fill="#6366f1" stroke="white" stroke-width="1.5" />
+						{/if}
+						<rect x={PAD.l} y={PAD.t} width={iW} height={iH} fill="transparent" />
+					</svg>
+				</div>
 			</div>
-		{/if}
+
+			<!-- Turn Duration -->
+			{#if session.context_growth.some(p => p.duration_ms != null)}
+				{@const dPts = session.context_growth.filter(p => p.duration_ms != null)}
+				{@const dn = dPts.length}
+				{#if dn > 1}
+					{@const durations = dPts.map(p => p.duration_ms!)}
+					{@const maxD = Math.max(...durations, 1)}
+					{@const sortedD = [...durations].sort((a, b) => a - b)}
+					{@const median = sortedD[Math.floor(sortedD.length / 2)]}
+					{@const dyOf = (v: number) => PAD.t + iH - (v / maxD) * iH}
+					{@const dLine = dPts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, dn).toFixed(1)} ${dyOf(p.duration_ms!).toFixed(1)}`).join(' ')}
+					{@const dArea = `${dLine} L ${xOf(dn-1, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
+					{@const slowIdxs = dPts.map((p, i) => (p.duration_ms! > median * 2 ? i : -1)).filter(i => i >= 0)}
+					{@const dHover = durHoverIdx !== null ? dPts[durHoverIdx] : null}
+					<div class="chart-card">
+						<div class="chart-header">
+							<h3>Turn Duration</h3>
+							<div class="chart-header-right">
+								{#if dHover && durHoverIdx !== null}
+									<span class="chart-hover-val">Turn {dHover.turn}: {fmtSecs(dHover.duration_ms!)}</span>
+								{/if}
+								<span class="chart-total">median {fmtSecs(median)}</span>
+							</div>
+						</div>
+						<div class="chart-desc">Time per turn (slow turns highlighted)</div>
+						<div style="position:relative">
+							<svg viewBox="0 0 {W} {H}" class="trend-svg"
+								onmousemove={(e) => chartMove(e, dn, v => durHoverIdx = v)}
+								onmouseleave={() => durHoverIdx = null}>
+								<defs>
+									<linearGradient id="durG" x1="0" y1="0" x2="0" y2="1">
+										<stop offset="0%" stop-color="#10b981" stop-opacity="0.25" />
+										<stop offset="100%" stop-color="#10b981" stop-opacity="0" />
+									</linearGradient>
+								</defs>
+								{#each [0, 0.5, 1] as frac}
+									{@const gy = PAD.t + iH * (1 - frac)}
+									<line x1={PAD.l} x2={W - PAD.r} y1={gy} y2={gy} stroke="#f1f5f9" stroke-width="1" />
+									<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtSecs(maxD * frac)}</text>
+								{/each}
+								<path d={dArea} fill="url(#durG)" />
+								<path d={dLine} fill="none" stroke="#10b981" stroke-width="1.5" stroke-linejoin="round" />
+								<!-- Median line -->
+								<line x1={PAD.l} x2={W - PAD.r} y1={dyOf(median)} y2={dyOf(median)} stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3" />
+								{#each slowIdxs as i}
+									<circle cx={xOf(i, dn)} cy={dyOf(dPts[i].duration_ms!)} r="3" fill="#ef4444" stroke="white" stroke-width="1" />
+								{/each}
+								{#if durHoverIdx !== null}
+									<line x1={xOf(durHoverIdx, dn)} x2={xOf(durHoverIdx, dn)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
+									<circle cx={xOf(durHoverIdx, dn)} cy={dyOf(dPts[durHoverIdx].duration_ms!)} r="3.5" fill="#10b981" stroke="white" stroke-width="1.5" />
+								{/if}
+								<rect x={PAD.l} y={PAD.t} width={iW} height={iH} fill="transparent" />
+							</svg>
+						</div>
+					</div>
+				{/if}
+			{/if}
+		</div>
 	{/if}
 
 	<!-- Insights -->
 	{#if session.insights.length > 0}
 		<div class="section">
-			<h2>Insights ({session.insights.length})</h2>
+			<h2>Insights <span class="h2-count">{session.insights.length}</span></h2>
 			<div class="insights-grid">
 				{#each sortedInsights(session.insights) as insight}
-					<div
-						class="insight-card"
-						style="background: {categoryBg(insight.category)}; border-color: {categoryBorder(insight.category)};"
-					>
+					<div class="insight-card" style="background: {categoryBg(insight.category)}; border-color: {categoryBorder(insight.category)};">
 						<div class="insight-header">
-							<span
-								class="insight-category"
-								style="color: {categoryColor(insight.category)}"
-							>
-								{categoryLabel(insight.category)}
-							</span>
+							<span class="insight-category" style="color: {categoryColor(insight.category)}">{categoryLabel(insight.category)}</span>
 							{#if severityIcon(insight.severity)}
-								<span class="severity-badge severity-{insight.severity}">
-									{severityIcon(insight.severity)}
-								</span>
+								<span class="severity-badge severity-{insight.severity}">{severityIcon(insight.severity)}</span>
 							{/if}
 						</div>
 						<h3 class="insight-title">{insight.title}</h3>
-						<div class="insight-content markdown-body">
-							{@html renderMarkdown(insight.content)}
-						</div>
+						<div class="insight-content markdown-body">{@html renderMarkdown(insight.content)}</div>
 					</div>
 				{/each}
 			</div>
@@ -585,9 +355,9 @@
 	<!-- Tool Calls -->
 	{#if session.tool_calls.length > 0}
 		<div class="section">
-			<button class="collapse-btn" onclick={() => (toolsExpanded = !toolsExpanded)}>
+			<button class="collapse-btn" onclick={() => toolsExpanded = !toolsExpanded}>
 				<span class="collapse-arrow" class:open={toolsExpanded}>&#9654;</span>
-				<h2 style="display:inline">Tool Calls ({session.tool_calls.length})</h2>
+				<h2 style="display:inline; margin-bottom:0">Tool Calls <span class="h2-count">{session.tool_calls.length}</span></h2>
 			</button>
 			{#if toolsExpanded}
 				<div class="tool-list">
@@ -596,25 +366,15 @@
 							<div class="tool-header">
 								<span class="tool-name">{tc.tool_name}</span>
 								<span class="tool-meta">
-									{#if tc.duration_ms}
-										{tc.duration_ms.toFixed(0)}ms
-									{/if}
-									{#if !tc.success}
-										<span class="tool-error">ERROR</span>
-									{/if}
+									{#if tc.duration_ms}{tc.duration_ms.toFixed(0)}ms{/if}
+									{#if !tc.success}<span class="tool-error">ERROR</span>{/if}
 								</span>
 							</div>
 							{#if tc.input_value}
-								<details class="tool-io">
-									<summary>Input</summary>
-									<pre>{tc.input_value}</pre>
-								</details>
+								<details class="tool-io"><summary>Input</summary><pre>{tc.input_value}</pre></details>
 							{/if}
 							{#if tc.output_value}
-								<details class="tool-io">
-									<summary>Output</summary>
-									<pre>{tc.output_value}</pre>
-								</details>
+								<details class="tool-io"><summary>Output</summary><pre>{tc.output_value}</pre></details>
 							{/if}
 						</div>
 					{/each}
@@ -625,352 +385,108 @@
 {/if}
 
 <style>
-	.nav-row {
-		display: flex;
-		justify-content: space-between;
-		margin-bottom: 24px;
+	.nav-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+	.back-link { color: #64748b; text-decoration: none; font-size: 14px; }
+	.back-link:hover { color: #2563eb; }
+	.loading, .error { text-align: center; padding: 48px; color: #64748b; }
+	.error { color: #dc2626; }
+
+	.session-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
+	.sh-left { display: flex; align-items: center; gap: 10px; }
+	.sh-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+	.session-id-btn {
+		display: flex; align-items: center; gap: 6px; background: #f8fafc; border: 1px solid #e2e8f0;
+		border-radius: 8px; padding: 6px 12px; cursor: pointer; transition: border-color 0.15s;
 	}
-	.back-link {
-		color: #64748b;
-		text-decoration: none;
-		font-size: 14px;
+	.session-id-btn:hover { border-color: #3b82f6; }
+	.session-id-btn .mono { font-size: 12px; color: #334155; font-family: 'SF Mono', 'Fira Code', monospace; }
+	.copy-icon { font-size: 14px; color: #94a3b8; }
+	.status-pill { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 100px; text-transform: uppercase; letter-spacing: 0.04em; }
+	.tag-link { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 6px; text-decoration: none; transition: opacity 0.15s; }
+	.tag-link:hover { opacity: 0.8; }
+	.tag-link.user { background: #fef3c7; color: #92400e; }
+	.tag-link.project { background: #eff6ff; color: #2563eb; }
+	.tag-static { font-size: 12px; color: #94a3b8; }
+
+	.hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 14px; margin-bottom: 20px; }
+	.hero-metric {
+		background: white; border-radius: 16px; padding: 20px 18px; text-align: center;
+		border: 1px solid #e8e5e0; transition: transform 0.2s, box-shadow 0.2s;
 	}
-	.back-link:hover {
-		color: #2563eb;
-	}
-	.loading,
-	.error {
-		text-align: center;
-		padding: 48px;
-		color: #64748b;
-	}
-	.error {
-		color: #dc2626;
-	}
-	.meta-card {
-		background: white;
-		border: 1px solid #e2e8f0;
-		border-radius: 8px;
-		padding: 20px;
-		margin-bottom: 24px;
-	}
-	.meta-row {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 24px;
-		margin-bottom: 16px;
-	}
-	.meta-item {
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-	}
-	.meta-label {
-		font-size: 11px;
-		color: #64748b;
-		text-transform: uppercase;
-		font-weight: 600;
-	}
-	.meta-value {
-		font-size: 15px;
-		font-weight: 500;
-		color: #0f172a;
-	}
-	.mono {
-		font-family: monospace;
-		font-size: 13px;
-	}
+	.hero-metric:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+	.hero-value { font-size: 28px; font-weight: 800; letter-spacing: -1.5px; line-height: 1; font-variant-numeric: tabular-nums; }
+	.hero-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #70707a; margin-top: 6px; }
+	.hero-sub { font-size: 11px; color: #a1a1aa; margin-top: 2px; }
+
+	.tool-dist { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px; }
+	.td-chip { display: flex; align-items: center; gap: 4px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 4px 10px; }
+	.td-name { font-size: 12px; font-weight: 600; font-family: monospace; color: #334155; }
+	.td-count { font-size: 11px; color: #94a3b8; }
+	.td-chip.other { background: #fafafa; }
+
+	.charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 28px; }
+	.chart-card { background: white; border-radius: 16px; padding: 20px 22px; border: 1px solid #e8e5e0; transition: box-shadow 0.25s ease; }
+	.chart-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.04); }
+	.chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1px; }
+	.chart-header h3 { font-size: 14px; font-weight: 700; color: #232326; }
+	.chart-header-right { display: flex; align-items: center; gap: 6px; }
+	.chart-hover-val { font-size: 12px; color: #475569; }
+	.chart-desc { font-size: 11px; color: #a1a1aa; margin-bottom: 8px; }
+	.chart-total { font-size: 11px; font-weight: 600; color: #10b981; }
+	.trend-badge { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 5px; }
+	.trend-badge.down { background: #fef3c7; color: #92400e; }
+	.trend-svg { width: 100%; height: auto; cursor: crosshair; }
+	.ax { font-size: 10px; fill: #94a3b8; font-family: inherit; }
+
 	.reanalyze-btn {
-		background: #2563eb;
-		color: white;
-		border: none;
-		border-radius: 6px;
-		padding: 8px 16px;
-		font-size: 13px;
-		font-weight: 500;
-		cursor: pointer;
+		background: #2563eb; color: white; border: none; border-radius: 8px;
+		padding: 7px 16px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.15s;
 	}
-	.reanalyze-btn:hover {
-		background: #1d4ed8;
-	}
-	.reanalyze-btn:disabled {
-		background: #94a3b8;
-		cursor: not-allowed;
-	}
-	.section {
-		margin-bottom: 32px;
-	}
-	h2 {
-		font-size: 18px;
-		font-weight: 600;
-		color: #0f172a;
-		margin-bottom: 16px;
-	}
-	.insights-grid {
-		display: flex;
-		flex-direction: column;
-		gap: 16px;
-	}
-	.insight-card {
-		border: 1px solid;
-		border-radius: 8px;
-		padding: 20px;
-	}
-	.insight-header {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		margin-bottom: 8px;
-	}
-	.insight-category {
-		font-size: 11px;
-		font-weight: 700;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
-	.severity-badge {
-		font-size: 10px;
-		font-weight: 700;
-		padding: 1px 5px;
-		border-radius: 3px;
-	}
-	.severity-critical {
-		background: #fef2f2;
-		color: #dc2626;
-	}
-	.severity-warning {
-		background: #fefce8;
-		color: #ca8a04;
-	}
-	.insight-title {
-		font-size: 16px;
-		font-weight: 600;
-		color: #0f172a;
-		margin-bottom: 10px;
-	}
+	.reanalyze-btn:hover { background: #1d4ed8; }
+	.reanalyze-btn:disabled { background: #94a3b8; cursor: not-allowed; }
 
-	/* Markdown content styling */
-	.insight-content {
-		font-size: 14px;
-		color: #334155;
-		line-height: 1.7;
-	}
-	.insight-content :global(p) {
-		margin-bottom: 10px;
-	}
-	.insight-content :global(p:last-child) {
-		margin-bottom: 0;
-	}
-	.insight-content :global(ul),
-	.insight-content :global(ol) {
-		margin: 8px 0;
-		padding-left: 24px;
-	}
-	.insight-content :global(li) {
-		margin-bottom: 4px;
-	}
-	.insight-content :global(strong) {
-		font-weight: 600;
-		color: #0f172a;
-	}
-	.insight-content :global(code) {
-		background: rgba(0, 0, 0, 0.06);
-		padding: 1px 5px;
-		border-radius: 3px;
-		font-size: 13px;
-		font-family:
-			'SF Mono',
-			'Fira Code',
-			monospace;
-	}
-	.insight-content :global(pre) {
-		margin: 10px 0;
-		padding: 12px 16px;
-		background: #f1f5f9;
-		border-radius: 6px;
-		overflow-x: auto;
-		border: 1px solid #e2e8f0;
-	}
-	.insight-content :global(pre code) {
-		background: none;
-		padding: 0;
-		font-size: 12px;
-		line-height: 1.5;
-	}
-	.insight-content :global(blockquote) {
-		margin: 10px 0;
-		padding: 8px 16px;
-		border-left: 3px solid #cbd5e1;
-		color: #64748b;
-		background: rgba(0, 0, 0, 0.02);
-		border-radius: 0 4px 4px 0;
-	}
-	.insight-content :global(h4),
-	.insight-content :global(h5) {
-		font-size: 13px;
-		font-weight: 600;
-		color: #0f172a;
-		margin: 12px 0 6px;
-	}
-	.insight-content :global(a) {
-		color: #2563eb;
-		text-decoration: none;
-	}
-	.insight-content :global(a:hover) {
-		text-decoration: underline;
-	}
+	.section { margin-bottom: 32px; }
+	h2 { font-size: 18px; font-weight: 600; color: #0f172a; margin-bottom: 16px; }
+	.h2-count { font-size: 13px; font-weight: 500; color: #94a3b8; }
 
-	.context-chart {
-		background: white;
-		border: 1px solid #e2e8f0;
-		border-radius: 8px;
-		padding: 16px;
-	}
-	.chart-inner {
-		position: relative;
-		width: 100%;
-	}
-	.context-svg {
-		width: 100%;
-		height: auto;
-		display: block;
-	}
-	.axis-text {
-		font-size: 10px;
-		fill: #94a3b8;
-		font-family: inherit;
-	}
-	.chart-tooltip {
-		position: absolute;
-		transform: translate(-50%, calc(-100% - 10px));
-		background: #0f172a;
-		color: white;
-		padding: 6px 10px;
-		border-radius: 6px;
-		font-size: 11px;
-		pointer-events: none;
-		white-space: nowrap;
-		box-shadow: 0 4px 12px rgba(15, 23, 42, 0.18);
-		z-index: 2;
-	}
-	.chart-tooltip.flip-left {
-		transform: translate(-8px, calc(-100% - 10px));
-	}
-	.chart-tooltip.flip-right {
-		transform: translate(calc(-100% + 8px), calc(-100% - 10px));
-	}
-	.tt-turn {
-		font-weight: 600;
-		margin-bottom: 3px;
-	}
-	.tt-row {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		color: #cbd5e1;
-		line-height: 1.5;
-	}
-	.tt-dot {
-		width: 8px;
-		height: 2px;
-		border-radius: 1px;
-		flex-shrink: 0;
-	}
-	.tt-dot.prompt {
-		background: #6366f1;
-	}
-	.tt-dot.completion {
-		background: #f59e0b;
-	}
-	.tt-dot.duration {
-		background: #10b981;
-	}
-	.tt-row.slow {
-		color: #fca5a5;
-		font-size: 10px;
-	}
+	.insights-grid { display: flex; flex-direction: column; gap: 14px; }
+	.insight-card { border: 1px solid; border-radius: 12px; padding: 20px; }
+	.insight-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+	.insight-category { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+	.severity-badge { font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px; }
+	.severity-critical { background: #fef2f2; color: #dc2626; }
+	.severity-warning { background: #fefce8; color: #ca8a04; }
+	.insight-title { font-size: 16px; font-weight: 600; color: #0f172a; margin-bottom: 10px; }
+	.insight-content { font-size: 14px; color: #334155; line-height: 1.7; }
+	.insight-content :global(p) { margin-bottom: 10px; }
+	.insight-content :global(p:last-child) { margin-bottom: 0; }
+	.insight-content :global(ul), .insight-content :global(ol) { margin: 8px 0; padding-left: 24px; }
+	.insight-content :global(li) { margin-bottom: 4px; }
+	.insight-content :global(strong) { font-weight: 600; color: #0f172a; }
+	.insight-content :global(code) { background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 3px; font-size: 13px; font-family: 'SF Mono', 'Fira Code', monospace; }
+	.insight-content :global(pre) { margin: 10px 0; padding: 12px 16px; background: #f1f5f9; border-radius: 6px; overflow-x: auto; border: 1px solid #e2e8f0; }
+	.insight-content :global(pre code) { background: none; padding: 0; font-size: 12px; line-height: 1.5; }
+	.insight-content :global(blockquote) { margin: 10px 0; padding: 8px 16px; border-left: 3px solid #cbd5e1; color: #64748b; background: rgba(0,0,0,0.02); border-radius: 0 4px 4px 0; }
+	.insight-content :global(a) { color: #2563eb; text-decoration: none; }
+	.insight-content :global(a:hover) { text-decoration: underline; }
 
-	.collapse-btn {
-		background: none;
-		border: none;
-		cursor: pointer;
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		padding: 0;
-		margin-bottom: 12px;
-	}
-	.collapse-arrow {
-		font-size: 10px;
-		color: #94a3b8;
-		transition: transform 0.15s;
-	}
-	.collapse-arrow.open {
-		transform: rotate(90deg);
-	}
-	.tool-list {
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-	}
-	.tool-item {
-		background: white;
-		border: 1px solid #e2e8f0;
-		border-radius: 6px;
-		padding: 12px;
-	}
-	.tool-item.error-tool {
-		border-color: #fca5a5;
-		background: #fff5f5;
-	}
-	.tool-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-	}
-	.tool-name {
-		font-weight: 600;
-		font-size: 13px;
-		font-family: monospace;
-	}
-	.tool-meta {
-		font-size: 12px;
-		color: #64748b;
-		display: flex;
-		gap: 8px;
-		align-items: center;
-	}
-	.tool-error {
-		color: #dc2626;
-		font-weight: 700;
-		font-size: 11px;
-	}
-	.tool-io {
-		margin-top: 8px;
-	}
-	.tool-io summary {
-		font-size: 12px;
-		color: #64748b;
-		cursor: pointer;
-	}
-	.tool-io pre {
-		margin-top: 4px;
-		padding: 8px;
-		background: #f8fafc;
-		border-radius: 4px;
-		font-size: 11px;
-		overflow-x: auto;
-		max-height: 200px;
-		overflow-y: auto;
-		white-space: pre-wrap;
-		word-break: break-all;
-	}
-	.empty {
-		padding: 32px;
-		text-align: center;
-		color: #64748b;
-		background: white;
-		border: 1px solid #e2e8f0;
-		border-radius: 8px;
+	.collapse-btn { background: none; border: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 0; margin-bottom: 12px; }
+	.collapse-arrow { font-size: 10px; color: #94a3b8; transition: transform 0.15s; }
+	.collapse-arrow.open { transform: rotate(90deg); }
+	.tool-list { display: flex; flex-direction: column; gap: 8px; }
+	.tool-item { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; }
+	.tool-item.error-tool { border-color: #fca5a5; background: #fff5f5; }
+	.tool-header { display: flex; justify-content: space-between; align-items: center; }
+	.tool-name { font-weight: 600; font-size: 13px; font-family: monospace; }
+	.tool-meta { font-size: 12px; color: #64748b; display: flex; gap: 8px; align-items: center; }
+	.tool-error { color: #dc2626; font-weight: 700; font-size: 11px; }
+	.tool-io { margin-top: 8px; }
+	.tool-io summary { font-size: 12px; color: #64748b; cursor: pointer; }
+	.tool-io pre { margin-top: 4px; padding: 8px; background: #f8fafc; border-radius: 4px; font-size: 11px; overflow-x: auto; max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
+	.empty { padding: 32px; text-align: center; color: #64748b; background: white; border: 1px solid #e2e8f0; border-radius: 12px; }
+
+	@media (max-width: 768px) {
+		.charts-grid { grid-template-columns: 1fr; }
+		.session-header { flex-direction: column; align-items: flex-start; }
 	}
 </style>

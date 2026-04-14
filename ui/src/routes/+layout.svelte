@@ -8,11 +8,13 @@
 <div class="app">
 	<header>
 		<nav>
-			<a href="/report" class="logo">cinsights</a>
+			<a href="/" class="logo">cinsights</a>
 			<div class="nav-links">
-				<a href="/report" class="nav-link">Report</a>
+				<a href="/" class="nav-link">Dashboard</a>
 				<a href="/projects" class="nav-link">Projects</a>
+				<a href="/developers" class="nav-link">Developers</a>
 				<a href="/sessions" class="nav-link">Sessions</a>
+				<a href="/doctor" class="nav-link">Doctor</a>
 			</div>
 		</nav>
 	</header>

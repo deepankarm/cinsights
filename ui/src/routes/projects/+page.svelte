@@ -1,10 +1,13 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { getProjects, type ProjectRead } from '$lib/api';
+	import { fmtTokens } from '$lib/format';
 
 	let projects: ProjectRead[] = $state([]);
 	let loading = $state(true);
 	let error: string | null = $state(null);
+	let hoveredProject: ProjectRead | null = $state(null);
+	let hoverPos = $state({ x: 0, y: 0 });
 
 	onMount(async () => {
 		try {
@@ -16,23 +19,17 @@
 		}
 	});
 
-	function formatTokens(n: number): string {
-		if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-		if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
-		return n.toString();
-	}
-
 	function formatDate(iso: string): string {
-		return new Date(iso).toLocaleDateString();
+		return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 	}
 </script>
 
 <svelte:head>
-	<title>Projects - cinsights</title>
+	<title>Projects — cinsights</title>
 </svelte:head>
 
 <h1>Projects</h1>
-<p class="subtitle">Per-project analysis of your Claude Code usage</p>
+<p class="subtitle">Per-project analysis of your coding agent usage</p>
 
 {#if loading}
 	<div class="loading">Loading...</div>
@@ -46,179 +43,132 @@
 {:else}
 	<div class="project-grid">
 		{#each projects as project}
-			<div class="project-card">
-				<div class="project-header">
-					<h2 class="project-name">{project.name}</h2>
-					{#if project.has_digest}
-						<span class="digest-badge">Report ready</span>
-					{/if}
+			<a href="/projects/{encodeURIComponent(project.name)}" class="project-card"
+				onmouseenter={(e) => { hoveredProject = project; hoverPos = { x: e.clientX, y: e.clientY }; }}
+				onmousemove={(e) => { hoverPos = { x: e.clientX, y: e.clientY }; }}
+				onmouseleave={() => { hoveredProject = null; }}>
+				<div class="card-top">
+					<span class="project-name">{project.name}</span>
+					{#if project.has_digest}<span class="badge insights">Insights</span>{/if}
 				</div>
-
-				<div class="project-stats">
+				<div class="card-stats">
 					<div class="stat">
-						<span class="stat-value">{project.session_count}</span>
+						<span class="stat-val">{project.session_count}</span>
 						<span class="stat-label">sessions</span>
 					</div>
 					<div class="stat">
-						<span class="stat-value">{formatTokens(project.total_tokens)}</span>
-						<span class="stat-label">tokens</span>
+						<span class="stat-val">{project.developer_count}</span>
+						<span class="stat-label">{project.developer_count === 1 ? 'dev' : 'devs'}</span>
 					</div>
 					<div class="stat">
-						<span class="stat-value">{project.total_tool_calls}</span>
-						<span class="stat-label">tool calls</span>
+						<span class="stat-val">{fmtTokens(project.total_tokens)}</span>
+						<span class="stat-label">tokens</span>
 					</div>
 				</div>
-
 				{#if project.top_tools.length > 0}
-					<div class="project-tools">
-						{#each project.top_tools as tool}
+					<div class="card-tools">
+						{#each project.top_tools.slice(0, 4) as tool}
 							<span class="tool-chip">{tool}</span>
 						{/each}
 					</div>
 				{/if}
-
-				<div class="project-footer">
-					<span class="last-active">Last active: {formatDate(project.latest_session)}</span>
-					<div class="project-actions">
-						<a href="/report?project={encodeURIComponent(project.name)}" class="action-btn">
-							{project.has_digest ? 'View Report' : 'Generate Report'}
-						</a>
-						<a href="/?project={encodeURIComponent(project.name)}" class="action-link">
-							Sessions
-						</a>
-					</div>
+				<div class="card-footer">
+					<span class="last-active">{formatDate(project.latest_session)}</span>
+					{#if project.analyzed_count > 0}
+						<span class="analyzed-badge">{project.analyzed_count} analyzed</span>
+					{/if}
 				</div>
-			</div>
+			</a>
 		{/each}
 	</div>
+
+	{#if hoveredProject}
+		{@const p = hoveredProject}
+		{@const panelW = 300}
+		{@const panelH = 220}
+		{@const px = Math.min(hoverPos.x + 16, (typeof window !== 'undefined' ? window.innerWidth : 1200) - panelW - 20)}
+		{@const py = Math.min(hoverPos.y - panelH / 2, (typeof window !== 'undefined' ? window.innerHeight : 800) - panelH - 20)}
+		<div class="hover-panel" style="left: {Math.max(8, px)}px; top: {Math.max(8, py)}px; width: {panelW}px">
+			<div class="hp-name">{p.name}</div>
+			<div class="hp-grid">
+				<div class="hp-item"><span class="hp-val">{p.session_count}</span><span class="hp-label">Sessions</span></div>
+				<div class="hp-item"><span class="hp-val">{p.analyzed_count}</span><span class="hp-label">Analyzed</span></div>
+				<div class="hp-item"><span class="hp-val">{p.session_count - p.analyzed_count}</span><span class="hp-label">Indexed</span></div>
+				<div class="hp-item"><span class="hp-val">{p.developer_count}</span><span class="hp-label">Developers</span></div>
+				<div class="hp-item"><span class="hp-val">{p.active_days}</span><span class="hp-label">Active days</span></div>
+				<div class="hp-item"><span class="hp-val">{fmtTokens(p.total_tokens)}</span><span class="hp-label">Tokens</span></div>
+			</div>
+			{#if p.top_tools.length > 0}
+				<div class="hp-tools">
+					{#each p.top_tools as t}<span class="hp-tool">{t}</span>{/each}
+				</div>
+			{/if}
+			{#if p.languages.length > 0}
+				<div class="hp-langs">
+					{#each p.languages as l}<span class="hp-lang">{l}</span>{/each}
+				</div>
+			{/if}
+			{#if p.has_digest}<div class="hp-digest">Insights available</div>{/if}
+		</div>
+	{/if}
 {/if}
 
 <style>
-	h1 { font-size: 28px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
-	.subtitle { color: #64748b; font-size: 14px; margin-bottom: 24px; }
-	.loading, .error { text-align: center; padding: 48px; color: #64748b; }
+	h1 { font-size: 24px; font-weight: 800; color: #232326; margin-bottom: 4px; }
+	.subtitle { color: #a1a1aa; font-size: 13px; margin-bottom: 24px; }
+	.loading, .error { text-align: center; padding: 48px; color: #94a3b8; }
 	.error { color: #dc2626; }
-	.empty { text-align: center; padding: 64px; color: #64748b; }
-	.empty code { background: #f1f5f9; padding: 2px 6px; border-radius: 3px; }
+	.empty { text-align: center; padding: 64px; color: #94a3b8; }
+	.empty code { background: #f4f4f5; padding: 2px 6px; border-radius: 3px; font-size: 12px; }
 
 	.project-grid {
 		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-		gap: 16px;
+		grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+		gap: 10px;
 	}
 
 	.project-card {
-		background: white;
-		border: 1px solid #e2e8f0;
-		border-radius: 10px;
-		padding: 20px;
-		display: flex;
-		flex-direction: column;
-		gap: 14px;
+		display: flex; flex-direction: column; gap: 10px;
+		background: white; border: 1px solid #e8e5e0; border-radius: 12px;
+		padding: 16px; text-decoration: none;
+		transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+		cursor: pointer;
+	}
+	.project-card:hover {
+		border-color: #3b82f6;
+		box-shadow: 0 4px 16px rgba(59,130,246,0.08);
+		transform: translateY(-1px);
 	}
 
-	.project-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-	}
+	.card-top { display: flex; align-items: center; justify-content: space-between; }
+	.project-name { font-size: 14px; font-weight: 700; color: #232326; font-family: 'SF Mono', 'Fira Code', monospace; }
+	.badge.insights { font-size: 9px; font-weight: 700; color: #16a34a; background: #f0fdf4; border: 1px solid #bbf7d0; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
 
-	.project-name {
-		font-size: 18px;
-		font-weight: 700;
-		color: #0f172a;
-		font-family: monospace;
-	}
+	.card-stats { display: flex; gap: 4px; }
+	.stat { flex: 1; text-align: center; }
+	.stat-val { display: block; font-size: 16px; font-weight: 800; color: #232326; letter-spacing: -0.5px; }
+	.stat-label { display: block; font-size: 9px; color: #a1a1aa; text-transform: uppercase; letter-spacing: 0.04em; }
 
-	.digest-badge {
-		font-size: 11px;
-		font-weight: 600;
-		color: #16a34a;
-		background: #f0fdf4;
-		border: 1px solid #bbf7d0;
-		padding: 2px 8px;
-		border-radius: 4px;
-	}
+	.card-tools { display: flex; gap: 4px; flex-wrap: wrap; }
+	.tool-chip { font-size: 10px; font-family: monospace; background: #f4f4f5; color: #52525b; padding: 2px 7px; border-radius: 4px; }
 
-	.project-stats {
-		display: flex;
-		gap: 20px;
-	}
+	.card-footer { display: flex; align-items: center; justify-content: space-between; margin-top: auto; }
+	.last-active { font-size: 11px; color: #a1a1aa; }
+	.analyzed-badge { font-size: 10px; font-weight: 600; color: #6366f1; background: #eef2ff; padding: 2px 7px; border-radius: 4px; }
 
-	.stat {
-		display: flex;
-		flex-direction: column;
+	.hover-panel {
+		position: fixed; background: white; border: 1px solid #d4d4d8;
+		border-radius: 14px; padding: 16px;
+		box-shadow: 0 12px 40px rgba(0,0,0,0.15);
+		z-index: 300; pointer-events: none;
 	}
-
-	.stat-value {
-		font-size: 20px;
-		font-weight: 700;
-		color: #0f172a;
-	}
-
-	.stat-label {
-		font-size: 11px;
-		color: #64748b;
-		text-transform: uppercase;
-	}
-
-	.project-tools {
-		display: flex;
-		gap: 6px;
-		flex-wrap: wrap;
-	}
-
-	.tool-chip {
-		font-size: 11px;
-		font-family: monospace;
-		background: #f1f5f9;
-		color: #475569;
-		padding: 2px 8px;
-		border-radius: 4px;
-	}
-
-	.project-footer {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-top: auto;
-		padding-top: 10px;
-		border-top: 1px solid #f1f5f9;
-	}
-
-	.last-active {
-		font-size: 12px;
-		color: #94a3b8;
-	}
-
-	.project-actions {
-		display: flex;
-		gap: 12px;
-		align-items: center;
-	}
-
-	.action-btn {
-		background: #2563eb;
-		color: white;
-		border: none;
-		border-radius: 6px;
-		padding: 6px 14px;
-		font-size: 12px;
-		font-weight: 500;
-		text-decoration: none;
-	}
-
-	.action-btn:hover {
-		background: #1d4ed8;
-	}
-
-	.action-link {
-		font-size: 12px;
-		color: #64748b;
-		text-decoration: none;
-	}
-
-	.action-link:hover {
-		color: #2563eb;
-	}
+	.hp-name { font-size: 15px; font-weight: 700; color: #232326; font-family: monospace; margin-bottom: 10px; }
+	.hp-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 10px; }
+	.hp-item { text-align: center; padding: 3px 0; }
+	.hp-val { display: block; font-size: 14px; font-weight: 700; color: #232326; }
+	.hp-label { display: block; font-size: 8px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.04em; }
+	.hp-tools, .hp-langs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+	.hp-tool { font-size: 10px; font-weight: 600; font-family: monospace; color: #475569; background: #f1f5f9; padding: 2px 6px; border-radius: 3px; }
+	.hp-lang { font-size: 10px; font-weight: 600; color: #2563eb; background: #eff6ff; padding: 2px 6px; border-radius: 3px; }
+	.hp-digest { font-size: 10px; font-weight: 600; color: #16a34a; }
 </style>

@@ -16,6 +16,9 @@ router = APIRouter(prefix="/api/projects", tags=["projects"])
 class ProjectRead(BaseModel):
     name: str
     session_count: int
+    analyzed_count: int
+    developer_count: int
+    active_days: int
     total_tokens: int
     total_tool_calls: int
     top_tools: list[str]
@@ -33,15 +36,18 @@ async def list_projects(db: AsyncSession = Depends(get_db)) -> list[ProjectRead]
             func.count(),
             func.sum(CodingSession.total_tokens),
             func.max(CodingSession.start_time),
+            func.count(CodingSession.id).filter(CodingSession.status == "analyzed"),
+            func.count(func.distinct(CodingSession.user_id)),
+            func.count(func.distinct(func.date(CodingSession.start_time))),
         )
         .where(CodingSession.project_name.isnot(None))
         .group_by(CodingSession.project_name)
-        .order_by(func.max(CodingSession.start_time).desc())
+        .order_by(func.count().desc())
     )
     rows = rows_result.all()
 
     results: list[ProjectRead] = []
-    for project_name, session_count, total_tokens, latest in rows:
+    for project_name, session_count, total_tokens, latest, analyzed_count, dev_count, active_days in rows:
         # Top tools for this project
         tool_result = await db.exec(
             select(ToolCall.tool_name, func.count())
@@ -66,10 +72,13 @@ async def list_projects(db: AsyncSession = Depends(get_db)) -> list[ProjectRead]
             ProjectRead(
                 name=project_name,
                 session_count=session_count,
+                analyzed_count=analyzed_count,
+                developer_count=dev_count,
+                active_days=active_days,
                 total_tokens=total_tokens or 0,
                 total_tool_calls=sum(c for _, c in tool_rows),
                 top_tools=[name for name, _ in tool_rows],
-                languages=[],  # Computed on demand via stats endpoint
+                languages=[],
                 latest_session=latest,
                 has_digest=has_digest,
             )

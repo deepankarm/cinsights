@@ -14,8 +14,9 @@ from cinsights.sources.base import SpanData, TraceData
 logger = logging.getLogger(__name__)
 
 MAX_IO_CHARS = 500  # Truncate tool I/O to keep prompt manageable
-MAX_TIMELINE_SPANS = 200  # Cap spans in the analysis timeline (stratified sample)
-TIMELINE_HEAD_TAIL = 30  # Keep this many spans from the start and end
+def _get_limits():
+    from cinsights.settings import get_config
+    return get_config().limits
 
 
 class InsightCategoryEnum(StrEnum):
@@ -105,37 +106,27 @@ class _SpanView:
 def _sample_timeline_spans(spans: list[SpanData]) -> tuple[list[SpanData], str | None]:
     """Stratified sample of spans for the analysis prompt.
 
-    For sessions with more than MAX_TIMELINE_SPANS, we keep:
-      - every error span (bounded; usually small, and most informative)
-      - the first TIMELINE_HEAD_TAIL spans (entry context)
-      - the last TIMELINE_HEAD_TAIL spans (exit context)
-      - a uniform sample of the remaining successful middle spans, sized so the
-        total stays under MAX_TIMELINE_SPANS
-
-    Returns the sampled spans (in original chronological order) and an optional
-    truncation notice string for the prompt header. The notice is None when no
-    sampling was needed.
-
-    This is the bounded fix for the "Input is too long" 400 we saw on long
-    sessions in Iter 1. It does not change behavior for small sessions.
+    Limits are read from ``config.json`` (``limits.max_timeline_spans`` and
+    ``limits.timeline_head_tail``).
     """
+    limits = _get_limits()
+    max_spans = limits.max_timeline_spans
+    head_tail = limits.timeline_head_tail
+
     n = len(spans)
-    if n <= MAX_TIMELINE_SPANS:
+    if n <= max_spans:
         return spans, None
 
-    # Stable index of position in the original timeline so we can sort the
-    # final pick chronologically.
     indexed = list(enumerate(spans))
 
     error_idxs = {i for i, s in indexed if not s.is_success}
-    head_idxs = {i for i, _ in indexed[:TIMELINE_HEAD_TAIL]}
-    tail_idxs = {i for i, _ in indexed[-TIMELINE_HEAD_TAIL:]}
+    head_idxs = {i for i, _ in indexed[:head_tail]}
+    tail_idxs = {i for i, _ in indexed[-head_tail:]}
 
     keep: set[int] = error_idxs | head_idxs | tail_idxs
 
-    # Fill the rest with a uniform sample from the successful middle spans.
     middle_candidates = [i for i, s in indexed if i not in keep and s.is_success]
-    remaining_budget = MAX_TIMELINE_SPANS - len(keep)
+    remaining_budget = max_spans - len(keep)
     if remaining_budget > 0 and middle_candidates:
         if remaining_budget >= len(middle_candidates):
             keep.update(middle_candidates)
@@ -146,7 +137,7 @@ def _sample_timeline_spans(spans: list[SpanData]) -> tuple[list[SpanData], str |
     sampled = [s for i, s in indexed if i in keep]
     notice = (
         f"TIMELINE TRUNCATED: showing {len(sampled)} of {n} spans "
-        f"(all {len(error_idxs)} errors + first/last {TIMELINE_HEAD_TAIL} + uniform sample of the rest). "
+        f"(all {len(error_idxs)} errors + first/last {head_tail} + uniform sample of the rest). "
         f"Tool counts and aggregate stats above reflect the FULL session."
     )
     return sampled, notice

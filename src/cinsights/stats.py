@@ -74,6 +74,19 @@ _ERROR_PATTERNS = [
 ]
 
 
+class WeeklyTrend(BaseModel):
+    """One week of aggregated quality metrics."""
+    week: str  # ISO date of Monday
+    session_count: int
+    avg_read_edit_ratio: float | None = None
+    avg_edits_without_read_pct: float | None = None
+    avg_error_rate: float | None = None
+    avg_research_mutation_ratio: float | None = None
+    avg_write_vs_edit_pct: float | None = None
+    avg_context_pressure: float | None = None
+    total_tokens: int = 0
+
+
 class SessionHealthScore(BaseModel):
     session_id: str
     start_time: datetime
@@ -109,6 +122,28 @@ class ProjectBreakdown(BaseModel):
     has_claude_md: bool
 
 
+class CostContext(BaseModel):
+    """Token and time cost aggregates for the digest period."""
+
+    total_estimated_cost_usd: float | None = None
+    avg_cost_per_session_usd: float | None = None
+    avg_duration_per_session_min: float = 0.0
+    total_errors: int = 0
+    error_rework_estimate_min: float = 0.0
+
+
+class Benchmarks(BaseModel):
+    """Project-wide averages for comparison in per-developer digests."""
+
+    scope_label: str = ""
+    avg_error_rate: float | None = None
+    avg_read_edit_ratio: float | None = None
+    avg_edits_without_read_pct: float | None = None
+    avg_turn_count: float | None = None
+    avg_duration_ms: float | None = None
+    developer_count: int = 0
+
+
 class DigestStats(BaseModel):
     """All computed statistics for a digest period."""
 
@@ -141,34 +176,59 @@ class DigestStats(BaseModel):
     has_claude_md: bool
     project_breakdown: list[ProjectBreakdown]
 
+    weekly_trends: list[WeeklyTrend]
+    previous_digest_summary: str | None = None
     analysis_tokens_used: int
 
+    cost_context: CostContext = CostContext()
+    benchmarks: Benchmarks | None = None
 
-def _session_filter(start: datetime, end: datetime, project_name: str | None = None) -> list[Any]:
-    """Build the standard WHERE clauses for selecting analyzed sessions in a window.
 
-    Returns a list of SQLAlchemy expressions to be ``AND``-ed via repeated
-    ``query.where(...)`` calls. Pure: builds expressions, no DB I/O.
+def _session_filter(
+    start: datetime,
+    end: datetime,
+    project_name: str | None = None,
+    user_id: str | None = None,
+    *,
+    analyzed_only: bool = False,
+) -> list[Any]:
+    """Build WHERE clauses for selecting sessions in a window.
+
+    By default selects INDEXED + ANALYZED sessions (all sessions with
+    extracted metadata). Pass ``analyzed_only=True`` to restrict to sessions
+    that have LLM-generated insights.
     """
     clauses: list[Any] = [
         CodingSession.start_time >= start,
         CodingSession.start_time <= end,
-        CodingSession.status == SessionStatus.ANALYZED,
     ]
+    if analyzed_only:
+        clauses.append(CodingSession.status == SessionStatus.ANALYZED)
+    else:
+        clauses.append(
+            col(CodingSession.status).in_([SessionStatus.INDEXED, SessionStatus.ANALYZED])
+        )
     if project_name:
         clauses.append(CodingSession.project_name == project_name)
+    if user_id:
+        clauses.append(CodingSession.user_id == user_id)
     return clauses
 
 
 def _base_query(
-    start: datetime, end: datetime, project_name: str | None = None
+    start: datetime,
+    end: datetime,
+    project_name: str | None = None,
+    user_id: str | None = None,
+    *,
+    analyzed_only: bool = False,
 ) -> SelectOfScalar[CodingSession]:
-    """Build a SELECT for analyzed CodingSessions in the given window.
+    """Build a SELECT for CodingSessions in the given window.
 
     Pure: builds the Select expression, doesn't execute it.
     """
     q = select(CodingSession)
-    for clause in _session_filter(start, end, project_name):
+    for clause in _session_filter(start, end, project_name, user_id, analyzed_only=analyzed_only):
         q = q.where(clause)
     return q
 
@@ -178,6 +238,9 @@ def _tc_agg_query(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
+    *,
+    analyzed_only: bool = False,
 ) -> Any:
     """Build a SELECT over ToolCall joined to its session, scoped to the window.
 
@@ -189,7 +252,7 @@ def _tc_agg_query(
         .select_from(ToolCall)
         .join(CodingSession, ToolCall.session_id == CodingSession.id)
     )
-    for clause in _session_filter(start, end, project_name):
+    for clause in _session_filter(start, end, project_name, user_id, analyzed_only=analyzed_only):
         q = q.where(clause)
     return q
 
@@ -199,9 +262,10 @@ async def compute_tool_distribution(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
 ) -> dict[str, int]:
     result = await db.exec(
-        _tc_agg_query((ToolCall.tool_name, func.count()), start, end, project_name)
+        _tc_agg_query((ToolCall.tool_name, func.count()), start, end, project_name, user_id)
         .group_by(ToolCall.tool_name)
         .order_by(func.count().desc())
     )
@@ -213,9 +277,10 @@ async def compute_error_breakdown(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
 ) -> tuple[dict[str, int], dict[str, int]]:
     tool_errors_result = await db.exec(
-        _tc_agg_query((ToolCall.tool_name, func.count()), start, end, project_name)
+        _tc_agg_query((ToolCall.tool_name, func.count()), start, end, project_name, user_id)
         .where(ToolCall.success == False)  # noqa: E712
         .group_by(ToolCall.tool_name)
         .order_by(func.count().desc())
@@ -223,7 +288,7 @@ async def compute_error_breakdown(
     tool_errors = tool_errors_result.all()
 
     failed_result = await db.exec(
-        _tc_agg_query((ToolCall.output_value,), start, end, project_name).where(
+        _tc_agg_query((ToolCall.output_value,), start, end, project_name, user_id).where(
             ToolCall.success == False  # noqa: E712 — SQLAlchemy filter
         )
     )
@@ -254,9 +319,10 @@ async def compute_language_distribution(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
 ) -> dict[str, int]:
     q = (
-        _tc_agg_query((ToolCall.input_value,), start, end, project_name)
+        _tc_agg_query((ToolCall.input_value,), start, end, project_name, user_id)
         .where(col(ToolCall.tool_name).in_(list(_FILE_TOOLS)))
         .where(ToolCall.input_value.isnot(None))
     )
@@ -281,8 +347,9 @@ async def compute_time_of_day(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
 ) -> dict[int, int]:
-    result = await db.exec(_base_query(start, end, project_name))
+    result = await db.exec(_base_query(start, end, project_name, user_id))
     sessions = result.all()
     hours: dict[int, int] = {}
     for s in sessions:
@@ -295,9 +362,10 @@ async def compute_session_health(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
 ) -> list[SessionHealthScore]:
     result = await db.exec(
-        _base_query(start, end, project_name).order_by(col(CodingSession.start_time).desc())
+        _base_query(start, end, project_name, user_id).order_by(col(CodingSession.start_time).desc())
     )
     sessions = result.all()
     if not sessions:
@@ -364,9 +432,10 @@ async def compute_permission_stats(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
 ) -> PermissionStats:
     """Count permission prompts and compute wait times."""
-    sessions_result = await db.exec(_base_query(start, end, project_name))
+    sessions_result = await db.exec(_base_query(start, end, project_name, user_id))
     session_ids = {s.id for s in sessions_result.all()}
 
     if not session_ids:
@@ -413,9 +482,10 @@ async def compute_plan_mode_stats(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
 ) -> PlanModeStats:
     """Count plan mode entries and agent stats."""
-    sessions_result = await db.exec(_base_query(start, end, project_name))
+    sessions_result = await db.exec(_base_query(start, end, project_name, user_id))
     session_ids = {s.id for s in sessions_result.all()}
 
     if not session_ids:
@@ -462,10 +532,11 @@ async def detect_claude_md(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
 ) -> bool:
     """Check if any session reads or edits a CLAUDE.md file."""
     q = (
-        _tc_agg_query((ToolCall.input_value,), start, end, project_name)
+        _tc_agg_query((ToolCall.input_value,), start, end, project_name, user_id)
         .where(col(ToolCall.tool_name).in_(["Read", "Edit", "Write"]))
         .where(ToolCall.input_value.isnot(None))
     )
@@ -492,9 +563,10 @@ async def detect_overlapping_sessions(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
 ) -> list[dict]:
     result = await db.exec(
-        _base_query(start, end, project_name)
+        _base_query(start, end, project_name, user_id)
         .where(CodingSession.end_time.isnot(None))
         .order_by(CodingSession.start_time)
     )
@@ -520,9 +592,12 @@ async def collect_session_summaries(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
 ) -> list[dict]:
+    # Session summaries depend on Insight rows → ANALYZED only
     sessions_result = await db.exec(
-        _base_query(start, end, project_name).order_by(CodingSession.start_time)
+        _base_query(start, end, project_name, user_id, analyzed_only=True)
+        .order_by(CodingSession.start_time)
     )
     sessions = sessions_result.all()
     if not sessions:
@@ -610,8 +685,104 @@ async def collect_session_summaries(
         )
 
     # Sort by tool_count desc so the LLM sees the most substantial sessions first.
+    # Cap to keep digest prompts within context limits.
+    from cinsights.settings import get_config
+    max_summaries = get_config().limits.max_digest_session_summaries
     summaries.sort(key=lambda x: x["tool_count"], reverse=True)
-    return summaries
+    return summaries[:max_summaries]
+
+
+def _compute_weekly_trends(sessions: list[CodingSession]) -> list[WeeklyTrend]:
+    """Aggregate sessions into weekly buckets by quality metrics."""
+    from datetime import timedelta
+
+    if not sessions:
+        return []
+
+    # Group by ISO week (Monday start)
+    by_week: dict[str, list[CodingSession]] = {}
+    for s in sessions:
+        monday = s.start_time.date() - timedelta(days=s.start_time.weekday())
+        week_key = monday.isoformat()
+        by_week.setdefault(week_key, []).append(s)
+
+    def _avg_field(sess: list[CodingSession], field: str) -> float | None:
+        vals = [getattr(s, field) for s in sess if getattr(s, field, None) is not None]
+        return round(sum(vals) / len(vals), 2) if vals else None
+
+    trends = []
+    for week in sorted(by_week.keys()):
+        week_sessions = by_week[week]
+        trends.append(
+            WeeklyTrend(
+                week=week,
+                session_count=len(week_sessions),
+                avg_read_edit_ratio=_avg_field(week_sessions, "read_edit_ratio"),
+                avg_edits_without_read_pct=_avg_field(week_sessions, "edits_without_read_pct"),
+                avg_error_rate=_avg_field(week_sessions, "error_rate"),
+                avg_research_mutation_ratio=_avg_field(week_sessions, "research_mutation_ratio"),
+                avg_write_vs_edit_pct=_avg_field(week_sessions, "write_vs_edit_pct"),
+                avg_context_pressure=_avg_field(week_sessions, "context_pressure_score"),
+                total_tokens=sum(s.total_tokens for s in week_sessions),
+            )
+        )
+    return trends
+
+
+def _compute_cost_context(
+    sessions: list[CodingSession],
+    total_duration: float,
+    error_breakdown: dict[str, int],
+) -> CostContext:
+    """Compute cost/time aggregates for the digest period."""
+    from cinsights.costs import estimate_cost
+
+    total_prompt = sum(s.prompt_tokens for s in sessions)
+    total_completion = sum(s.completion_tokens for s in sessions)
+    total_cost = estimate_cost(total_prompt, total_completion)
+    n = len(sessions) or 1
+    total_errors = sum(error_breakdown.values())
+
+    return CostContext(
+        total_estimated_cost_usd=total_cost,
+        avg_cost_per_session_usd=round(total_cost / n, 4) if total_cost else None,
+        avg_duration_per_session_min=round(total_duration / n, 1),
+        total_errors=total_errors,
+        error_rework_estimate_min=round(total_errors * 2.0, 1),
+    )
+
+
+async def _compute_benchmarks(
+    db: AsyncSession,
+    start: datetime,
+    end: datetime,
+    project_name: str | None,
+    user_id: str | None,
+) -> Benchmarks | None:
+    """Compute project-wide averages for comparison in per-developer digests."""
+    if not user_id:
+        return None
+
+    all_sessions_result = await db.exec(_base_query(start, end, project_name))
+    all_sessions = all_sessions_result.all()
+    if not all_sessions:
+        return None
+
+    developers = {s.user_id for s in all_sessions if s.user_id}
+
+    def _avg(field: str) -> float | None:
+        vals = [getattr(s, field) for s in all_sessions if getattr(s, field) is not None]
+        return round(sum(vals) / len(vals), 3) if vals else None
+
+    return Benchmarks(
+        scope_label=project_name or "all projects",
+        avg_error_rate=_avg("error_rate"),
+        avg_read_edit_ratio=_avg("read_edit_ratio"),
+        avg_edits_without_read_pct=_avg("edits_without_read_pct"),
+        avg_turn_count=_avg("turn_count"),
+        avg_duration_ms=None,
+        developer_count=len(developers),
+    )
 
 
 async def compute_all(
@@ -619,6 +790,7 @@ async def compute_all(
     start: datetime,
     end: datetime,
     project_name: str | None = None,
+    user_id: str | None = None,
 ) -> DigestStats:
     """Compute all statistics for a digest period, optionally filtered by project.
 
@@ -628,8 +800,10 @@ async def compute_all(
     must serialize queries on one session and rely on the request boundary
     (separate sessions per request / per scope) for parallelism.
     """
-    sessions_result = await db.exec(_base_query(start, end, project_name))
+    # All indexed+analyzed sessions for quantitative stats
+    sessions_result = await db.exec(_base_query(start, end, project_name, user_id))
     sessions = sessions_result.all()
+    analyzed_count = sum(1 for s in sessions if s.status == SessionStatus.ANALYZED)
 
     total_tokens = sum(s.total_tokens for s in sessions)
     total_prompt = sum(s.prompt_tokens for s in sessions)
@@ -644,18 +818,22 @@ async def compute_all(
         .select_from(ToolCall)
         .join(CodingSession, ToolCall.session_id == CodingSession.id)
     )
-    for clause in _session_filter(start, end, project_name):
+    for clause in _session_filter(start, end, project_name, user_id):
         tc_count_q = tc_count_q.where(clause)
     tc_count_result = await db.exec(tc_count_q)
     total_tool_calls = tc_count_result.one()
 
-    analysis_tokens = sum(s.analysis_prompt_tokens + s.analysis_completion_tokens for s in sessions)
+    analysis_tokens = sum(
+        s.analysis_prompt_tokens + s.analysis_completion_tokens
+        for s in sessions
+        if s.status == SessionStatus.ANALYZED
+    )
 
-    p = project_name
-    tool_dist = await compute_tool_distribution(db, start, end, p)
-    error_breakdown, error_types = await compute_error_breakdown(db, start, end, p)
-    lang_dist = await compute_language_distribution(db, start, end, p)
-    time_of_day = await compute_time_of_day(db, start, end, p)
+    p, u = project_name, user_id
+    tool_dist = await compute_tool_distribution(db, start, end, p, u)
+    error_breakdown, error_types = await compute_error_breakdown(db, start, end, p, u)
+    lang_dist = await compute_language_distribution(db, start, end, p, u)
+    time_of_day = await compute_time_of_day(db, start, end, p, u)
 
     session_durations = [
         {
@@ -710,7 +888,7 @@ async def compute_all(
         period_start=start,
         period_end=end,
         session_count=len(sessions),
-        analyzed_count=len(sessions),
+        analyzed_count=analyzed_count,
         total_tool_calls=total_tool_calls,
         total_tokens=total_tokens,
         total_prompt_tokens=total_prompt,
@@ -723,13 +901,16 @@ async def compute_all(
         language_distribution=lang_dist,
         time_of_day=time_of_day,
         session_durations=session_durations,
-        session_health=await compute_session_health(db, start, end, p),
+        session_health=await compute_session_health(db, start, end, p, u),
         tokens_per_session=tokens_per_session,
-        overlapping_sessions=await detect_overlapping_sessions(db, start, end, p),
-        session_summaries=await collect_session_summaries(db, start, end, p),
-        permission_stats=await compute_permission_stats(db, start, end, p),
-        plan_mode_stats=await compute_plan_mode_stats(db, start, end, p),
-        has_claude_md=await detect_claude_md(db, start, end, p),
+        overlapping_sessions=await detect_overlapping_sessions(db, start, end, p, u),
+        session_summaries=await collect_session_summaries(db, start, end, p, u),
+        permission_stats=await compute_permission_stats(db, start, end, p, u),
+        plan_mode_stats=await compute_plan_mode_stats(db, start, end, p, u),
+        has_claude_md=await detect_claude_md(db, start, end, p, u),
         project_breakdown=proj_breakdown,
+        weekly_trends=_compute_weekly_trends(sessions),
         analysis_tokens_used=analysis_tokens,
+        cost_context=_compute_cost_context(sessions, total_duration, error_breakdown),
+        benchmarks=await _compute_benchmarks(db, start, end, project_name, user_id),
     )

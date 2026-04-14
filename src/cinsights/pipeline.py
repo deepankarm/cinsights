@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     from types import ModuleType
 
     from cinsights.analysis.digest import DigestAnalysisResult, DigestAnalyzer
-    from cinsights.analysis.project_detection import ProjectGuess
     from cinsights.analysis.session import AnalysisResult
     from cinsights.db.models import CodingSession, Digest
     from cinsights.sources.base import SpanData, TraceData, TraceSource
@@ -40,30 +39,25 @@ def _filter_tool_spans(spans: list[SpanData]) -> list[SpanData]:
     ]
 
 
-async def _store_analysis(
+async def _store_indexed(
     db: AsyncSession,
     trace_id: str,
     session_id: str,
     trace: TraceData,
     spans: list[SpanData],
-    result: AnalysisResult,
     source: TraceSource,
     force: bool,
     existing: CodingSession | None,
-    project_guess: ProjectGuess,
-) -> int:
-    """Store trace data and analysis results in the database.
+    project_name: str | None,
+) -> CodingSession:
+    """Extract and store Tier 0 metadata + quality metrics (zero LLM cost).
 
-    Returns the number of insights persisted. On re-analyze (existing row or
-    --force), all prior tool_calls and insights for this session are deleted
-    via explicit queries — we never touch lazy relationship attributes because
-    AsyncSession does not support implicit lazy loads.
+    Creates/updates CodingSession and ToolCall rows. Computes quality metrics
+    from the tool call sequence. Sets status = INDEXED.
     """
     from cinsights.db.models import (
         CodingSession,
         Insight,
-        InsightCategory,
-        InsightSeverity,
         SessionStatus,
         ToolCall,
     )
@@ -71,7 +65,6 @@ async def _store_analysis(
     root = next((s for s in spans if s.parent_id is None), None)
     tool_spans = _filter_tool_spans(spans)
 
-    # Extract user.id from span attributes
     user_id = None
     for s in spans:
         if not user_id:
@@ -79,14 +72,8 @@ async def _store_analysis(
         if user_id:
             break
 
-    project_name = project_guess.project_name
-
     last_span_time = max(s.end_time for s in spans) if spans else None
 
-    # Sum prompt_tokens across ALL Turn spans, not just the last. Each Turn's
-    # prompt_tokens is the full context sent at that turn; compaction resets
-    # the turn counter so the same session can have multiple "Turn 1" spans.
-    # The stored value is RAW input tokens (no cache discount).
     import json as json_mod
 
     turn_spans = sorted(
@@ -122,19 +109,19 @@ async def _store_analysis(
             project_name=project_name,
             start_time=trace.start_time,
             end_time=trace.end_time,
-            model=root.model_name if root else None,
+            model=(root.model_name if root and root.model_name else None)
+                or next((s.model_name for s in turn_spans if s.model_name), None),
             total_tokens=total_tokens,
             prompt_tokens=total_prompt,
             completion_tokens=total_completion,
             context_growth_json=context_growth,
             span_count=len(spans),
             last_span_time=last_span_time,
-            status=SessionStatus.PENDING,
+            status=SessionStatus.INDEXED,
         )
         db.add(coding_session)
     else:
         coding_session = existing
-        # Update metadata that may have changed
         coding_session.user_id = user_id or existing.user_id
         coding_session.project_name = project_name or existing.project_name
         coding_session.start_time = trace.start_time
@@ -145,16 +132,13 @@ async def _store_analysis(
         coding_session.context_growth_json = context_growth
         coding_session.span_count = len(spans)
         coding_session.last_span_time = last_span_time
-        # tenant/source/agent are intentionally NOT overwritten on re-analyze —
-        # they reflect where the row was first ingested.
 
-    # Populate entireio-specific metadata
+    # Source-specific agent_type detection
     if settings.source == SourceType.ENTIREIO:
         from cinsights.sources.entireio import EntireioSource
 
         if isinstance(source, EntireioSource):
             coding_session.metadata_json = source.get_session_metadata_json(trace_id)
-            # Use agent_type from checkpoint metadata instead of settings default
             idx = source._build_index()
             for _, ref in idx.items():
                 if ref.checkpoint_id == trace_id.split(":")[1] and ref.session_idx == int(
@@ -162,11 +146,12 @@ async def _store_analysis(
                 ):
                     if ref.metadata.agent:
                         agent_name = ref.metadata.agent.lower().replace(" ", "-")
+                        if agent_name in ("agent", "mock-lifecycle-agent", "vogon-agent"):
+                            agent_name = "unknown"
                         if not existing:
                             coding_session.agent_type = agent_name
                     break
 
-    # Use detected agent_type for local source
     if settings.source == SourceType.LOCAL:
         from cinsights.sources.local import LocalSource
 
@@ -175,19 +160,16 @@ async def _store_analysis(
             if detected and not existing:
                 coding_session.agent_type = detected
 
-    # Clear old data if re-analyzing. Use explicit FK queries — AsyncSession
-    # doesn't support implicit lazy relationship loads.
+    # Clear old tool calls if re-indexing (preserve insights — they require LLM cost to regenerate)
     if force or existing:
-        old_tcs_result = await db.exec(select_fn(ToolCall).where(ToolCall.session_id == trace_id))
-        for tc in old_tcs_result.all():
+        old_tcs = await db.exec(select_fn(ToolCall).where(ToolCall.session_id == trace_id))
+        for tc in old_tcs.all():
             await db.delete(tc)
-        old_ins_result = await db.exec(select_fn(Insight).where(Insight.session_id == trace_id))
-        for ins in old_ins_result.all():
-            await db.delete(ins)
         await db.flush()
 
+    # Store tool calls
+    tool_call_rows = []
     for span in tool_spans:
-        # Only store output for failed calls (error classification) to save DB space
         output = None
         if not span.is_success and span.output_value:
             output = span.output_value[:2000]
@@ -204,6 +186,48 @@ async def _store_analysis(
             timestamp=span.start_time,
         )
         db.add(tc)
+        tool_call_rows.append(tc)
+
+    # Compute Tier 0 quality metrics
+    from cinsights.metrics import compute_all as compute_metrics
+
+    context_growth_list = None
+    if context_growth:
+        import contextlib
+
+        with contextlib.suppress(json_mod.JSONDecodeError, TypeError):
+            context_growth_list = json_mod.loads(context_growth)
+
+    metrics = compute_metrics(tool_call_rows, context_growth_list, total_tokens)
+    for key, value in metrics.items():
+        if value is not None:
+            setattr(coding_session, key, value)
+
+    # Estimate analysis cost from actual span data
+    from cinsights.costs import estimate_session_analysis_tokens
+
+    coding_session.estimated_analysis_tokens = estimate_session_analysis_tokens(spans)
+
+    return coding_session
+
+
+async def _store_insights(
+    db: AsyncSession,
+    coding_session: CodingSession,
+    result: AnalysisResult,
+) -> int:
+    """Store LLM-generated insights on an already-INDEXED session.
+
+    Updates status to ANALYZED. Returns the number of insights persisted.
+    """
+    from cinsights.db.models import (
+        Insight,
+        InsightCategory,
+        InsightSeverity,
+        SessionStatus,
+    )
+
+    settings = get_settings()
 
     for item in result.insights:
         try:
@@ -216,8 +240,8 @@ async def _store_analysis(
             sev = InsightSeverity.INFO
 
         insight = Insight(
-            tenant_id=tenant_id,
-            session_id=trace_id,
+            tenant_id=coding_session.tenant_id,
+            session_id=coding_session.id,
             category=cat,
             title=item.title,
             content=item.content,
@@ -259,7 +283,7 @@ async def _store_digest_sections(
         (DigestSectionType.WORK_AREAS, "What You Work On", "", _dump(result.narrative.work_areas)),
         (
             DigestSectionType.DEVELOPER_PERSONA,
-            "How You Use Claude Code",
+            "How You Use Coding Agents",
             result.narrative.developer_persona,
             None,
         ),
@@ -283,21 +307,15 @@ async def _store_digest_sections(
         ),
         (
             DigestSectionType.FEATURE_RECOMMENDATIONS,
-            "CC Features to Try",
+            "Features to Try",
             "",
             _dump(result.actions.feature_recommendations),
         ),
         (
-            DigestSectionType.WORKFLOW_PATTERNS,
-            "New Ways to Use Claude Code",
+            DigestSectionType.RECOMMENDATIONS,
+            "Recommendations",
             "",
-            _dump(result.forward.workflow_patterns),
-        ),
-        (
-            DigestSectionType.AMBITIOUS_WORKFLOWS,
-            "On the Horizon",
-            "",
-            _dump(result.forward.ambitious_workflows),
+            _dump(result.forward.recommendations),
         ),
     ]
 
@@ -351,13 +369,13 @@ async def _run_one_digest(
     """
     import json as json_mod
 
-    from cinsights.db.models import Digest, DigestSection, DigestStatus
+    from cinsights.db.models import Digest, DigestSection, DigestSectionType, DigestStatus
     from cinsights.stats import compute_all
 
-    label = scope_project or "global"
+    label = scope_project or (f"user:{user_id}" if user_id else "global")
 
     async with sessionmaker() as db:
-        stats = await compute_all(db, start, end, project_name=scope_project)
+        stats = await compute_all(db, start, end, project_name=scope_project, user_id=user_id)
 
         if stats.session_count == 0:
             console.print(f"  [yellow]·[/yellow] {label} — no sessions, skipped")
@@ -404,6 +422,30 @@ async def _run_one_digest(
                 )
                 return ("unchanged", 0, 0)
 
+        # Extract previous digest summary before deleting for delta narratives.
+        previous_summary = None
+        if latest_complete:
+            prev_sections_result = await db.exec(
+                select_fn(DigestSection)
+                .where(DigestSection.digest_id == latest_complete.id)
+                .where(
+                    col(DigestSection.section_type).in_([
+                        DigestSectionType.AT_A_GLANCE,
+                        DigestSectionType.FRICTION_ANALYSIS,
+                    ])
+                )
+            )
+            prev_parts = []
+            for sec in prev_sections_result.all():
+                prev_parts.append(f"### {sec.title}\n{sec.content}")
+            if prev_parts:
+                prev_date = latest_complete.completed_at
+                date_str = f"{prev_date:%Y-%m-%d}" if prev_date else "unknown"
+                previous_summary = (
+                    f"Previous digest ({date_str}, {latest_complete.session_count} sessions):\n"
+                    + "\n\n".join(prev_parts)
+                )
+
         # Stats changed (or no prior digest). Delete every existing digest in this
         # scope (running, failed, or stale-complete) before creating a new one.
         existing_result = await db.exec(scope_q)
@@ -417,6 +459,10 @@ async def _run_one_digest(
             await db.delete(old)
         if existing_digests:
             await db.flush()
+
+        # Attach previous digest context to stats for the LLM
+        if previous_summary:
+            stats.previous_digest_summary = previous_summary
 
         settings = get_settings()
         digest_record = Digest(
@@ -450,57 +496,20 @@ async def _run_one_digest(
             raise
 
 
-async def _analyze_async(
+async def _discover_work_items(
+    settings,
+    source: TraceSource,
+    sessionmaker,
     hours: int,
     limit: int,
     force: bool,
-    concurrency: int,
-    verbose: bool,
     trace_ids: list[str] | None,
-    run: _RunHandle | None = None,
-) -> None:
-    """Pull sessions from the configured source and run per-session LLM analysis.
-
-    Source clients may be sync, so blocking calls are pushed into a
-    threadpool via ``asyncio.to_thread``. The LLM analyzer is genuinely
-    async and runs concurrently up to ``concurrency``.
-    """
-    if verbose:
-        logging.basicConfig(level=logging.DEBUG)
-    else:
-        logging.basicConfig(level=logging.INFO)
-
-    settings = get_settings()
-
-    from cinsights.analysis.project_detection import ProjectDetector
-    from cinsights.analysis.session import SessionAnalyzer
-    from cinsights.db.engine import get_sessionmaker
+) -> list[tuple[str, str, object, list]]:
+    """Discover sessions from source and return work items to process."""
     from cinsights.db.models import CodingSession, SessionStatus
-    from cinsights.settings import get_llm_config
-    from cinsights.sources.factory import create_source
 
-    source = create_source(settings)
-    sessionmaker = get_sessionmaker()
-
-    llm = get_llm_config()
-    model = llm.build_model()
-    analyzer = SessionAnalyzer(model=model)
-    project_detector = ProjectDetector(model=model)
-
-    async with sessionmaker() as _kp_db:
-        kp_result = await _kp_db.exec(
-            select_fn(CodingSession.project_name)
-            .where(CodingSession.project_name.is_not(None))
-            .distinct()
-        )
-        known_projects = sorted({p for p in kp_result.all() if p})
-
-    # Collect traces to analyze
-    # Each work item: (trace_id, session_id, TraceData, spans)
     work_items: list[tuple[str, str, object, list]] = []
 
-    # Source clients may be sync — push blocking calls into a thread
-    # so the event loop stays free for the LLM analyzer.
     if trace_ids:
         from cinsights.sources.base import TraceData
 
@@ -513,7 +522,6 @@ async def _analyze_async(
                 f"Fetching {len(trace_ids)} ID(s) from {settings.source}...", total=None
             )
             for tid in trace_ids:
-                # Try as session ID first (fetches all spans across traces)
                 spans = await asyncio.to_thread(source.get_spans_by_session, tid)
                 if spans:
                     trace = TraceData(
@@ -524,7 +532,6 @@ async def _analyze_async(
                     )
                     work_items.append((tid, tid, trace, spans))
                 else:
-                    # Try as trace ID
                     spans = await asyncio.to_thread(source.get_spans, tid)
                     if spans:
                         trace = TraceData(
@@ -537,8 +544,42 @@ async def _analyze_async(
                     else:
                         console.print(f"  [yellow]No spans for {tid[:16]}...[/yellow]")
             progress.update(task, description=f"Found {len(work_items)} session(s) with spans")
+    elif force:
+        # Force mode: re-index all DB sessions belonging to the current source.
+        from cinsights.sources.base import TraceData
+
+        async with sessionmaker() as db:
+            all_sessions = (
+                await db.exec(
+                    select_fn(CodingSession)
+                    .where(CodingSession.source == str(settings.source))
+                    .order_by(col(CodingSession.start_time).desc())
+                    .limit(limit)
+                )
+            ).all()
+            session_ids = [cs.id for cs in all_sessions]
+
+        console.print(f"  Force re-indexing {len(session_ids)} {settings.source} session(s)...")
+
+        not_found = 0
+        for sid in session_ids:
+            spans = await asyncio.to_thread(source.get_spans_by_session, sid)
+            if not spans:
+                not_found += 1
+                continue
+            trace = TraceData(
+                trace_id=sid,
+                start_time=spans[0].start_time,
+                end_time=spans[-1].end_time,
+                spans=spans,
+            )
+            work_items.append((sid, sid, trace, spans))
+
+        if not_found:
+            console.print(
+                f"  [dim]{not_found} session(s) not found in source, skipped[/dim]"
+            )
     else:
-        # Discover all sessions from the configured source
         start_time = datetime.now(UTC) - timedelta(hours=hours)
 
         with Progress(
@@ -552,16 +593,8 @@ async def _analyze_async(
 
         if not discovered:
             console.print(f"[yellow]No sessions found in the last {hours} hours.[/yellow]")
-            return
+            return work_items
 
-        # Filter to sessions needing analysis. We re-analyze ANALYZED sessions only
-        # when both conditions hold:
-        #   1) the session has grown by at least 20% in span count, AND
-        #   2) the last new span is at least 60s old
-        # The first condition ignores trivial growth (1-2 new spans during a long
-        # session). The second condition lets sessions "settle" before we burn
-        # tokens re-analyzing them — a session that's actively being appended to
-        # right now will probably grow more in the next minute.
         REANALYZE_GROWTH_RATIO = 0.20
         REANALYZE_QUIET_SECONDS = 60.0
         now = datetime.now(UTC)
@@ -570,7 +603,7 @@ async def _analyze_async(
         async with sessionmaker() as db:
             for d in discovered[:limit]:
                 existing = await db.get(CodingSession, d.session_id)
-                if existing and existing.status == SessionStatus.ANALYZED and not force:
+                if existing and existing.status == SessionStatus.ANALYZED:
                     prior = max(existing.span_count, 1)
                     growth = (d.span_count - existing.span_count) / prior
                     last_seen = existing.last_span_time
@@ -605,49 +638,563 @@ async def _analyze_async(
         if skipped:
             console.print(f"  [dim]{skipped} session(s) unchanged or still active, skipped[/dim]")
 
+    return work_items
+
+
+def _get_project_name(
+    settings, source: TraceSource, trace_id: str, previous_tag: str | None,
+) -> tuple[str | None, str]:
+    """Determine project name for a session based on source type."""
+    if settings.source == SourceType.ENTIREIO and settings.entireio_repo_path:
+        from pathlib import Path
+
+        return Path(settings.entireio_repo_path).name, "From repo path"
+    if settings.source == SourceType.LOCAL:
+        from cinsights.sources.local import LocalSource
+
+        if isinstance(source, LocalSource):
+            return source.get_project_name(trace_id), "From directory"
+    return previous_tag, "Previous tag"
+
+
+async def _index_async(
+    hours: int,
+    limit: int,
+    force: bool,
+    verbose: bool,
+    trace_ids: list[str] | None = None,
+    run: _RunHandle | None = None,
+) -> None:
+    """Discover sessions, index metadata + quality metrics, score against baselines.
+
+    Zero LLM cost. This is the workhorse command — run frequently.
+    """
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+
+    settings = get_settings()
+
+    from cinsights.db.engine import get_sessionmaker
+    from cinsights.db.models import CodingSession, SessionBaseline
+    from cinsights.scoring import format_score_reason, score_session
+    from cinsights.sources.factory import create_source
+    from cinsights.trends import update_baseline, update_daily_trend
+
+    source = create_source(settings)
+    sessionmaker = get_sessionmaker()
+
+    work_items = await _discover_work_items(
+        settings, source, sessionmaker, hours, limit, force, trace_ids,
+    )
+
     if not work_items:
-        console.print("[yellow]No traces to analyze (all already analyzed).[/yellow]")
+        console.print("[yellow]No sessions to index.[/yellow]")
         return
 
     console.print(
-        f"\n[bold]Analyzing {len(work_items)} trace(s) (concurrency={concurrency})...[/bold]\n"
+        f"\n[bold]Indexing {len(work_items)} session(s)...[/bold]\n"
     )
 
+    # Fetch previous project tags
     async with sessionmaker() as _prev_db:
         previous_tags: dict[str, str | None] = {}
         for trace_id, _, _, _ in work_items:
             existing_row = await _prev_db.get(CodingSession, trace_id)
             previous_tags[trace_id] = existing_row.project_name if existing_row else None
 
-    analysis_items = [(trace, spans) for _, _, trace, spans in work_items]
+    # Index all sessions
+    indexed = 0
+    failed = 0
+    async with sessionmaker() as db:
+        for trace_id, session_id, trace, spans in work_items:
+            pn, _ = _get_project_name(settings, source, trace_id, previous_tags.get(trace_id))
+            try:
+                existing = await db.get(CodingSession, trace_id)
+                coding_session = await _store_indexed(
+                    db, trace_id, session_id, trace, spans, source, force, existing,
+                    project_name=pn,
+                )
+                await update_daily_trend(db, coding_session)
+                await update_baseline(db, coding_session)
+                await db.commit()
+                indexed += 1
+                console.print(f"  [cyan]○[/cyan] {trace_id[:12]} — indexed")
+            except Exception as e:
+                await db.rollback()
+                failed += 1
+                console.print(f"  [red]✗[/red] {trace_id[:12]} — {e}")
 
-    # For entireio source, use repo directory name as project (skip LLM detection)
-    if settings.source == SourceType.ENTIREIO and settings.entireio_repo_path:
-        from pathlib import Path
+    # Score all indexed sessions against baselines
+    console.print(f"\n[bold]Scoring {indexed} session(s)...[/bold]\n")
 
-        from cinsights.analysis.project_detection import ProjectGuess
+    scored_rows: list[tuple[str, float, str]] = []
+    async with sessionmaker() as db:
+        for trace_id, _, _, _ in work_items:
+            cs = await db.get(CodingSession, trace_id)
+            if not cs:
+                continue
+            user_id_val = cs.user_id or "unknown"
+            project_val = cs.project_name
+            baseline_id = f"{user_id_val}:{project_val or '_'}"
+            baseline = await db.get(SessionBaseline, baseline_id)
+            if not baseline:
+                baseline = SessionBaseline(
+                    id=baseline_id, user_id=user_id_val, project_name=project_val,
+                    tenant_id=cs.tenant_id, session_count=0,
+                )
+            total, breakdown = score_session(cs, baseline)
+            cs.interestingness_score = total
+            reason = format_score_reason(total, breakdown)
+            scored_rows.append((trace_id, total, reason))
+        await db.commit()
 
-        repo_name = Path(settings.entireio_repo_path).name
-        static_guess = ProjectGuess(
-            project_name=repo_name,
-            confidence="high",
-            reasoning="Derived from entireio repo path",
-        )
-        analysis_results = await analyzer.analyze_batch(analysis_items, max_concurrency=concurrency)
-        project_guesses = [static_guess] * len(work_items)
+    # Display scores
+    scored_rows.sort(key=lambda x: x[1], reverse=True)
+    for trace_id, score, reason in scored_rows:
+        if score >= 0.6:
+            console.print(f"  [bold red]★[/bold red] {trace_id[:12]} — {reason}")
+        elif score >= 0.4:
+            console.print(f"  [yellow]◆[/yellow] {trace_id[:12]} — {reason}")
+        else:
+            console.print(f"  [dim]·[/dim] {trace_id[:12]} — {reason}")
+
+    console.print()
+    table = Table(title="Index Summary")
+    table.add_column("Metric", style="bold")
+    table.add_column("Count", justify="right")
+    table.add_row("Indexed", str(indexed))
+    table.add_row("Failed", str(failed))
+    if scored_rows:
+        table.add_row("High interest (≥0.6)", str(sum(1 for _, s, _ in scored_rows if s >= 0.6)))
+        table.add_row("Medium interest (≥0.4)", str(sum(1 for _, s, _ in scored_rows if 0.4 <= s < 0.6)))
+        table.add_row("Low interest (<0.4)", str(sum(1 for _, s, _ in scored_rows if s < 0.4)))
+    console.print(table)
+
+
+async def _score_async(
+    user_id: str | None = None,
+    project: str | None = None,
+    min_score: float = 0.0,
+    verbose: bool = False,
+) -> None:
+    """Re-score existing sessions and display distribution + coverage.
+
+    Diagnostic command — does not re-index or trigger LLM analysis.
+    Shows score distribution, per-user and per-project coverage, and
+    highlights gaps where users/projects would get no analysis.
+    """
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG)
     else:
-        detect_items: list[tuple[str | None, list[SpanData]]] = [
+        logging.basicConfig(level=logging.INFO)
+
+    from collections import defaultdict
+
+    from cinsights.db.engine import get_sessionmaker
+    from cinsights.db.models import CodingSession, SessionBaseline, SessionStatus
+    from cinsights.scoring import format_score_reason, score_session
+
+    sessionmaker = get_sessionmaker()
+
+    query = select_fn(CodingSession).where(
+        col(CodingSession.status).in_([SessionStatus.INDEXED, SessionStatus.ANALYZED]),
+        # Skip sub-agent sessions (prompt_suggestion, compact, etc.)
+        ~col(CodingSession.id).like("%agent-aprompt_suggestion%"),
+        ~col(CodingSession.id).like("%agent-acompact%"),
+    )
+    if user_id:
+        query = query.where(CodingSession.user_id == user_id)
+    if project:
+        query = query.where(CodingSession.project_name == project)
+    query = query.order_by(col(CodingSession.start_time).desc()).limit(2000)
+
+    # Score all sessions
+    scored_rows: list[tuple[str, str | None, str | None, str, float, str]] = []
+
+    async with sessionmaker() as db:
+        result = await db.exec(query)
+        sessions = result.all()
+
+        for cs in sessions:
+            user_id_val = cs.user_id or "unknown"
+            project_val = cs.project_name
+            baseline_id = f"{user_id_val}:{project_val or '_'}"
+            baseline = await db.get(SessionBaseline, baseline_id)
+            if not baseline:
+                baseline = SessionBaseline(
+                    id=baseline_id, user_id=user_id_val, project_name=project_val,
+                    tenant_id=cs.tenant_id, session_count=0,
+                )
+            total, breakdown = score_session(cs, baseline)
+            cs.interestingness_score = total
+            reason = format_score_reason(total, breakdown)
+            scored_rows.append((cs.id, cs.user_id, cs.project_name, cs.status, total, reason))
+        await db.commit()
+
+    if not scored_rows:
+        console.print("[yellow]No sessions to score. Run cinsights index first.[/yellow]")
+        return
+
+    scored_rows.sort(key=lambda x: x[4], reverse=True)
+
+    # --- 1. Distribution table ---
+    thresholds = [0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.0]
+    dist_table = Table(title="Score Distribution")
+    dist_table.add_column("Threshold", justify="right")
+    dist_table.add_column("Sessions", justify="right")
+    dist_table.add_column("Unanalyzed", justify="right")
+    dist_table.add_column("Bar")
+
+    total_count = len(scored_rows)
+    for t in thresholds:
+        count = sum(1 for _, _, _, _, s, _ in scored_rows if s >= t)
+        unanalyzed = sum(1 for _, _, _, st, s, _ in scored_rows if s >= t and st == "indexed")
+        pct = count / total_count if total_count else 0
+        bar = "█" * int(pct * 30)
+        style = "bold red" if t >= 0.6 else "yellow" if t >= 0.4 else "dim"
+        dist_table.add_row(
+            f"[{style}]≥ {t:.1f}[/{style}]",
+            str(count),
+            str(unanalyzed) if unanalyzed else "-",
+            f"[{style}]{bar}[/{style}] {pct:.0%}",
+        )
+    console.print(dist_table)
+
+    # --- 2. Simulate selection at different thresholds ---
+    # Build CodingSession-like objects for select_for_analysis
+    from cinsights.db.models import CodingSession as CS
+    from cinsights.scoring import select_for_analysis
+
+    # Build scored tuples for select_for_analysis
+    session_objs: dict[str, CS] = {}
+    scored_tuples: list[tuple[CS, float, dict[str, float]]] = []
+
+    async with sessionmaker() as db:
+        for sid, uid, proj, status, score, _ in scored_rows:
+            cs = await db.get(CS, sid)
+            if cs:
+                session_objs[sid] = cs
+                scored_tuples.append((cs, score, {}))
+
+    # Compute per-session cost estimate
+    from cinsights.costs import estimate_total_cost
+    import math
+
+    # Cache per-session cost
+    _cost_cache: dict[str, float] = {}
+    for sid, cs in session_objs.items():
+        if cs.estimated_analysis_tokens:
+            c = estimate_total_cost(cs.estimated_analysis_tokens)
+            if c is not None:
+                _cost_cache[sid] = c
+
+    def _est_cost(sessions: list[CS]) -> float:
+        return sum(_cost_cache.get(s.id, 0.0) for s in sessions)
+
+    def _fmt_cost(cost: float) -> str:
+        if not cost:
+            return "-"
+        rounded = math.ceil(cost * 2) / 2  # round up to nearest $0.50
+        return f"~${rounded:.1f}" if rounded == int(rounded * 2) / 2 else f"~${rounded:.2f}"
+
+    sim_thresholds = [0.6, 0.5, 0.4, 0.3, 0.2]
+    sim_table = Table(title="What would be analyzed? (threshold → sessions selected)")
+    sim_table.add_column("--min-score", justify="right")
+    sim_table.add_column("By score", justify="right")
+    sim_table.add_column("+ coverage fills", justify="right")
+    sim_table.add_column("Total", justify="right", style="bold")
+    sim_table.add_column("% of all")
+    sim_table.add_column("Est. cost", justify="right")
+
+    for t in sim_thresholds:
+        to_analyze, _ = select_for_analysis(scored_tuples, min_score=t, min_per_user_project=2)
+        by_score_only = sum(1 for _, _, _, _, s, _ in scored_rows if s >= t)
+        fills = len(to_analyze) - by_score_only
+        pct = len(to_analyze) / total_count * 100 if total_count else 0
+        cost = _est_cost(to_analyze)
+        cost_str = _fmt_cost(cost)
+        if t == min_score:
+            sim_table.add_row(
+                f"[bold]{t:.1f}[/bold]",
+                str(by_score_only),
+                f"+{fills}" if fills > 0 else "-",
+                f"[bold]{len(to_analyze)}[/bold]",
+                f"{pct:.0f}%",
+                f"[bold]{cost_str}[/bold]",
+            )
+        else:
+            sim_table.add_row(
+                f"{t:.1f}",
+                str(by_score_only),
+                f"+{fills}" if fills > 0 else "-",
+                str(len(to_analyze)),
+                f"{pct:.0f}%",
+                cost_str,
+            )
+
+    console.print(sim_table)
+
+    # --- 3. Coverage detail at chosen threshold ---
+    to_analyze_ms, _ = select_for_analysis(scored_tuples, min_score=min_score, min_per_user_project=2)
+    selected_ids = {s.id for s in to_analyze_ms}
+
+    # Build nested project → user stats
+    by_proj_user: dict[str, dict[str, dict]] = defaultdict(
+        lambda: defaultdict(lambda: {"total": 0, "selected": 0, "analyzed": 0, "top_score": 0.0, "est_cost": 0.0})
+    )
+    for sid, uid, proj, status, score, _ in scored_rows:
+        p = proj or "Unknown"
+        u = uid or "unknown"
+        d = by_proj_user[p][u]
+        d["total"] += 1
+        d["top_score"] = max(d["top_score"], score)
+        if sid in selected_ids:
+            d["selected"] += 1
+            d["est_cost"] += _cost_cache.get(sid, 0.0)
+        if status == "analyzed":
+            d["analyzed"] += 1
+
+    def _pct(n: int, total: int) -> str:
+        return f"{n / total * 100:.0f}%" if total else "-"
+
+    def _score_style(score: float) -> str:
+        if score >= 0.6:
+            return "bold red"
+        if score >= min_score:
+            return "yellow"
+        return "dim"
+
+    cov_table = Table(title=f"Coverage (at --min-score {min_score})")
+    cov_table.add_column("Project", max_width=20)
+    cov_table.add_column("User", max_width=22)
+    cov_table.add_column("Total", justify="right")
+    cov_table.add_column("Selected", justify="right")
+    cov_table.add_column("Sel %", justify="right")
+    cov_table.add_column("Analyzed", justify="right")
+    cov_table.add_column("Ana %", justify="right")
+    cov_table.add_column("Top Score", justify="right")
+    cov_table.add_column("Est. Cost", justify="right")
+
+    sorted_projects = sorted(by_proj_user, key=lambda p: sum(u["total"] for u in by_proj_user[p].values()), reverse=True)
+    for i, proj in enumerate(sorted_projects):
+        users = by_proj_user[proj]
+        # Project totals
+        pt = sum(u["total"] for u in users.values())
+        ps = sum(u["selected"] for u in users.values())
+        pa = sum(u["analyzed"] for u in users.values())
+        pts = max(u["top_score"] for u in users.values())
+        pc = sum(u["est_cost"] for u in users.values())
+        style = _score_style(pts)
+
+        pc_str = f"${pc:.2f}" if pc else "-"
+        cov_table.add_row(
+            f"[bold]{proj}[/bold]", "",
+            f"[bold]{pt}[/bold]", f"[bold]{ps}[/bold]", f"[bold]{_pct(ps, pt)}[/bold]",
+            f"[bold]{pa}[/bold]", f"[bold]{_pct(pa, pt)}[/bold]",
+            f"[bold][{style}]{pts:.2f}[/{style}][/bold]",
+            f"[bold]{pc_str}[/bold]",
+        )
+        # User rows within project
+        sorted_users = sorted(users, key=lambda u: users[u]["total"], reverse=True)
+        for uid in sorted_users:
+            d = users[uid]
+            style = _score_style(d["top_score"])
+            uc_str = f"${d['est_cost']:.2f}" if d["est_cost"] else "-"
+            cov_table.add_row(
+                "", f"  {uid}",
+                str(d["total"]), str(d["selected"]), _pct(d["selected"], d["total"]),
+                str(d["analyzed"]), _pct(d["analyzed"], d["total"]),
+                f"[{style}]{d['top_score']:.2f}[/{style}]",
+                uc_str,
+            )
+        if i < len(sorted_projects) - 1:
+            cov_table.add_section()
+
+    console.print(cov_table)
+
+    # --- 4. Recommendation ---
+    unanalyzed = [s for s in to_analyze_ms if s.status.value == "indexed"]
+    if unanalyzed:
+        cost = _est_cost(unanalyzed)
+        cost_str = f", est. [bold]{_fmt_cost(cost)}[/bold]" if cost else ""
+        console.print(
+            f"\n  At [bold]--min-score {min_score}[/bold]: {len(to_analyze_ms)} sessions selected "
+            f"({len(unanalyzed)} unanalyzed{cost_str})"
+            f"\n  Run [cyan]cinsights analyze --min-score {min_score}[/cyan] to analyze them."
+        )
+
+
+async def _analyze_async(
+    hours: int,
+    limit: int,
+    force: bool,
+    concurrency: int,
+    verbose: bool,
+    trace_ids: list[str] | None,
+    run: _RunHandle | None = None,
+    min_score: float = 0.0,
+) -> None:
+    """LLM-analyze INDEXED sessions that meet the score threshold.
+
+    Sessions must already be indexed (via ``cinsights index``). This command
+    reads interestingness scores and selects sessions above ``min_score``
+    for LLM analysis.
+    """
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+
+    settings = get_settings()
+
+    from cinsights.analysis.project_detection import ProjectDetector
+    from cinsights.analysis.session import SessionAnalyzer
+    from cinsights.db.engine import get_sessionmaker
+    from cinsights.db.models import CodingSession, SessionStatus
+    from cinsights.settings import get_llm_config
+    from cinsights.sources.factory import create_source
+
+    source = create_source(settings)
+    sessionmaker = get_sessionmaker()
+
+    llm = get_llm_config()
+    model = llm.build_model()
+    analyzer = SessionAnalyzer(model=model)
+    project_detector = ProjectDetector(model=model)
+
+    async with sessionmaker() as _kp_db:
+        kp_result = await _kp_db.exec(
+            select_fn(CodingSession.project_name)
+            .where(CodingSession.project_name.is_not(None))
+            .distinct()
+        )
+        known_projects = sorted({p for p in kp_result.all() if p})
+
+    if trace_ids:
+        # Analyze specific sessions by ID
+        work_items = await _discover_work_items(
+            settings, source, sessionmaker, hours, limit, force, trace_ids,
+        )
+    else:
+        # Select INDEXED sessions using scoring + coverage fills
+        from cinsights.scoring import select_for_analysis
+
+        query = (
+            select_fn(CodingSession)
+            .where(CodingSession.status == SessionStatus.INDEXED)
+            .where(CodingSession.interestingness_score.isnot(None))
+            .order_by(col(CodingSession.interestingness_score).desc())
+        )
+
+        async with sessionmaker() as db:
+            result = await db.exec(query)
+            all_indexed = result.all()
+
+        if not all_indexed:
+            console.print(f"[yellow]No scored INDEXED sessions found.[/yellow]")
+            console.print("  Run [cyan]cinsights index[/cyan] first to discover and score sessions.")
+            return
+
+        # Build scored tuples and apply selection with coverage fills
+        scored_tuples = [(s, s.interestingness_score or 0.0, {}) for s in all_indexed]
+        candidates, _ = select_for_analysis(scored_tuples, min_score=min_score)
+        candidates = candidates[:limit]
+
+        if not candidates:
+            console.print(f"[yellow]No sessions selected at --min-score {min_score}.[/yellow]")
+            return
+
+        by_score = sum(1 for s in candidates if (s.interestingness_score or 0) >= min_score)
+        by_fill = len(candidates) - by_score
+        console.print(
+            f"\n[bold]Selected {len(candidates)} INDEXED session(s)[/bold] "
+            f"({by_score} by score ≥ {min_score}, {by_fill} by coverage fills)\n"
+        )
+
+        work_items = []
+        # Build source instances per source type to load spans
+        from cinsights.sources.base import TraceData
+        from cinsights.sources.factory import create_source as _create_source
+
+        source_cache: dict[str, TraceSource] = {str(settings.source): source}
+
+        def _get_source(source_name: str) -> TraceSource | None:
+            if source_name in source_cache:
+                return source_cache[source_name]
+            try:
+                from copy import copy
+
+                s = copy(settings)
+                s.source = SourceType(source_name)
+                src = _create_source(s)
+                source_cache[source_name] = src
+                return src
+            except Exception:
+                return None
+
+        for cs in candidates:
+            src = _get_source(cs.source) or source
+            spans = await asyncio.to_thread(src.get_spans_by_session, cs.id)
+            if spans:
+                trace = TraceData(
+                    trace_id=cs.id,
+                    start_time=spans[0].start_time,
+                    end_time=spans[-1].end_time,
+                    spans=spans,
+                )
+                work_items.append((cs.id, cs.id, trace, spans))
+                console.print(
+                    f"  [yellow]◆[/yellow] {cs.id[:12]} — score={cs.interestingness_score:.2f}, "
+                    f"user={cs.user_id or '-'}, project={cs.project_name or '-'}"
+                )
+
+    if not work_items:
+        console.print("[yellow]No sessions to analyze.[/yellow]")
+        return
+
+    # Fetch previous project tags
+    async with sessionmaker() as _prev_db:
+        previous_tags: dict[str, str | None] = {}
+        for trace_id, _, _, _ in work_items:
+            existing_row = await _prev_db.get(CodingSession, trace_id)
+            previous_tags[trace_id] = existing_row.project_name if existing_row else None
+
+    console.print(
+        f"\n[bold]Analyzing {len(work_items)} session(s) (concurrency={concurrency})...[/bold]\n"
+    )
+
+    analysis_input = [(trace, spans) for _, _, trace, spans in work_items]
+
+    # Project detection for phoenix source (others already have project names)
+    if settings.source not in (SourceType.ENTIREIO, SourceType.LOCAL):
+        detect_items_list: list[tuple[str | None, list[SpanData]]] = [
             (previous_tags[trace_id], _filter_tool_spans(spans))
             for trace_id, _, _, spans in work_items
         ]
         analysis_results, project_guesses = await asyncio.gather(
-            analyzer.analyze_batch(analysis_items, max_concurrency=concurrency),
+            analyzer.analyze_batch(analysis_input, max_concurrency=concurrency),
             project_detector.detect_batch(
-                detect_items, known_projects, max_concurrency=concurrency
+                detect_items_list, known_projects, max_concurrency=concurrency
             ),
         )
+    else:
+        from cinsights.analysis.project_detection import ProjectGuess
 
-    # Store results in DB
+        analysis_results = await analyzer.analyze_batch(analysis_input, max_concurrency=concurrency)
+        project_guesses = [
+            ProjectGuess(
+                project_name=_get_project_name(settings, source, tid, previous_tags.get(tid))[0],
+                confidence="high",
+                reasoning="From source",
+            )
+            for tid, _, _, _ in work_items
+        ]
+
+    # Store LLM results
+    from cinsights.trends import update_daily_trend
+
     analyzed = 0
     failed = 0
     async with sessionmaker() as db:
@@ -655,19 +1202,13 @@ async def _analyze_async(
             work_items, analysis_results, project_guesses, strict=True
         ):
             try:
-                existing = await db.get(CodingSession, trace_id)
-                n_insights = await _store_analysis(
-                    db,
-                    trace_id,
-                    session_id,
-                    trace,
-                    spans,
-                    result,
-                    source,
-                    force,
-                    existing,
-                    project_guess=project_guess,
-                )
+                coding_session = await db.get(CodingSession, trace_id)
+                if not coding_session:
+                    continue
+                if project_guess.project_name and not coding_session.project_name:
+                    coding_session.project_name = project_guess.project_name
+                n_insights = await _store_insights(db, coding_session, result)
+                await update_daily_trend(db, coding_session)
                 await db.commit()
                 analyzed += 1
                 if run is not None:
@@ -687,31 +1228,27 @@ async def _analyze_async(
                 failed += 1
                 console.print(f"  [red]✗[/red] {trace_id[:12]} — {e}")
 
-    # Summary
     console.print()
     table = Table(title="Analysis Summary")
     table.add_column("Metric", style="bold")
     table.add_column("Count", justify="right")
     table.add_row("Analyzed", str(analyzed))
-    table.add_row("Skipped", str(len(analysis_items) - analyzed - failed))
     table.add_row("Failed", str(failed))
     console.print(table)
 
 
 async def _digest_async(
+    scope_type: str,
+    scope_value: str,
     days: int,
-    user_id: str | None,
-    project: str | None,
     stats_only: bool,
     verbose: bool,
     run: _RunHandle | None = None,
 ) -> None:
-    """Generate global + per-project digests for the given window, concurrently.
+    """Generate a digest for a project or developer.
 
-    When ``project`` is ``None`` we discover every distinct project in scope
-    and run one digest per project plus a "global" digest, all in parallel via
-    ``asyncio.gather``. Each ``_run_one_digest`` opens its own AsyncSession so
-    the concurrency is real (not blocked on single-session serialization).
+    ``scope_type`` is ``"project"`` or ``"user"``. ``scope_value`` is the
+    project name or user ID respectively.
     """
     if verbose:
         logging.basicConfig(level=logging.DEBUG)
@@ -721,31 +1258,18 @@ async def _digest_async(
     settings = get_settings()
 
     from cinsights.db.engine import get_sessionmaker
-    from cinsights.db.models import CodingSession, SessionStatus
 
     end = datetime.now(UTC)
     start = end - timedelta(days=days)
     sessionmaker = get_sessionmaker()
 
-    # Build scope list. Explicit --project always wins; otherwise we run a global
-    # digest *and* one per detected project, in parallel.
-    if project:
-        scopes: list[str | None] = [project]
+    if scope_type == "project":
+        scope_project, user_id = scope_value, None
+        label = scope_value
     else:
-        async with sessionmaker() as db:
-            project_rows_result = await db.exec(
-                select_fn(CodingSession.project_name)
-                .where(CodingSession.project_name.is_not(None))
-                .where(CodingSession.start_time >= start)
-                .where(CodingSession.start_time <= end)
-                .where(CodingSession.status == SessionStatus.ANALYZED)
-                .group_by(CodingSession.project_name)
-            )
-            project_rows = project_rows_result.all()
-        # Global first, then projects in stable order
-        scopes = [None, *sorted(p for p in project_rows if p)]
+        scope_project, user_id = None, scope_value
+        label = f"user:{scope_value}"
 
-    # Build the analyzer once and share it across scopes (just an HTTP client).
     analyzer = None
     if not stats_only:
         from cinsights.analysis.digest import DigestAnalyzer
@@ -754,61 +1278,32 @@ async def _digest_async(
         analyzer = DigestAnalyzer(model=get_llm_config().build_model())
 
     console.print(
-        f"[bold]Running {len(scopes)} digest(s) for last {days} days (concurrent)...[/bold]\n"
+        f"[bold]Running digest for {label} (last {days} days)...[/bold]\n"
     )
 
-    tasks = [
-        _run_one_digest(
-            sessionmaker=sessionmaker,
-            analyzer=analyzer,
-            scope_project=scope,
-            user_id=user_id,
-            start=start,
-            end=end,
-            stats_only=stats_only,
-        )
-        for scope in scopes
-    ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    result = await _run_one_digest(
+        sessionmaker=sessionmaker,
+        analyzer=analyzer,
+        scope_project=scope_project,
+        user_id=user_id,
+        start=start,
+        end=end,
+        stats_only=stats_only,
+    )
 
-    # Summarize. Each non-exception result is (status, prompt_tokens, completion_tokens).
-    def _status_of(r: object) -> object:
-        return r[0] if isinstance(r, tuple) else r
+    if run is not None and isinstance(result, tuple) and result[0] is True:
+        run.digests_generated += 1
+        run.total_prompt_tokens += result[1]
+        run.total_completion_tokens += result[2]
 
-    succeeded = sum(1 for r in results if _status_of(r) is True)
-    skipped = sum(1 for r in results if _status_of(r) in ("empty", "stats_only", "unchanged"))
-    failed = [
-        (scope, r) for scope, r in zip(scopes, results, strict=True) if isinstance(r, Exception)
-    ]
-
-    if run is not None:
-        for r in results:
-            if isinstance(r, tuple) and r[0] is True:
-                run.digests_generated += 1
-                run.total_prompt_tokens += r[1]
-                run.total_completion_tokens += r[2]
-
-    console.print()
-    table = Table(title="Digest Summary")
-    table.add_column("Scope", style="bold")
-    table.add_column("Result")
-    for scope, result in zip(scopes, results, strict=True):
-        label = scope or "global"
-        status = _status_of(result)
-        if status is True:
-            table.add_row(label, "[green]✓ done[/green]")
-        elif status == "empty":
-            table.add_row(label, "[yellow]no sessions[/yellow]")
-        elif status == "stats_only":
-            table.add_row(label, "[cyan]· stats only[/cyan]")
-        elif status == "unchanged":
-            table.add_row(label, "[dim]· unchanged, reused[/dim]")
-        elif isinstance(result, Exception):
-            table.add_row(label, f"[red]✗ {result}[/red]")
-    console.print(table)
-
-    if not stats_only and succeeded:
-        console.print(f"\n  View at: [bold]http://localhost:{settings.port}/report[/bold]")
-
-    if failed and not succeeded and not skipped:
-        raise typer.Exit(1)
+    status = result[0] if isinstance(result, tuple) else result
+    if status is True:
+        console.print(f"  [green]✓[/green] {label} — done")
+        url_path = f"/projects/{scope_value}" if scope_type == "project" else f"/users/{scope_value}"
+        console.print(f"\n  View at: [bold]http://localhost:{settings.port}{url_path}[/bold]")
+    elif status == "empty":
+        console.print(f"  [yellow]·[/yellow] {label} — no sessions")
+    elif status == "stats_only":
+        console.print(f"  [cyan]·[/cyan] {label} — stats only")
+    elif status == "unchanged":
+        console.print(f"  [dim]·[/dim] {label} — unchanged, reused")

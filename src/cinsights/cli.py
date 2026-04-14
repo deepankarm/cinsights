@@ -6,7 +6,7 @@ to the async pipeline. All real work lives in:
 
 - ``cinsights.runtime`` — observability primitives (``_track_run``,
   ``_RunHandle``, ``console``, ``_content_hash``)
-- ``cinsights.pipeline`` — the analyze + digest orchestration coroutines
+- ``cinsights.pipeline`` — the index, score, analyze, and digest coroutines
 """
 
 from __future__ import annotations
@@ -15,52 +15,44 @@ import asyncio
 
 import typer
 
-from cinsights.pipeline import _analyze_async, _digest_async
+from cinsights.pipeline import _analyze_async, _digest_async, _index_async, _score_async
 from cinsights.runtime import _track_run
 from cinsights.settings import get_settings
 
 app = typer.Typer(name="cinsights", help="LLM-powered insights from coding agent sessions.")
 
 
-def _apply_source_overrides(source: str | None, repo: str | None, paths: str | None = None) -> None:
-    """Override settings.source, entireio_repo_path, and local_paths from CLI flags.
-
-    Uses lru_cache mutation so the rest of the pipeline sees updated values.
-    """
-    if source or repo or paths:
+def _apply_source_overrides(source: str | None, repo: str | None) -> None:
+    """Override settings.source and entireio_repo_path from CLI flags."""
+    if source or repo:
         settings = get_settings()
         if source:
             settings.source = source
         if repo:
             settings.entireio_repo_path = repo
-        if paths:
-            settings.local_paths = paths
 
 
 @app.command()
-def analyze(
-    hours: int = typer.Option(24, help="Analyze sessions from the last N hours."),
-    limit: int = typer.Option(50, help="Max sessions to analyze."),
-    force: bool = typer.Option(False, help="Re-analyze already-analyzed sessions."),
-    concurrency: int = typer.Option(5, help="Max concurrent LLM analysis requests."),
+def index(
+    hours: int = typer.Option(24, help="Index sessions from the last N hours."),
+    limit: int = typer.Option(50, help="Max sessions to index."),
+    force: bool = typer.Option(False, help="Re-index already-indexed sessions."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
     source: str | None = typer.Option(None, help="Override source (phoenix, entireio, local)."),
     repo: str | None = typer.Option(None, help="Repo path for entireio source."),
-    paths: str | None = typer.Option(None, help="Comma-separated dirs for local source."),
     trace_ids: list[str] | None = typer.Argument(
-        None, help="Specific trace/session IDs to analyze."
+        None, help="Specific trace/session IDs to index."
     ),
 ) -> None:
-    """Pull sessions from a source, run LLM analysis, store insights."""
-    _apply_source_overrides(source, repo, paths)
+    """Discover sessions, extract metadata + quality metrics, score against baselines. Zero LLM cost."""
+    _apply_source_overrides(source, repo)
 
     async def _entry() -> None:
         async with _track_run("analyze") as run:
-            await _analyze_async(
+            await _index_async(
                 hours=hours,
                 limit=limit,
                 force=force,
-                concurrency=concurrency,
                 verbose=verbose,
                 trace_ids=trace_ids,
                 run=run,
@@ -70,21 +62,84 @@ def analyze(
 
 
 @app.command()
+def score(
+    user_id: str | None = typer.Option(None, "--user", help="Filter by user ID."),
+    project: str | None = typer.Option(None, "--project", help="Filter by project name."),
+    min_score: float = typer.Option(0.0, "--min-score", help="Show sessions above this score."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
+) -> None:
+    """Re-score existing sessions, show distribution and coverage gaps. Zero LLM cost."""
+
+    async def _entry() -> None:
+        await _score_async(
+            user_id=user_id,
+            project=project,
+            min_score=min_score,
+            verbose=verbose,
+        )
+
+    asyncio.run(_entry())
+
+
+@app.command()
+def analyze(
+    limit: int = typer.Option(50, help="Max sessions to analyze."),
+    force: bool = typer.Option(False, help="Re-analyze already-analyzed sessions."),
+    concurrency: int = typer.Option(5, help="Max concurrent LLM analysis requests."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
+    source: str | None = typer.Option(None, help="Override source (phoenix, entireio, local)."),
+    repo: str | None = typer.Option(None, help="Repo path for entireio source."),
+    min_score: float = typer.Option(0.0, "--min-score", help="Only analyze sessions with score >= this."),
+    trace_ids: list[str] | None = typer.Argument(
+        None, help="Specific trace/session IDs to analyze."
+    ),
+) -> None:
+    """LLM-analyze INDEXED sessions above the score threshold. Costs tokens."""
+    _apply_source_overrides(source, repo)
+
+    async def _entry() -> None:
+        async with _track_run("analyze") as run:
+            run.extra["source"] = source
+            run.extra["min_score"] = min_score
+            run.extra["limit"] = limit
+            await _analyze_async(
+                hours=24,
+                limit=limit,
+                force=force,
+                concurrency=concurrency,
+                verbose=verbose,
+                trace_ids=trace_ids,
+                run=run,
+                min_score=min_score,
+            )
+
+    asyncio.run(_entry())
+
+
+@app.command()
 def digest(
+    scope_type: str = typer.Argument(help="Scope: 'project' or 'user'."),
+    scope_value: str = typer.Argument(help="Project name or user ID."),
     days: int = typer.Option(7, help="Analyze sessions from the last N days."),
-    user_id: str | None = typer.Option(None, help="Filter by user ID."),
-    project: str | None = typer.Option(None, help="Filter by project name."),
     stats_only: bool = typer.Option(False, "--stats-only", help="Only compute stats (no LLM)."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
 ) -> None:
-    """Generate a cross-session insights report."""
+    """Generate insights for a project or developer.
+
+    Usage: cinsights digest project <name> | cinsights digest user <id>
+    """
+    if scope_type not in ("project", "user"):
+        raise typer.BadParameter(f"scope_type must be 'project' or 'user', got '{scope_type}'")
 
     async def _entry() -> None:
         async with _track_run("digest") as run:
+            run.extra["scope_type"] = scope_type
+            run.extra[scope_type] = scope_value
+            run.extra["days"] = days
             await _digest_async(
+                scope_type=scope_type,
+                scope_value=scope_value,
                 days=days,
-                user_id=user_id,
-                project=project,
                 stats_only=stats_only,
                 verbose=verbose,
                 run=run,
@@ -95,21 +150,33 @@ def digest(
 
 @app.command()
 def refresh(
-    hours: int = typer.Option(24, help="Analyze sessions from the last N hours."),
+    hours: int = typer.Option(24, help="Index sessions from the last N hours."),
     days: int = typer.Option(7, help="Digest window in days."),
-    limit: int = typer.Option(50, help="Max sessions to analyze."),
-    force: bool = typer.Option(False, help="Re-analyze already-analyzed sessions."),
+    limit: int = typer.Option(50, help="Max sessions to process."),
+    force: bool = typer.Option(False, help="Re-process already-processed sessions."),
     concurrency: int = typer.Option(5, help="Max concurrent LLM analysis requests."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
     source: str | None = typer.Option(None, help="Override source (phoenix, entireio, local)."),
     repo: str | None = typer.Option(None, help="Repo path for entireio source."),
-    paths: str | None = typer.Option(None, help="Comma-separated dirs for local source."),
+    min_score: float = typer.Option(0.4, "--min-score", help="Only analyze sessions with score >= this."),
 ) -> None:
-    """Refresh everything: pull + analyze new sessions, then regenerate all digests."""
-    _apply_source_overrides(source, repo, paths)
+    """Refresh: index → analyze (scored). Run digest separately per project/user."""
+    _apply_source_overrides(source, repo)
 
     async def _entry() -> None:
         async with _track_run("refresh") as run:
+            run.extra["source"] = source
+            run.extra["min_score"] = min_score
+            await _index_async(
+                hours=hours,
+                limit=limit,
+                force=force,
+                verbose=verbose,
+                run=run,
+            )
+            from cinsights.runtime import console
+
+            console.print()
             await _analyze_async(
                 hours=hours,
                 limit=limit,
@@ -118,17 +185,7 @@ def refresh(
                 verbose=verbose,
                 trace_ids=None,
                 run=run,
-            )
-            from cinsights.runtime import console
-
-            console.print()
-            await _digest_async(
-                days=days,
-                user_id=None,
-                project=None,
-                stats_only=False,
-                verbose=verbose,
-                run=run,
+                min_score=min_score,
             )
 
     asyncio.run(_entry())
@@ -169,9 +226,10 @@ def setup(
     import json
 
     from cinsights.runtime import console
-    from cinsights.settings import LLMConfig, Paths
+    from cinsights.settings import AppConfig, LLMConfig, Paths
 
-    llm = LLMConfig.load()
+    app_config = AppConfig.load()
+    llm = app_config.llm
 
     if validate:
         console.print(
@@ -211,18 +269,18 @@ def setup(
             console.print("[red]Invalid JSON for extra headers.[/red]")
             raise typer.Exit(1) from e
 
-    new_config = LLMConfig(
+    app_config.llm = LLMConfig(
         provider=provider,
         model=model,
         base_url=base_url or None,
         extra_headers=headers_dict,
     )
-    new_config.save()
+    app_config.save()
     console.print(f"\n  Configuration written to [bold]{Paths.config_file}[/bold]")
 
     # Offer to test
     if typer.confirm("Test connection?", default=True):
-        _test_connection(new_config)
+        _test_connection(app_config.llm)
 
 
 def _test_connection(llm) -> None:

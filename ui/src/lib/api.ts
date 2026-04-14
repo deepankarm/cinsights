@@ -10,9 +10,13 @@ async function fetchJSON<T>(url: string): Promise<T> {
 	return res.json();
 }
 
-export async function getSessions(skip = 0, limit = 20, status?: string): Promise<SessionRead[]> {
+export async function getSessions(
+	skip = 0, limit = 100, status?: string, userId?: string, projectName?: string
+): Promise<SessionRead[]> {
 	let url = `${BASE}/?skip=${skip}&limit=${limit}`;
 	if (status) url += `&status=${status}`;
+	if (userId) url += `&user_id=${encodeURIComponent(userId)}`;
+	if (projectName) url += `&project_name=${encodeURIComponent(projectName)}`;
 	return fetchJSON(url);
 }
 
@@ -31,13 +35,12 @@ export async function triggerAnalysis(id: string): Promise<SessionDetail> {
 }
 
 // Digest API
-export async function getDigests(project?: string): Promise<DigestRead[]> {
+export async function getDigests(project?: string, userId?: string): Promise<DigestRead[]> {
 	let url = '/api/digests/';
-	if (project) {
-		url += `?project=${encodeURIComponent(project)}`;
-	} else {
-		url += '?global_only=true';
-	}
+	const params: string[] = [];
+	if (project) params.push(`project=${encodeURIComponent(project)}`);
+	if (userId) params.push(`user_id=${encodeURIComponent(userId)}`);
+	if (params.length) url += `?${params.join('&')}`;
 	return fetchJSON(url);
 }
 
@@ -49,6 +52,9 @@ export async function getDigest(id: string): Promise<DigestDetail> {
 export interface ProjectRead {
 	name: string;
 	session_count: number;
+	analyzed_count: number;
+	developer_count: number;
+	active_days: number;
 	total_tokens: number;
 	total_tool_calls: number;
 	top_tools: string[];
@@ -68,4 +74,176 @@ export async function tagSession(sessionId: string, projectName: string): Promis
 		body: JSON.stringify({ project_name: projectName }),
 	});
 	if (!res.ok) throw new Error(`Tag failed: ${res.status}`);
+}
+
+// Trends API
+export interface TrendPoint {
+	date: string;
+	session_count: number;
+	analyzed_count: number;
+	total_tokens: number;
+	total_tool_calls: number;
+	avg_read_edit_ratio: number | null;
+	avg_edits_without_read_pct: number | null;
+	avg_error_rate: number | null;
+	avg_research_mutation_ratio: number | null;
+	avg_session_duration_ms: number | null;
+	agent_distribution_json: string | null;
+}
+
+export interface BaselineRead {
+	id: string;
+	user_id: string;
+	project_name: string | null;
+	session_count: number;
+	avg_turns: number;
+	avg_tool_count: number;
+	avg_read_edit_ratio: number;
+	avg_error_rate: number;
+	avg_duration_ms: number;
+}
+
+export async function getTrends(project?: string, userId?: string, days = 90): Promise<TrendPoint[]> {
+	let url = `/api/trends/daily?days=${days}`;
+	if (project) url += `&project=${encodeURIComponent(project)}`;
+	if (userId) url += `&user_id=${encodeURIComponent(userId)}`;
+	return fetchJSON(url);
+}
+
+export interface TokenDistribution {
+	q1: number;
+	median: number;
+	q3: number;
+	whisker_low: number;
+	whisker_high: number;
+	max_val: number;
+	count: number;
+}
+
+export async function getTokenDistribution(project?: string, userId?: string): Promise<TokenDistribution | null> {
+	let url = '/api/trends/token-distribution';
+	const params: string[] = [];
+	if (project) params.push(`project=${encodeURIComponent(project)}`);
+	if (userId) params.push(`user_id=${encodeURIComponent(userId)}`);
+	if (params.length) url += `?${params.join('&')}`;
+	return fetchJSON(url);
+}
+
+export async function getBaselines(project?: string): Promise<BaselineRead[]> {
+	let url = '/api/trends/baselines';
+	if (project) url += `?project=${encodeURIComponent(project)}`;
+	return fetchJSON(url);
+}
+
+// Users API
+export interface UserSummary {
+	user_id: string;
+	display_name: string;
+	session_count: number;
+	analyzed_count: number;
+	indexed_count: number;
+	avg_read_edit_ratio: number | null;
+	avg_edits_without_read_pct: number | null;
+	avg_research_mutation_ratio: number | null;
+	avg_write_vs_edit_pct: number | null;
+	avg_error_rate: number | null;
+	avg_repeated_edits: number | null;
+	avg_subagent_spawn_rate: number | null;
+	avg_tokens_per_useful_edit: number | null;
+	avg_context_pressure: number | null;
+	avg_turn_count: number | null;
+	avg_tool_calls_per_turn: number | null;
+	avg_duration_ms: number | null;
+	total_tokens: number;
+	projects: string[];
+	agents: string[];
+	sources: string[];
+}
+
+// Doctor API
+export interface RefreshRunRead {
+	id: string;
+	command: string;
+	started_at: string;
+	completed_at: string | null;
+	status: string;
+	sessions_analyzed: number;
+	digests_generated: number;
+	total_prompt_tokens: number;
+	total_completion_tokens: number;
+	estimated_cost_usd: number | null;
+	wall_seconds: number | null;
+	db_size_bytes: number | null;
+	error_message: string | null;
+	metadata: Record<string, string | number | null> | null;
+}
+
+export interface DbSizePoint { timestamp: string; bytes: number; }
+
+export interface ConfigLimit { key: string; value: number; description: string; }
+export interface ConfigSnapshot { model: string; provider: string; limits: ConfigLimit[]; }
+
+export interface SystemHealthResponse {
+	total_sessions: number;
+	indexed_sessions: number;
+	analyzed_sessions: number;
+	failed_sessions: number;
+	total_projects: number;
+	total_developers: number;
+	db_size_bytes: number | null;
+	db_size_history: DbSizePoint[];
+	last_refresh: RefreshRunRead | null;
+	last_analyze: RefreshRunRead | null;
+	last_digest: RefreshRunRead | null;
+	config: ConfigSnapshot;
+}
+
+export interface CommandCost { command: string; prompt_tokens: number; completion_tokens: number; estimated_cost_usd: number | null; run_count: number; }
+export interface ProjectCost { project_name: string; prompt_tokens: number; completion_tokens: number; estimated_cost_usd: number | null; session_count: number; }
+export interface DailyCost { date: string; prompt_tokens: number; completion_tokens: number; }
+
+export interface CostSummaryResponse {
+	total_prompt_tokens: number;
+	total_completion_tokens: number;
+	estimated_cost_usd: number | null;
+	by_command: CommandCost[];
+	by_project: ProjectCost[];
+	daily_trend: DailyCost[];
+}
+
+export interface ProjectCoverage { project_name: string; total_sessions: number; indexed: number; analyzed: number; failed: number; coverage_pct: number; avg_interestingness: number | null; }
+export interface ScoreBucket { bucket: string; count: number; }
+
+export interface CoverageResponse {
+	projects: ProjectCoverage[];
+	score_distribution: ScoreBucket[];
+}
+
+export async function getDoctorHealth(): Promise<SystemHealthResponse> {
+	return fetchJSON('/api/doctor/health');
+}
+
+export async function getDoctorRuns(command?: string, status?: string, skip = 0, limit = 50): Promise<RefreshRunRead[]> {
+	const params: string[] = [`skip=${skip}`, `limit=${limit}`];
+	if (command) params.push(`command=${command}`);
+	if (status) params.push(`status=${status}`);
+	return fetchJSON(`/api/doctor/runs?${params.join('&')}`);
+}
+
+export async function getDoctorCost(): Promise<CostSummaryResponse> {
+	return fetchJSON('/api/doctor/cost');
+}
+
+export async function getDoctorCoverage(): Promise<CoverageResponse> {
+	return fetchJSON('/api/doctor/coverage');
+}
+
+export async function getUsers(start?: string, end?: string, project?: string): Promise<UserSummary[]> {
+	let url = '/api/users/';
+	const params: string[] = [];
+	if (start) params.push(`start=${start}`);
+	if (end) params.push(`end=${end}`);
+	if (project) params.push(`project=${encodeURIComponent(project)}`);
+	if (params.length) url += `?${params.join('&')}`;
+	return fetchJSON(url);
 }

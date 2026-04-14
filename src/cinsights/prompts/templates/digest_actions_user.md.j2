@@ -1,4 +1,14 @@
-## Period: {{ period_start }} to {{ period_end }} ({{ session_count }} sessions)
+## Period: {{ period_start }} to {{ period_end }} ({{ session_count }} sessions{% if analyzed_count < session_count %}, {{ analyzed_count }} analyzed{% endif %})
+
+{% if cost_context %}
+## Cost Context
+- Estimated total cost: ${{ "%.2f" | format(cost_context.total_estimated_cost_usd) if cost_context.total_estimated_cost_usd else 'N/A' }}
+- Avg cost/session: ${{ "%.3f" | format(cost_context.avg_cost_per_session_usd) if cost_context.avg_cost_per_session_usd else 'N/A' }}
+- Avg duration/session: {{ cost_context.avg_duration_per_session_min }}min
+- Total tool errors: {{ cost_context.total_errors }}
+- Estimated rework time from errors: ~{{ cost_context.error_rework_estimate_min | int }}min (rough: {{ cost_context.total_errors }} errors × ~2min recovery each)
+Use these numbers as anchors for impact estimates. All cost calculations are approximate.
+{% endif %}
 
 {% if project_breakdown %}
 ## Projects
@@ -34,8 +44,15 @@
 ## CLAUDE.md
 {% if has_claude_md %}Project has a CLAUDE.md file.{% else %}Project does NOT have a CLAUDE.md file.{% endif %}
 
-## Session Health
-{% for h in session_health %}
+{% if weekly_trends and weekly_trends | length > 1 %}
+## Weekly Quality Trends
+{% for w in weekly_trends %}
+- **{{ w.week }}** ({{ w.session_count }} sessions): R:E={{ w.avg_read_edit_ratio if w.avg_read_edit_ratio is not none else '—' }}, errors={{ w.avg_error_rate if w.avg_error_rate is not none else '—' }}%
+{% endfor %}
+{% endif %}
+
+## Session Health ({{ session_health | length }} sessions{% if session_health | length > max_health %}, showing top {{ max_health }}{% endif %})
+{% for h in session_health[:max_health] %}
 - Grade {{ h.grade }} | {{ h.duration_minutes }}min | {{ h.tool_count }} tools | {{ h.error_count }} errors | {{ h.error_rate * 100 | int }}% error rate
 {% endfor %}
 

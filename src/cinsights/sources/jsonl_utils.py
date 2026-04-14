@@ -48,6 +48,9 @@ def extract_tool_results(message: dict) -> dict[str, dict]:
 
 def parse_lines(data: bytes) -> list[dict]:
     """Parse JSONL bytes into a list of dicts, skipping non-conversation lines."""
+    # Ensure we can decode as UTF-8; replace errors for robustness
+    if isinstance(data, bytes):
+        data = data.decode("utf-8", errors="replace").encode("utf-8")
     lines = []
     for raw_line in data.split(b"\n"):
         raw_line = raw_line.strip()
@@ -56,6 +59,8 @@ def parse_lines(data: bytes) -> list[dict]:
         try:
             obj = json.loads(raw_line)
         except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
             continue
         line_type = obj.get("type", "")
         if line_type in SKIP_TYPES:
