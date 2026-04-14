@@ -25,9 +25,11 @@
 	let workAreas = $derived(getSection('work_areas')?.metadata as Array<{name: string; session_count: number; description: string}> | undefined);
 	let persona = $derived(getSection('developer_persona'));
 	let wins = $derived(getSection('impressive_wins')?.metadata as Array<{title: string; description: string; evidence: string}> | undefined);
-	let frictions = $derived(getSection('friction_analysis')?.metadata as Array<{category: string; description: string; examples: string[]; severity: string}> | undefined);
+	let frictions = $derived(getSection('friction_analysis')?.metadata as Array<{category: string; description: string; examples: string[]; severity: string; estimated_impact?: string}> | undefined);
 	let claudeMd = $derived(getSection('claude_md_suggestions')?.metadata as Array<{rule: string; why: string}> | undefined);
 	let features = $derived(getSection('feature_recommendations')?.metadata as Array<{feature: string; title: string; why_for_you: string; setup_code: string | null}> | undefined);
+	let recommendations = $derived(getSection('recommendations')?.metadata as Array<{name: string; description: string; rationale: string; starter_prompt: string | null; difficulty: string}> | undefined);
+	// Legacy support for old digests
 	let patterns = $derived(getSection('workflow_patterns')?.metadata as Array<{name: string; description: string; rationale: string; starter_prompt: string}> | undefined);
 	let ambitious = $derived(getSection('ambitious_workflows')?.metadata as Array<{name: string; description: string; rationale: string; starter_prompt: string}> | undefined);
 </script>
@@ -238,6 +240,9 @@
 						{/if}
 					</div>
 					<p>{@html rlm(f.description)}</p>
+					{#if f.estimated_impact}
+						<div class="impact-badge">{@html rlm(f.estimated_impact)}</div>
+					{/if}
 					{#if f.examples && f.examples.length > 0}
 						<ul class="examples">
 							{#each f.examples as ex}
@@ -301,8 +306,41 @@
 	</section>
 {/if}
 
-<!-- Patterns -->
-{#if patterns && patterns.length > 0}
+<!-- Recommendations (merged workflow patterns + ambitious) -->
+{#if recommendations && recommendations.length > 0}
+	<section class="sect">
+		<h2 class="sect-title">Recommendations</h2>
+		<div class="stack">
+			{#each recommendations as r, i}
+				<div class="expand-card" class:expanded={expandedCards[`rec-${i}`]}>
+					<button class="expand-head" onclick={() => expandedCards[`rec-${i}`] = !expandedCards[`rec-${i}`]}>
+						<div>
+							<h3>{r.name}</h3>
+							<span class="rec-desc">{@html rlm(r.description)}</span>
+						</div>
+						<div class="expand-right">
+							<span class="difficulty-tag diff-{r.difficulty}">{r.difficulty}</span>
+							<span class="expand-chevron">{expandedCards[`rec-${i}`] ? '−' : '+'}</span>
+						</div>
+					</button>
+					{#if expandedCards[`rec-${i}`]}
+						<div class="expand-body">
+							<p class="muted">{@html rlm(r.rationale)}</p>
+							{#if r.starter_prompt}
+								<div class="code-wrap">
+									<span class="code-label">Starter prompt</span>
+									<pre>{r.starter_prompt}</pre>
+									<button class="btn-copy" onclick={(e) => copyText(r.starter_prompt, e.currentTarget as HTMLButtonElement)}>Copy</button>
+								</div>
+							{/if}
+						</div>
+					{/if}
+				</div>
+			{/each}
+		</div>
+	</section>
+{:else if patterns && patterns.length > 0}
+	<!-- Legacy: old digests with separate patterns/ambitious -->
 	<section class="sect">
 		<h2 class="sect-title">Workflow patterns</h2>
 		<div class="stack">
@@ -316,39 +354,13 @@
 						<div class="expand-body">
 							<p>{@html rlm(p.description)}</p>
 							<p class="muted">{@html rlm(p.rationale)}</p>
-							<div class="code-wrap">
-								<span class="code-label">Starter prompt</span>
-								<pre>{p.starter_prompt}</pre>
-								<button class="btn-copy" onclick={(e) => copyText(p.starter_prompt, e.currentTarget as HTMLButtonElement)}>Copy</button>
-							</div>
-						</div>
-					{/if}
-				</div>
-			{/each}
-		</div>
-	</section>
-{/if}
-
-<!-- Ambitious -->
-{#if ambitious && ambitious.length > 0}
-	<section class="sect">
-		<h2 class="sect-title">On the horizon</h2>
-		<div class="stack">
-			{#each ambitious as a, i}
-				<div class="expand-card" class:expanded={expandedCards[`amb-${i}`]}>
-					<button class="expand-head" onclick={() => expandedCards[`amb-${i}`] = !expandedCards[`amb-${i}`]}>
-						<div><h3>{a.name}</h3></div>
-						<span class="expand-chevron">{expandedCards[`amb-${i}`] ? '−' : '+'}</span>
-					</button>
-					{#if expandedCards[`amb-${i}`]}
-						<div class="expand-body">
-							<p>{@html rlm(a.description)}</p>
-							<p class="muted">{@html rlm(a.rationale)}</p>
-							<div class="code-wrap">
-								<span class="code-label">Starter prompt</span>
-								<pre>{a.starter_prompt}</pre>
-								<button class="btn-copy" onclick={(e) => copyText(a.starter_prompt, e.currentTarget as HTMLButtonElement)}>Copy</button>
-							</div>
+							{#if p.starter_prompt}
+								<div class="code-wrap">
+									<span class="code-label">Starter prompt</span>
+									<pre>{p.starter_prompt}</pre>
+									<button class="btn-copy" onclick={(e) => copyText(p.starter_prompt, e.currentTarget as HTMLButtonElement)}>Copy</button>
+								</div>
+							{/if}
 						</div>
 					{/if}
 				</div>
@@ -453,6 +465,7 @@
 	.tag { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 100px; }
 	.tag-red { background: #fef2f2; color: #ef4444; }
 	.tag-amber { background: #fffbeb; color: #d97706; }
+	.impact-badge { margin: 8px 0; font-size: 12px; color: #7c3aed; background: #f5f3ff; border: 1px solid #e9e5f5; border-radius: 6px; padding: 6px 10px; line-height: 1.4; }
 	.examples { margin: 8px 0 0 20px; font-size: 13px; color: #52525b; line-height: 1.6; }
 	.examples li { margin-bottom: 4px; }
 
@@ -468,7 +481,13 @@
 	.expand-head { display: flex; justify-content: space-between; align-items: flex-start; padding: 18px 22px; cursor: pointer; background: none; border: none; width: 100%; text-align: left; font: inherit; color: inherit; }
 	.expand-head h3 { font-size: 15px; font-weight: 600; color: #232326; margin: 0; }
 	.expand-tag { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #6366f1; margin-bottom: 4px; }
+	.expand-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 	.expand-chevron { font-size: 20px; color: #a1a1aa; line-height: 1; flex-shrink: 0; }
+	.rec-desc { display: block; font-size: 13px; color: #52525b; font-weight: 400; margin-top: 2px; }
+	.difficulty-tag { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
+	.diff-quick { background: #f0fdf4; color: #16a34a; }
+	.diff-moderate { background: #eff6ff; color: #2563eb; }
+	.diff-ambitious { background: #fef3c7; color: #92400e; }
 	.expand-body { padding: 0 22px 20px; }
 	.expand-body p { font-size: 14px; color: #52525b; line-height: 1.65; margin-bottom: 8px; }
 	.muted { color: #70707a !important; font-size: 13px !important; }

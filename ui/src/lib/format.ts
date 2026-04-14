@@ -107,7 +107,7 @@ export function fmtAgo(iso: string): string {
 export function fmtSecs(s: number | null): string {
 	if (s == null) return '-';
 	if (s < 60) return `${s.toFixed(0)}s`;
-	if (s < 3600) return `${(s / 60).toFixed(1)}m`;
+	if (s < 3600) return `${(s / 60).toFixed(1)}min`;
 	return `${(s / 3600).toFixed(1)}h`;
 }
 

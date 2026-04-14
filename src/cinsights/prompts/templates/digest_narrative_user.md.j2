@@ -5,6 +5,11 @@
 - **Total tokens**: {{ total_tokens | int }}
 - **Total duration**: {{ total_duration_minutes | int }} minutes
 - **Active days**: {{ active_days }}
+{% if cost_context %}
+- **Estimated cost**: ${{ "%.2f" | format(cost_context.total_estimated_cost_usd) if cost_context.total_estimated_cost_usd else 'N/A' }} (${{ "%.3f" | format(cost_context.avg_cost_per_session_usd) if cost_context.avg_cost_per_session_usd else 'N/A' }}/session avg)
+- **Avg session duration**: {{ cost_context.avg_duration_per_session_min }}min
+- **Total tool errors**: {{ cost_context.total_errors }} (~{{ cost_context.error_rework_estimate_min | int }}min estimated rework)
+{% endif %}
 
 {% if project_breakdown %}
 ## Projects
@@ -83,6 +88,16 @@ Sessions are sorted by size (most substantial first). Weight evidence from MAJOR
 {% endfor %}{% endif %}
 
 {% endfor %}
+
+{% if benchmarks %}
+## Benchmarks (vs {{ benchmarks.scope_label }}, {{ benchmarks.developer_count }} developers)
+Compare this developer's metrics against these project-wide averages:
+- Avg error rate: {{ benchmarks.avg_error_rate if benchmarks.avg_error_rate is not none else 'N/A' }}
+- Avg Read:Edit ratio: {{ benchmarks.avg_read_edit_ratio if benchmarks.avg_read_edit_ratio is not none else 'N/A' }}
+- Avg blind edits: {{ benchmarks.avg_edits_without_read_pct if benchmarks.avg_edits_without_read_pct is not none else 'N/A' }}%
+- Avg turns/session: {{ benchmarks.avg_turn_count if benchmarks.avg_turn_count is not none else 'N/A' }}
+Use these to contextualize this developer's performance: "Your error rate of X% is Y% lower/higher than the team average."
+{% endif %}
 
 {% if previous_digest_summary %}
 ## Previous Digest (for comparison)

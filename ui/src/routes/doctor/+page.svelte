@@ -82,6 +82,7 @@
 		return Math.max(...dist.map(b => b.count), 1);
 	}
 
+
 	function runScope(run: RefreshRunRead): string {
 		const m = run.metadata;
 		if (!m) return '';
@@ -223,41 +224,53 @@
 		</select>
 	</div>
 
-	<div class="runs-list">
-		{#each visibleRuns as run}
-			<div class="run-row" class:run-failed={run.status === 'failed'}>
-				<span class="run-status" style="background: {statusColor(run.status)}"></span>
-				<span class="run-cmd" style="color: {cmdColor(run.command)}">{run.command}</span>
-				{#if runScopeType(run)}
-					<span class="run-scope-type">{runScopeType(run)}</span>
+	<table class="runs-table">
+		<thead>
+			<tr>
+				<th></th>
+				<th>Command</th>
+				<th>Scope</th>
+				<th>Time</th>
+				<th>Duration</th>
+				<th>Work</th>
+				<th>Tokens</th>
+				<th>Cost</th>
+				<th>Model</th>
+				<th></th>
+			</tr>
+		</thead>
+		<tbody>
+			{#each visibleRuns as run}
+				<tr class:run-failed={run.status === 'failed'}>
+					<td><span class="run-status" style="background: {statusColor(run.status)}"></span></td>
+					<td><span class="run-cmd" style="color: {cmdColor(run.command)}">{run.command}</span></td>
+					<td class="run-scope-cell">
+						{#if runScopeType(run)}<span class="run-scope-type">{runScopeType(run)}</span>{/if}
+						{#if runScope(run)}<span class="run-scope">{runScope(run)}</span>{/if}
+						{#if runDays(run)}<span class="run-days">{runDays(run)}</span>{/if}
+					</td>
+					<td class="run-time">{fmtDate(run.started_at)}</td>
+					<td class="run-dur">{fmtSecs(run.wall_seconds)}</td>
+					<td class="run-work">
+						{#if run.sessions_analyzed > 0}{run.sessions_analyzed} sessions{:else if run.digests_generated > 0}{run.digests_generated} digest{:else}-{/if}
+					</td>
+					<td class="run-tokens">{run.total_prompt_tokens + run.total_completion_tokens > 0 ? fmtTokens(run.total_prompt_tokens + run.total_completion_tokens) : '-'}</td>
+					<td class="run-cost">{fmtCost(run.estimated_cost_usd)}</td>
+					<td class="run-model">{runModel(run)}</td>
+					<td>
+						{#if run.error_message}
+							<button class="run-err-toggle" onclick={() => toggleError(run.id)}>
+								{expandedErrors.has(run.id) ? 'Hide' : 'Error'}
+							</button>
+						{/if}
+					</td>
+				</tr>
+				{#if run.error_message && expandedErrors.has(run.id)}
+					<tr><td colspan="10" class="run-error-cell"><div class="run-error">{run.error_message}</div></td></tr>
 				{/if}
-				{#if runScope(run)}
-					<span class="run-scope">{runScope(run)}</span>
-				{/if}
-				{#if runDays(run)}
-					<span class="run-days">{runDays(run)}</span>
-				{/if}
-				<span class="run-time">{fmtDate(run.started_at)}</span>
-				<span class="run-dur">{fmtSecs(run.wall_seconds)}</span>
-				{#if run.sessions_analyzed > 0}<span class="run-detail">{run.sessions_analyzed} sessions</span>{/if}
-				{#if run.digests_generated > 0}<span class="run-detail">{run.digests_generated} digest</span>{/if}
-				{#if run.total_prompt_tokens + run.total_completion_tokens > 0}
-					<span class="run-tokens">{fmtTokens(run.total_prompt_tokens + run.total_completion_tokens)}</span>
-				{/if}
-				{#if runModel(run)}
-					<span class="run-model">{runModel(run)}</span>
-				{/if}
-				{#if run.error_message}
-					<button class="run-err-toggle" onclick={() => toggleError(run.id)}>
-						{expandedErrors.has(run.id) ? 'Hide' : 'Error'}
-					</button>
-				{/if}
-			</div>
-			{#if run.error_message && expandedErrors.has(run.id)}
-				<div class="run-error">{run.error_message}</div>
-			{/if}
-		{/each}
-	</div>
+			{/each}
+		</tbody>
+	</table>
 	{#if filteredRuns.length > runsLimit}
 		<button class="show-more" onclick={() => showAllRuns = !showAllRuns}>
 			{showAllRuns ? 'Show fewer' : `Show all ${filteredRuns.length} runs`}
@@ -430,22 +443,28 @@
 	/* Ops Log */
 	.filter-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
 	.filter-bar select { padding: 6px 10px; border: 1px solid #e8e5e0; border-radius: 8px; font-size: 12px; background: white; color: #232326; cursor: pointer; }
-	.runs-list { display: flex; flex-direction: column; gap: 2px; }
-	.run-row { display: flex; align-items: center; gap: 8px; padding: 7px 12px; background: white; border-radius: 8px; font-size: 12px; color: #52525b; }
-	.run-row:hover { background: #f8fafc; }
-	.run-row.run-failed { background: #fef2f2; }
-	.run-status { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-	.run-cmd { font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; flex-shrink: 0; }
-	.run-scope-type { font-size: 10px; color: #a1a1aa; flex-shrink: 0; }
-	.run-scope { font-size: 12px; font-weight: 600; color: #232326; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
-	.run-days { font-size: 10px; color: #94a3b8; font-family: monospace; flex-shrink: 0; }
-	.run-model { font-size: 10px; color: #a1a1aa; font-family: monospace; background: #f4f4f5; padding: 1px 5px; border-radius: 3px; flex-shrink: 0; }
-	.run-time { font-size: 11px; color: #a1a1aa; margin-left: auto; flex-shrink: 0; }
-	.run-dur { font-size: 11px; font-family: monospace; color: #475569; flex-shrink: 0; }
-	.run-detail { font-size: 11px; color: #475569; flex-shrink: 0; }
-	.run-tokens { font-size: 11px; font-family: monospace; color: #94a3b8; flex-shrink: 0; }
-	.run-err-toggle { background: none; border: 1px solid #fca5a5; border-radius: 4px; padding: 2px 8px; font-size: 10px; color: #dc2626; cursor: pointer; flex-shrink: 0; }
-	.run-error { padding: 8px 12px 8px 28px; font-size: 11px; color: #991b1b; background: #fef2f2; border-radius: 0 0 8px 8px; margin-top: -2px; font-family: monospace; white-space: pre-wrap; word-break: break-all; }
+	.runs-table { width: 100%; border-collapse: separate; border-spacing: 0 2px; font-size: 12px; }
+	.runs-table th { text-align: left; font-size: 10px; font-weight: 600; color: #a1a1aa; text-transform: uppercase; letter-spacing: 0.04em; padding: 4px 8px; white-space: nowrap; }
+	.runs-table td { padding: 6px 8px; background: white; color: #52525b; white-space: nowrap; }
+	.runs-table tr:first-child td:first-child { border-radius: 8px 0 0 8px; }
+	.runs-table tr:first-child td:last-child { border-radius: 0 8px 8px 0; }
+	.runs-table tbody tr:hover td { background: #f8fafc; }
+	.runs-table tr.run-failed td { background: #fef2f2; }
+	.run-status { display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
+	.run-cmd { font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
+	.run-scope-cell { display: flex; align-items: center; gap: 6px; }
+	.run-scope-type { font-size: 10px; color: #a1a1aa; }
+	.run-scope { font-size: 12px; font-weight: 600; color: #232326; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+	.run-days { font-size: 10px; color: #94a3b8; font-family: monospace; }
+	.run-time { font-size: 11px; color: #a1a1aa; }
+	.run-dur { font-size: 11px; font-family: monospace; color: #475569; }
+	.run-work { font-size: 11px; color: #475569; }
+	.run-tokens { font-size: 11px; font-family: monospace; color: #475569; }
+	.run-cost { font-size: 11px; font-family: monospace; color: #7c3aed; }
+	.run-model { font-size: 10px; color: #a1a1aa; font-family: monospace; }
+	.run-err-toggle { background: none; border: 1px solid #fca5a5; border-radius: 4px; padding: 2px 8px; font-size: 10px; color: #dc2626; cursor: pointer; }
+	.run-error-cell { padding: 0 !important; background: none !important; }
+	.run-error { padding: 8px 12px 8px 28px; font-size: 11px; color: #991b1b; background: #fef2f2; border-radius: 0 0 8px 8px; font-family: monospace; white-space: pre-wrap; word-break: break-all; }
 	.show-more { display: block; margin: 12px auto 0; background: white; border: 1px solid #e8e5e0; border-radius: 10px; padding: 10px 24px; font-size: 13px; font-weight: 500; color: #70707a; cursor: pointer; transition: all 0.15s; }
 	.show-more:hover { color: #232326; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
 

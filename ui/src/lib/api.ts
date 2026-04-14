@@ -171,6 +171,7 @@ export interface RefreshRunRead {
 	digests_generated: number;
 	total_prompt_tokens: number;
 	total_completion_tokens: number;
+	estimated_cost_usd: number | null;
 	wall_seconds: number | null;
 	db_size_bytes: number | null;
 	error_message: string | null;
