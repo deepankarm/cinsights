@@ -73,7 +73,7 @@ Open [http://localhost:8100](http://localhost:8100).
 
 Or run index + analyze together with `cinsights refresh --source local --hours 8760`, then run digest separately.
 
-<!-- screenshot: web-ui-first-run -->
+![Projects overview](../.github/images/projects-overview.png)
 
 ## What to look at first
 

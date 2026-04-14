@@ -4,21 +4,23 @@ AI coding agents are transforming how teams build software. But when your team u
 
 cinsights is built for engineering teams that want to understand how their developers work with AI coding agents - not per-session logs, but patterns across time, across agents, and across your whole team. Which projects have the most friction? Which developers are getting the most value? What CLAUDE.md rules would help everyone? Where is token spend going and is it worth it?
 
-<!-- screenshot: dashboard-overview -->
+**Per-project digests** - what's working, what's hindering, quick wins, and ambitious ideas. Aggregated across sessions over days or weeks, not a single-run snapshot.
 
-## What you get
+![Project insights - at a glance](.github/images/project-insights-summary.png)
 
-**Per-project insights** - friction patterns, tool usage, quality metrics, and copy-paste-ready CLAUDE.md suggestions specific to each project. Updated as new sessions come in.
+**Per-developer profiles** - work areas, interaction style, tool preferences, and how each developer uses coding agents. Built from cross-session patterns, not self-reported surveys.
 
-**Per-developer insights** - developer personas, workflow patterns, feature recommendations, and how each developer's interaction style compares to their own baseline over time.
+![Developer work areas and persona](.github/images/developer-insights-workareas.png)
 
-**Friction analysis** - recurring pain points identified from tool call patterns, grounded in specific sessions, with actionable fixes. Not "you had errors" but "you have a repeated read-before-edit pattern on `src/auth/` that costs ~40 tool calls per session - here's the CLAUDE.md rule that fixes it."
+**Grounded friction analysis** - recurring pain points linked to specific sessions with impact estimates. Not "you had errors" but "you have a repeated read-before-edit pattern that costs ~40 tool calls per session."
 
-**Quality metrics** - read:edit ratio, error rate, context pressure, repeated edits, tokens per useful edit. Computed from tool call sequences, zero LLM cost. The smoke detectors that tell you something is off before you spend tokens figuring out what.
+![Friction analysis with evidence](.github/images/project-insights-frictions.png)
 
-**Cross-session digests** - aggregated over days or weeks, scoped to a project or developer. Not a snapshot: a running picture of how patterns evolve.
+**Actionable fixes** - copy-paste CLAUDE.md rules and feature recommendations (hooks, custom skills, plan mode) generated from your team's actual friction patterns. Each suggestion is grounded in session evidence.
 
-<!-- screenshot: session-detail -->
+![Copy-paste CLAUDE.md suggestions](.github/images/project-insights-claudemd.png)
+
+![Features to try - hooks, custom skills, plan mode](.github/images/developer-insights-features.png)
 
 ## Quick start
 
@@ -50,7 +52,7 @@ Open [http://localhost:8100](http://localhost:8100). See the [getting started gu
 | [Entire.io](docs/sources/entireio.md) | Git-based checkpoints across Claude Code, Cursor, Codex | Cross-agent and cross-machine coverage for teams. |
 | [Phoenix](docs/sources/phoenix.md) | Arize Phoenix traces | Centralized team observability. |
 
-## Documentation
+## [Documentation](docs/README.md)
 
 - [Getting started](docs/getting-started.md) - install, configure, first run
 - [Concepts](docs/concepts.md) - pipeline, quality metrics, scoring, insights, digests

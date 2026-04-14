@@ -4,11 +4,6 @@
 
 cinsights processes coding agent sessions in three stages. Each stage is independently runnable.
 
-```
-index ──→ analyze ──→ digest
-(free)    (tokens)    (tokens)
-```
-
 **Index** (`cinsights index`) discovers sessions from the configured source, parses tool call timelines, computes quality metrics, and scores each session against the developer's baseline. Zero LLM cost. This is the stage you can run as often as you want.
 
 **Analyze** (`cinsights analyze`) sends scored sessions to the LLM for per-session insight extraction - friction points, wins, recommendations, patterns, and skill proposals. Costs tokens, but only runs on sessions above the score threshold.
@@ -38,6 +33,8 @@ Computed during indexing from tool call sequences alone. No LLM needed.
 | `tool_calls_per_turn` | Average tool calls per turn | - | - |
 
 Quality metrics are the smoke detectors. They tell you something is off before you spend tokens figuring out what.
+
+![Quality metrics with trend charts](../.github/images/project-stats.png)
 
 ## Scoring and budget modes
 
@@ -86,6 +83,10 @@ What the LLM extracts from each analyzed session:
 
 Each insight has a severity: `info`, `warning`, or `critical`.
 
+![Session detail with insights](../.github/images/session-insights.png)
+
+![Recommendations with difficulty tags](../.github/images/project-insights-recommendations.png)
+
 ## Cross-session digest
 
 The digest aggregates analyzed sessions over a time window (default: 7 days) for a specific project or developer. It runs three concurrent LLM calls:
@@ -97,6 +98,10 @@ The digest aggregates analyzed sessions over a time window (default: 7 days) for
 **Forward-looking** - impressive wins worth repeating, workflow patterns codified as starter prompts, and ambitious automation ideas.
 
 The digest is the product. Individual session insights are evidence. If you only look at one thing, look at the digest.
+
+![Developer digest - at a glance](../.github/images/developer-insights-summary.png)
+
+![Work areas and developer persona](../.github/images/project-insights-workareas.png)
 
 ---
 
