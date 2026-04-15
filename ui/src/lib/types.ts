@@ -11,6 +11,7 @@ export interface SessionRead {
 	total_tokens: number;
 	status: 'indexed' | 'pending' | 'analyzed' | 'failed';
 	tool_call_count: number;
+	error_count: number;
 	insight_count: number;
 	active_duration_ms: number | null;
 }
