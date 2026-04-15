@@ -12,12 +12,16 @@ to the async pipeline. All real work lives in:
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING
 
 import typer
 
 from cinsights.pipeline import _analyze_async, _digest_async, _index_async, _score_async
 from cinsights.runtime import _track_run
 from cinsights.settings import get_settings
+
+if TYPE_CHECKING:
+    from cinsights.settings import LLMConfig
 
 app = typer.Typer(name="cinsights", help="LLM-powered insights from coding agent sessions.")
 
@@ -285,13 +289,18 @@ def setup(
         _test_connection(app_config.llm)
 
 
-def _test_connection(llm) -> None:
+def _test_connection(llm: LLMConfig) -> None:
     """Send a minimal request to verify the LLM config works."""
     import asyncio
 
     from cinsights.runtime import console
 
     async def _probe():
+        if llm.is_local_ollama:
+            return await _probe_ollama(llm)
+        return await _probe_pydantic_ai(llm)
+
+    async def _probe_pydantic_ai(llm: LLMConfig) -> int:
         from pydantic_ai import Agent
         from pydantic_ai.settings import ModelSettings
 
@@ -304,6 +313,21 @@ def _test_connection(llm) -> None:
         result = await agent.run("Reply with exactly: OK")
         usage = result.usage()
         return usage.output_tokens or 0
+
+    async def _probe_ollama(llm: LLMConfig) -> int:
+        import httpx
+
+        async with httpx.AsyncClient(base_url=llm.base_url, timeout=30) as client:
+            resp = await client.post(
+                "/chat/completions",
+                json={
+                    "model": llm.model,
+                    "messages": [{"role": "user", "content": "Reply with exactly: OK"}],
+                    "max_tokens": 20,
+                },
+            )
+            resp.raise_for_status()
+        return resp.json().get("usage", {}).get("completion_tokens", 0)
 
     try:
         tokens = asyncio.run(_probe())

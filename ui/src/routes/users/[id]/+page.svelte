@@ -107,7 +107,13 @@
 
 			{#if digest}
 				<div class="section">
-					<h2>Insights</h2>
+					<div class="insights-header">
+						<h2>Insights</h2>
+						<span class="insights-meta">
+							{#if digest.analysis_model}<span class="model-badge">{digest.analysis_model}</span>{/if}
+							<span class="generated-at">{new Date(digest.created_at).toLocaleDateString()}</span>
+						</span>
+					</div>
 					<InsightsPanel {digest} />
 				</div>
 			{:else}
@@ -124,6 +130,10 @@
 
 <style>
 	.loading { text-align: center; padding: 80px; color: #94a3b8; }
+	.insights-header { display: flex; align-items: baseline; gap: 12px; margin-bottom: -8px; }
+	.insights-meta { display: flex; align-items: center; gap: 8px; }
+	.model-badge { font-size: 11px; font-weight: 600; color: #6366f1; background: #eef2ff; border: 1px solid #c7d2fe; padding: 2px 8px; border-radius: 4px; font-family: monospace; }
+	.generated-at { font-size: 12px; color: #94a3b8; }
 
 	.user-banner { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 20px; }
 	.banner-info { flex: 1; }

@@ -197,6 +197,7 @@ class Digest(SQLModel, table=True):
     stats_json: str | None = None  # Full computed stats snapshot (JSON)
     analysis_prompt_tokens: int = 0  # Tokens used by cinsights digest analysis
     analysis_completion_tokens: int = 0
+    analysis_model: str | None = None  # LLM model used for digest analysis
     status: DigestStatus = DigestStatus.PENDING
     error_message: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)

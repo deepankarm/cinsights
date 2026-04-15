@@ -318,8 +318,11 @@
 {/if}
 
 <footer class="report-footer">
-	Generated {new Date(digest.created_at).toLocaleString()} &middot;
-	{(digest.analysis_prompt_tokens + digest.analysis_completion_tokens).toLocaleString()} tokens
+	Generated {new Date(digest.created_at).toLocaleString()}
+	{#if digest.analysis_model}
+		&middot; <span class="model-badge">{digest.analysis_model}</span>
+	{/if}
+	&middot; {(digest.analysis_prompt_tokens + digest.analysis_completion_tokens).toLocaleString()} tokens
 	{#if digest.sessions_since > 0}
 		&middot; <span class="staleness-badge">{digest.sessions_since} new session{digest.sessions_since === 1 ? '' : 's'} since</span>
 	{/if}
@@ -416,6 +419,7 @@
 
 	/* Footer */
 	.report-footer { text-align: center; padding: 32px; color: #a1a1aa; font-size: 12px; }
+	.model-badge { font-size: 11px; font-weight: 600; color: #6366f1; background: #eef2ff; border: 1px solid #c7d2fe; padding: 2px 8px; border-radius: 4px; font-family: monospace; }
 	.staleness-badge { font-size: 11px; font-weight: 600; color: #b45309; background: #fef3c7; border: 1px solid #fcd34d; padding: 2px 8px; border-radius: 4px; }
 
 	/* Markdown globals */
