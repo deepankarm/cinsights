@@ -148,9 +148,13 @@ async def get_token_distribution(
     whisker_high = min(vals[-1], q3 + int(1.5 * iqr))
 
     return TokenDistribution(
-        q1=q1, median=median, q3=q3,
-        whisker_low=whisker_low, whisker_high=whisker_high,
-        max_val=vals[-1], count=len(vals),
+        q1=q1,
+        median=median,
+        q3=q3,
+        whisker_low=whisker_low,
+        whisker_high=whisker_high,
+        max_val=vals[-1],
+        count=len(vals),
     )
 
 

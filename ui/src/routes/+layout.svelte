@@ -8,7 +8,7 @@
 <div class="app">
 	<header>
 		<nav>
-			<a href="/" class="logo">cinsights</a>
+			<a href="/" class="logo"><img src="/logo.svg" alt="" class="logo-icon" />cinsights</a>
 			<div class="nav-links">
 				<a href="/" class="nav-link">Dashboard</a>
 				<a href="/projects" class="nav-link">Projects</a>
@@ -76,6 +76,14 @@
 		text-decoration: none;
 		color: #232326;
 		letter-spacing: -0.5px;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.logo-icon {
+		width: 24px;
+		height: 24px;
 	}
 
 	.nav-links {

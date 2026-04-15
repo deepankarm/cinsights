@@ -55,15 +55,17 @@ class DigestDetail(BaseModel):
     sessions_since: int = 0
 
 
-
-
 async def _count_sessions_since(db: AsyncSession, digest: Digest) -> int:
     """Count sessions indexed/analyzed after the digest was completed."""
     if not digest.completed_at:
         return 0
-    q = select(func.count()).select_from(CodingSession).where(
-        CodingSession.created_at > digest.completed_at,
-        col(CodingSession.status).in_([SessionStatus.INDEXED, SessionStatus.ANALYZED]),
+    q = (
+        select(func.count())
+        .select_from(CodingSession)
+        .where(
+            CodingSession.created_at > digest.completed_at,
+            col(CodingSession.status).in_([SessionStatus.INDEXED, SessionStatus.ANALYZED]),
+        )
     )
     if digest.project_name:
         q = q.where(CodingSession.project_name == digest.project_name)

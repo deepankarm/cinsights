@@ -49,7 +49,7 @@ class FrictionItem(BaseModel):
     severity: str = Field(description="critical, warning, or info")
     estimated_impact: str = Field(
         default="",
-        description="Rough time/cost impact with reasoning, e.g. '~2-4 hours/month based on 12 occurrences x ~15min recovery each. Calculation is approximate.'"
+        description="Rough time/cost impact with reasoning, e.g. '~2-4 hours/month based on 12 occurrences x ~15min recovery each. Calculation is approximate.'",
     )
 
 
@@ -59,10 +59,14 @@ class ClaudeMdSuggestion(BaseModel):
 
 
 class FeatureRecommendation(BaseModel):
-    feature: str = Field(description="Feature name: Custom Skills, Hooks, Headless Mode, Sub-agents, Plan Mode")
+    feature: str = Field(
+        description="Feature name: Custom Skills, Hooks, Headless Mode, Sub-agents, Plan Mode"
+    )
     title: str = Field(description="One-line recommendation title")
     why_for_you: str = Field(description="Personalized explanation citing evidence from sessions")
-    setup_code: str | None = Field(default=None, description="Working config, skill prompt, or hook definition — ready to use")
+    setup_code: str | None = Field(
+        default=None, description="Working config, skill prompt, or hook definition — ready to use"
+    )
 
 
 class ActionsResult(BaseModel):
@@ -82,7 +86,10 @@ class Recommendation(BaseModel):
     description: str = Field(description="What to do and why")
     rationale: str = Field(description="Evidence from sessions")
     starter_prompt: str | None = Field(default=None, description="Copy-paste prompt if applicable")
-    difficulty: str = Field(default="moderate", description="'quick' (do today), 'moderate' (this week), or 'ambitious' (project)")
+    difficulty: str = Field(
+        default="moderate",
+        description="'quick' (do today), 'moderate' (this week), or 'ambitious' (project)",
+    )
 
 
 class ForwardResult(BaseModel):
@@ -108,6 +115,7 @@ class DigestAnalyzer(LLMAnalyzer):
     async def analyze(self, stats: DigestStats) -> DigestAnalysisResult:
         """Run 3 concurrent LLM calls and combine results."""
         from cinsights.settings import get_config
+
         limits = get_config().limits
 
         stats_dict = stats.model_dump()

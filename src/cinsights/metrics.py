@@ -145,11 +145,7 @@ def tokens_per_useful_edit(tool_calls: list[ToolCall], total_tokens: int) -> flo
 
     Lower = more efficient. Measures cost of productive output.
     """
-    useful = sum(
-        1
-        for tc in tool_calls
-        if tc.tool_name in _MUTATION_TOOLS and tc.success
-    )
+    useful = sum(1 for tc in tool_calls if tc.tool_name in _MUTATION_TOOLS and tc.success)
     if useful == 0 or total_tokens == 0:
         return None
     return round(total_tokens / useful, 0)
