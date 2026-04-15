@@ -6,7 +6,7 @@ Start with defaults. The only thing you need to set on day one is your API key.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | - | Anthropic API key (required for default LLM config) |
+| `ANTHROPIC_API_KEY` | - | Anthropic API key (required for default LLM config; not needed with Ollama) |
 | `CINSIGHTS_SOURCE` | `phoenix` | Data source: `phoenix`, `local`, or `entireio` |
 | `CINSIGHTS_DATABASE_URL` | `sqlite:///cinsights.db` | Database connection string |
 | `CINSIGHTS_BUDGET_MODE` | `balanced` | Scoring budget: `frugal`, `balanced`, `thorough`, `all` |
@@ -32,7 +32,8 @@ You can also set these in a `.env` file in the project root.
     "provider": "anthropic",
     "model": "claude-haiku-4-5-20251001",
     "base_url": null,
-    "extra_headers": {}
+    "extra_headers": {},
+    "use_json_schema_mode": false
   },
   "claude_code_homes": ["~/.claude"],
   "codex_homes": ["~/.codex"],
@@ -48,7 +49,19 @@ You can also set these in a `.env` file in the project root.
 }
 ```
 
-**`llm`** - Provider and model. Uses pydantic-ai's `provider:model` namespace, so any provider that pydantic-ai supports works. API keys come from environment variables, never stored here.
+Ollama example:
+
+```json
+{
+  "llm": {
+    "provider": "openai",
+    "model": "qwen2.5:14b",
+    "base_url": "http://localhost:11434/v1"
+  }
+}
+```
+
+**`llm`** - Provider and model. Uses pydantic-ai's `provider:model` namespace, so any provider that pydantic-ai supports works. API keys come from environment variables, never stored here. When `base_url` points to localhost, cinsights auto-detects it as a local model and uses Ollama-compatible structured output. Set `use_json_schema_mode: true` explicitly for non-localhost endpoints that need the same treatment (e.g. a remote Ollama instance).
 
 **`claude_code_homes` / `codex_homes`** - Directories to scan when using the [local source](sources/local.md).
 
@@ -75,6 +88,14 @@ cinsights setup --validate
 ```
 
 Any provider that pydantic-ai supports works - Anthropic, OpenAI, Google, etc. For custom gateways or proxies, use `--base-url` and `--extra-headers`.
+
+For Ollama:
+
+```bash
+cinsights setup --provider openai --model qwen2.5:14b --base-url http://localhost:11434/v1
+```
+
+Recommended local models: `qwen2.5:14b` (best quality, needs ~16GB RAM) or `qwen2.5:7b` (faster, ~8GB RAM).
 
 ## CLI reference
 
