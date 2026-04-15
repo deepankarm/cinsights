@@ -2,7 +2,7 @@
 
 # cinsights
 
-<img src=".github/images/logo.svg" width="120" height="120" alt="cinsights logo">
+<img src="https://raw.githubusercontent.com/deepankarm/cinsights/main/.github/images/logo.svg" width="120" height="120" alt="cinsights logo">
 
 **Coding agent insights for teams**
 
