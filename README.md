@@ -2,7 +2,7 @@
 
 # cinsights
 
-<img src=".github/images/logo.svg" width="120" height="120" alt="cinsights logo">
+<img src="https://raw.githubusercontent.com/deepankarm/cinsights/main/.github/images/logo.svg" width="120" height="120" alt="cinsights logo">
 
 **Coding agent insights for teams**
 
@@ -39,6 +39,9 @@ pip install cinsights
 
 # Configure LLM (interactive)
 cinsights setup
+# No API key? Use Ollama instead:
+# ollama pull qwen2.5:14b
+# cinsights setup --provider openai --model qwen2.5:14b --base-url http://localhost:11434/v1
 
 # Index + analyze local Claude Code / Codex sessions
 cinsights refresh --source local --hours 8760

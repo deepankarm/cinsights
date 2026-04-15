@@ -20,6 +20,7 @@ You choose which LLM generates the insights. cinsights supports any provider tha
 - OpenAI
 - Google
 - Any OpenAI-compatible API (self-hosted models, internal gateways)
+- Ollama for local inference (no API key needed — useful for evaluation or environments without external API access)
 
 Configure via `cinsights setup --provider <name> --model <model> --base-url <url>`. For internal gateways that require auth headers, use `--extra-headers`.
 
