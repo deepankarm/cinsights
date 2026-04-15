@@ -10,6 +10,7 @@ from cinsights.analysis.session import (
     _build_prompts,
     _truncate,
 )
+from cinsights.settings import LLMConfig
 from cinsights.sources.base import SpanData, TraceData
 
 
@@ -103,7 +104,7 @@ async def test_analyze_structured_output():
     mock_run_llm = AsyncMock(return_value=(expected_output, 100, 50))
 
     with patch.object(SessionAnalyzer, "_run_llm", mock_run_llm):
-        analyzer = SessionAnalyzer(model="test-model")
+        analyzer = SessionAnalyzer(llm_config=LLMConfig())
         trace = TraceData(
             trace_id="trace-1",
             start_time=datetime(2026, 4, 1, 10, 0, tzinfo=UTC),
@@ -140,7 +141,7 @@ async def test_analyze_batch():
     mock_run_llm = AsyncMock(return_value=(expected_output, 100, 50))
 
     with patch.object(SessionAnalyzer, "_run_llm", mock_run_llm):
-        analyzer = SessionAnalyzer(model="test-model")
+        analyzer = SessionAnalyzer(llm_config=LLMConfig())
         trace1 = TraceData(
             trace_id="t1",
             start_time=datetime(2026, 4, 1, 10, 0, tzinfo=UTC),
