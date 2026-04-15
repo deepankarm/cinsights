@@ -3,8 +3,9 @@
 	import { page } from '$app/state';
 	import { getSession, triggerAnalysis } from '$lib/api';
 	import { renderMarkdown } from '$lib/markdown';
-	import { fmtTokens } from '$lib/format';
+	import { fmtTokens, gradeColor, gradeBg } from '$lib/format';
 	import type { SessionDetail } from '$lib/types';
+	import ActivityCharts, { type ErrorDetail } from '$lib/components/ActivityCharts.svelte';
 
 	let session: SessionDetail | null = $state(null);
 	let loading = $state(true);
@@ -83,6 +84,69 @@
 	const errorCount = $derived(session?.tool_calls.filter(tc => !tc.success).length ?? 0);
 	const errorRate = $derived(session?.tool_calls.length ? (errorCount / session.tool_calls.length * 100) : 0);
 
+	const grade = $derived.by(() => {
+		const rate = errorRate / 100;
+		if (rate <= 0.05) return 'A';
+		if (rate <= 0.10) return 'B';
+		if (rate <= 0.20) return 'C';
+		if (rate <= 0.35) return 'D';
+		return 'F';
+	});
+
+	const toolDistribution = $derived.by(() => {
+		if (!session) return {};
+		const counts: Record<string, number> = {};
+		for (const tc of session.tool_calls) counts[tc.tool_name] = (counts[tc.tool_name] ?? 0) + 1;
+		return Object.fromEntries(Object.entries(counts).sort((a, b) => b[1] - a[1]));
+	});
+
+	const errorTypes = $derived.by(() => {
+		if (!session) return {};
+		const counts: Record<string, number> = {};
+		for (const tc of session.tool_calls) {
+			if (!tc.success) counts[tc.tool_name] = (counts[tc.tool_name] ?? 0) + 1;
+		}
+		return Object.fromEntries(Object.entries(counts).sort((a, b) => b[1] - a[1]));
+	});
+
+	const timeOfDay = $derived.by(() => {
+		if (!session) return {};
+		const counts: Record<string, number> = {};
+		for (const tc of session.tool_calls) {
+			const h = new Date(tc.timestamp).getHours();
+			counts[h] = (counts[h] ?? 0) + 1;
+		}
+		return Object.fromEntries(Object.entries(counts).sort(([a], [b]) => Number(a) - Number(b)));
+	});
+
+	const languageDistribution = $derived.by(() => {
+		if (!session) return {};
+		const counts: Record<string, number> = {};
+		const langTools = ['Read', 'Edit', 'Write', 'Glob', 'Grep'];
+		for (const tc of session.tool_calls) {
+			if (!langTools.includes(tc.tool_name) || !tc.input_value) continue;
+			const ext = tc.input_value.match(/\.(\w{1,6})(?:['")\s,]|$)/)?.[1];
+			if (ext) counts[ext] = (counts[ext] ?? 0) + 1;
+		}
+		return Object.fromEntries(Object.entries(counts).sort((a, b) => b[1] - a[1]));
+	});
+
+	const errorDetails = $derived.by((): ErrorDetail[] => {
+		if (!session) return [];
+		const groups: Record<string, { tool: string; message: string; count: number }> = {};
+		for (const tc of session.tool_calls) {
+			if (tc.success) continue;
+			const msg = (tc.output_value ?? '').slice(0, 200).split('\n')[0] || 'Unknown error';
+			const key = `${tc.tool_name}::${msg}`;
+			if (groups[key]) {
+				groups[key].count++;
+			} else {
+				groups[key] = { tool: tc.tool_name, message: msg, count: 1 };
+			}
+		}
+		return Object.values(groups).sort((a, b) => b.count - a.count);
+	});
+
 	const firstEditMs = $derived.by(() => {
 		if (!session) return null;
 		const edit = session.tool_calls
@@ -95,13 +159,6 @@
 
 	const toolsPerTurn = $derived(turnCount > 0 ? (session?.tool_calls.length ?? 0) / turnCount : 0);
 
-	// Top 5 tools
-	const topTools = $derived.by(() => {
-		if (!session) return [];
-		const counts: Record<string, number> = {};
-		for (const tc of session.tool_calls) counts[tc.tool_name] = (counts[tc.tool_name] ?? 0) + 1;
-		return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 5);
-	});
 
 	function categoryColor(cat: string): string {
 		const m: Record<string, string> = { friction: '#dc2626', win: '#16a34a', recommendation: '#2563eb', pattern: '#7c3aed', skill_proposal: '#0891b2', summary: '#0f172a' };
@@ -152,6 +209,7 @@
 				<span class="mono">{session.id}</span>
 				<span class="copy-icon">{copied ? '✓' : '⎘'}</span>
 			</button>
+			<span class="grade-badge" style="background: {gradeBg(grade)}; color: {gradeColor(grade)}">{grade}</span>
 			<span class="status-pill" style="background: {session.status === 'analyzed' ? '#ecfdf5' : '#f5f3ff'}; color: {session.status === 'analyzed' ? '#16a34a' : '#7c3aed'}">
 				{session.status}
 			</span>
@@ -203,131 +261,118 @@
 		</div>
 	</div>
 
-	<!-- Tool distribution mini -->
-	{#if topTools.length > 0}
-		<div class="tool-dist">
-			{#each topTools as [name, count]}
-				<span class="td-chip"><span class="td-name">{name}</span><span class="td-count">{count}</span></span>
-			{/each}
-			{#if (session.tool_calls.length - topTools.reduce((s, [,c]) => s + c, 0)) > 0}
-				<span class="td-chip other"><span class="td-name">other</span><span class="td-count">{session.tool_calls.length - topTools.reduce((s, [,c]) => s + c, 0)}</span></span>
-			{/if}
-		</div>
-	{/if}
-
-	<!-- Charts row -->
-	{#if session.context_growth && session.context_growth.length > 1}
-		{@const pts = session.context_growth}
-		{@const n = pts.length}
-		{@const maxY = Math.max(...pts.map(p => p.prompt_tokens), 1)}
-		{@const yOf = (v: number) => PAD.t + iH - (v / maxY) * iH}
-		{@const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, n).toFixed(1)} ${yOf(p.prompt_tokens).toFixed(1)}`).join(' ')}
-		{@const areaPath = `${linePath} L ${xOf(n-1, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
-		{@const compactionIdxs = pts.map((p, i) => (i > 0 && p.prompt_tokens < pts[i-1].prompt_tokens * 0.85 ? i : -1)).filter(i => i >= 0)}
-		{@const hover = hoverIdx !== null ? pts[hoverIdx] : null}
-		<div class="charts-grid">
-			<!-- Context Growth -->
-			<div class="chart-card">
-				<div class="chart-header">
-					<h3>Context Growth</h3>
-					<div class="chart-header-right">
-						{#if hover && hoverIdx !== null}
-							<span class="chart-hover-val">Turn {hover.turn}: {fmtTokens(hover.prompt_tokens)}</span>
-						{/if}
-						{#if compactionIdxs.length > 0}
-							<span class="trend-badge down">{compactionIdxs.length} compaction{compactionIdxs.length > 1 ? 's' : ''}</span>
-						{/if}
-					</div>
-				</div>
-				<div class="chart-desc">Prompt tokens per turn</div>
-				<div style="position:relative">
-					<svg viewBox="0 0 {W} {H}" class="trend-svg"
-						onmousemove={(e) => chartMove(e, n, v => hoverIdx = v)}
-						onmouseleave={() => hoverIdx = null}>
-						<defs>
-							<linearGradient id="ctxG" x1="0" y1="0" x2="0" y2="1">
-								<stop offset="0%" stop-color="#6366f1" stop-opacity="0.25" />
-								<stop offset="100%" stop-color="#6366f1" stop-opacity="0" />
-							</linearGradient>
-						</defs>
-						{#each [0, 0.5, 1] as frac}
-							{@const gy = PAD.t + iH * (1 - frac)}
-							<line x1={PAD.l} x2={W - PAD.r} y1={gy} y2={gy} stroke="#f1f5f9" stroke-width="1" />
-							<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtTokens(Math.round(maxY * frac))}</text>
-						{/each}
-						<path d={areaPath} fill="url(#ctxG)" />
-						<path d={linePath} fill="none" stroke="#6366f1" stroke-width="1.5" stroke-linejoin="round" />
-						{#each compactionIdxs as i}
-							<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#f59e0b" stroke="white" stroke-width="1" />
-						{/each}
-						{#if hoverIdx !== null}
-							<line x1={xOf(hoverIdx, n)} x2={xOf(hoverIdx, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
-							<circle cx={xOf(hoverIdx, n)} cy={yOf(pts[hoverIdx].prompt_tokens)} r="3.5" fill="#6366f1" stroke="white" stroke-width="1.5" />
-						{/if}
-						<rect x={PAD.l} y={PAD.t} width={iW} height={iH} fill="transparent" />
-					</svg>
-				</div>
-			</div>
-
-			<!-- Turn Duration -->
-			{#if session.context_growth.some(p => p.duration_ms != null)}
-				{@const dPts = session.context_growth.filter(p => p.duration_ms != null)}
-				{@const dn = dPts.length}
-				{#if dn > 1}
-					{@const durations = dPts.map(p => p.duration_ms!)}
-					{@const maxD = Math.max(...durations, 1)}
-					{@const sortedD = [...durations].sort((a, b) => a - b)}
-					{@const median = sortedD[Math.floor(sortedD.length / 2)]}
-					{@const dyOf = (v: number) => PAD.t + iH - (v / maxD) * iH}
-					{@const dLine = dPts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, dn).toFixed(1)} ${dyOf(p.duration_ms!).toFixed(1)}`).join(' ')}
-					{@const dArea = `${dLine} L ${xOf(dn-1, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
-					{@const slowIdxs = dPts.map((p, i) => (p.duration_ms! > median * 2 ? i : -1)).filter(i => i >= 0)}
-					{@const dHover = durHoverIdx !== null ? dPts[durHoverIdx] : null}
+	<!-- Activity Charts -->
+	<div class="section">
+		<ActivityCharts {toolDistribution} {languageDistribution} {timeOfDay} {errorTypes} {errorDetails}>
+			{#snippet extra()}
+				{#if session.context_growth && session.context_growth.length > 1}
+					{@const pts = session.context_growth}
+					{@const n = pts.length}
+					{@const maxY = Math.max(...pts.map(p => p.prompt_tokens), 1)}
+					{@const yOf = (v: number) => PAD.t + iH - (v / maxY) * iH}
+					{@const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, n).toFixed(1)} ${yOf(p.prompt_tokens).toFixed(1)}`).join(' ')}
+					{@const areaPath = `${linePath} L ${xOf(n-1, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
+					{@const compactionIdxs = pts.map((p, i) => (i > 0 && p.prompt_tokens < pts[i-1].prompt_tokens * 0.85 ? i : -1)).filter(i => i >= 0)}
+					{@const hover = hoverIdx !== null ? pts[hoverIdx] : null}
+					<!-- Context Growth -->
 					<div class="chart-card">
 						<div class="chart-header">
-							<h3>Turn Duration</h3>
+							<h3>Context Growth</h3>
 							<div class="chart-header-right">
-								{#if dHover && durHoverIdx !== null}
-									<span class="chart-hover-val">Turn {dHover.turn}: {fmtSecs(dHover.duration_ms!)}</span>
+								{#if hover && hoverIdx !== null}
+									<span class="chart-hover-val">Turn {hover.turn}: {fmtTokens(hover.prompt_tokens)}</span>
 								{/if}
-								<span class="chart-total">median {fmtSecs(median)}</span>
+								{#if compactionIdxs.length > 0}
+									<span class="trend-badge down">{compactionIdxs.length} compaction{compactionIdxs.length > 1 ? 's' : ''}</span>
+								{/if}
 							</div>
 						</div>
-						<div class="chart-desc">Time per turn (slow turns highlighted)</div>
-						<div style="position:relative">
-							<svg viewBox="0 0 {W} {H}" class="trend-svg"
-								onmousemove={(e) => chartMove(e, dn, v => durHoverIdx = v)}
-								onmouseleave={() => durHoverIdx = null}>
-								<defs>
-									<linearGradient id="durG" x1="0" y1="0" x2="0" y2="1">
-										<stop offset="0%" stop-color="#10b981" stop-opacity="0.25" />
-										<stop offset="100%" stop-color="#10b981" stop-opacity="0" />
-									</linearGradient>
-								</defs>
-								{#each [0, 0.5, 1] as frac}
-									{@const gy = PAD.t + iH * (1 - frac)}
-									<line x1={PAD.l} x2={W - PAD.r} y1={gy} y2={gy} stroke="#f1f5f9" stroke-width="1" />
-									<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtSecs(maxD * frac)}</text>
-								{/each}
-								<path d={dArea} fill="url(#durG)" />
-								<path d={dLine} fill="none" stroke="#10b981" stroke-width="1.5" stroke-linejoin="round" />
-								<!-- Median line -->
-								<line x1={PAD.l} x2={W - PAD.r} y1={dyOf(median)} y2={dyOf(median)} stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3" />
-								{#each slowIdxs as i}
-									<circle cx={xOf(i, dn)} cy={dyOf(dPts[i].duration_ms!)} r="3" fill="#ef4444" stroke="white" stroke-width="1" />
-								{/each}
-								{#if durHoverIdx !== null}
-									<line x1={xOf(durHoverIdx, dn)} x2={xOf(durHoverIdx, dn)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
-									<circle cx={xOf(durHoverIdx, dn)} cy={dyOf(dPts[durHoverIdx].duration_ms!)} r="3.5" fill="#10b981" stroke="white" stroke-width="1.5" />
-								{/if}
-								<rect x={PAD.l} y={PAD.t} width={iW} height={iH} fill="transparent" />
-							</svg>
-						</div>
+						<div class="chart-desc">Prompt tokens per turn</div>
+						<svg viewBox="0 0 {W} {H}" class="trend-svg"
+							onmousemove={(e) => chartMove(e, n, v => hoverIdx = v)}
+							onmouseleave={() => hoverIdx = null}>
+							<defs>
+								<linearGradient id="ctxG" x1="0" y1="0" x2="0" y2="1">
+									<stop offset="0%" stop-color="#6366f1" stop-opacity="0.25" />
+									<stop offset="100%" stop-color="#6366f1" stop-opacity="0" />
+								</linearGradient>
+							</defs>
+							{#each [0, 0.5, 1] as frac}
+								{@const gy = PAD.t + iH * (1 - frac)}
+								<line x1={PAD.l} x2={W - PAD.r} y1={gy} y2={gy} stroke="#f1f5f9" stroke-width="1" />
+								<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtTokens(Math.round(maxY * frac))}</text>
+							{/each}
+							<path d={areaPath} fill="url(#ctxG)" />
+							<path d={linePath} fill="none" stroke="#6366f1" stroke-width="1.5" stroke-linejoin="round" />
+							{#each compactionIdxs as i}
+								<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#f59e0b" stroke="white" stroke-width="1" />
+							{/each}
+							{#if hoverIdx !== null}
+								<line x1={xOf(hoverIdx, n)} x2={xOf(hoverIdx, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
+								<circle cx={xOf(hoverIdx, n)} cy={yOf(pts[hoverIdx].prompt_tokens)} r="3.5" fill="#6366f1" stroke="white" stroke-width="1.5" />
+							{/if}
+							<rect x={PAD.l} y={PAD.t} width={iW} height={iH} fill="transparent" />
+						</svg>
 					</div>
+
+					<!-- Turn Duration -->
+					{#if session.context_growth.some(p => p.duration_ms != null)}
+						{@const dPts = session.context_growth.filter(p => p.duration_ms != null)}
+						{@const dn = dPts.length}
+						{#if dn > 1}
+							{@const durations = dPts.map(p => p.duration_ms!)}
+							{@const maxD = Math.max(...durations, 1)}
+							{@const sortedD = [...durations].sort((a, b) => a - b)}
+							{@const median = sortedD[Math.floor(sortedD.length / 2)]}
+							{@const dyOf = (v: number) => PAD.t + iH - (v / maxD) * iH}
+							{@const dLine = dPts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, dn).toFixed(1)} ${dyOf(p.duration_ms!).toFixed(1)}`).join(' ')}
+							{@const dArea = `${dLine} L ${xOf(dn-1, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
+							{@const slowIdxs = dPts.map((p, i) => (p.duration_ms! > median * 2 ? i : -1)).filter(i => i >= 0)}
+							{@const dHover = durHoverIdx !== null ? dPts[durHoverIdx] : null}
+							<div class="chart-card">
+								<div class="chart-header">
+									<h3>Turn Duration</h3>
+									<div class="chart-header-right">
+										{#if dHover && durHoverIdx !== null}
+											<span class="chart-hover-val">Turn {dHover.turn}: {fmtSecs(dHover.duration_ms!)}</span>
+										{/if}
+										<span class="chart-total">median {fmtSecs(median)}</span>
+									</div>
+								</div>
+								<div class="chart-desc">Time per turn (slow turns highlighted)</div>
+								<svg viewBox="0 0 {W} {H}" class="trend-svg"
+									onmousemove={(e) => chartMove(e, dn, v => durHoverIdx = v)}
+									onmouseleave={() => durHoverIdx = null}>
+									<defs>
+										<linearGradient id="durG" x1="0" y1="0" x2="0" y2="1">
+											<stop offset="0%" stop-color="#10b981" stop-opacity="0.25" />
+											<stop offset="100%" stop-color="#10b981" stop-opacity="0" />
+										</linearGradient>
+									</defs>
+									{#each [0, 0.5, 1] as frac}
+										{@const gy = PAD.t + iH * (1 - frac)}
+										<line x1={PAD.l} x2={W - PAD.r} y1={gy} y2={gy} stroke="#f1f5f9" stroke-width="1" />
+										<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtSecs(maxD * frac)}</text>
+									{/each}
+									<path d={dArea} fill="url(#durG)" />
+									<path d={dLine} fill="none" stroke="#10b981" stroke-width="1.5" stroke-linejoin="round" />
+									<line x1={PAD.l} x2={W - PAD.r} y1={dyOf(median)} y2={dyOf(median)} stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3" />
+									{#each slowIdxs as i}
+										<circle cx={xOf(i, dn)} cy={dyOf(dPts[i].duration_ms!)} r="3" fill="#ef4444" stroke="white" stroke-width="1" />
+									{/each}
+									{#if durHoverIdx !== null}
+										<line x1={xOf(durHoverIdx, dn)} x2={xOf(durHoverIdx, dn)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
+										<circle cx={xOf(durHoverIdx, dn)} cy={dyOf(dPts[durHoverIdx].duration_ms!)} r="3.5" fill="#10b981" stroke="white" stroke-width="1.5" />
+									{/if}
+									<rect x={PAD.l} y={PAD.t} width={iW} height={iH} fill="transparent" />
+								</svg>
+							</div>
+						{/if}
+					{/if}
 				{/if}
-			{/if}
-		</div>
-	{/if}
+			{/snippet}
+		</ActivityCharts>
+	</div>
 
 	<!-- Insights -->
 	{#if session.insights.length > 0}
@@ -418,15 +463,9 @@
 	.hero-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #70707a; margin-top: 6px; }
 	.hero-sub { font-size: 11px; color: #a1a1aa; margin-top: 2px; }
 
-	.tool-dist { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px; }
-	.td-chip { display: flex; align-items: center; gap: 4px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 4px 10px; }
-	.td-name { font-size: 12px; font-weight: 600; font-family: monospace; color: #334155; }
-	.td-count { font-size: 11px; color: #94a3b8; }
-	.td-chip.other { background: #fafafa; }
+	.grade-badge { font-size: 18px; font-weight: 800; padding: 2px 12px; border-radius: 10px; }
 
-	.charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 28px; }
-	.chart-card { background: white; border-radius: 16px; padding: 20px 22px; border: 1px solid #e8e5e0; transition: box-shadow 0.25s ease; }
-	.chart-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.04); }
+	.chart-card { background: white; border-radius: 16px; padding: 22px 24px; }
 	.chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1px; }
 	.chart-header h3 { font-size: 14px; font-weight: 700; color: #232326; }
 	.chart-header-right { display: flex; align-items: center; gap: 6px; }
@@ -486,7 +525,6 @@
 	.empty { padding: 32px; text-align: center; color: #64748b; background: white; border: 1px solid #e2e8f0; border-radius: 12px; }
 
 	@media (max-width: 768px) {
-		.charts-grid { grid-template-columns: 1fr; }
 		.session-header { flex-direction: column; align-items: flex-start; }
 	}
 </style>

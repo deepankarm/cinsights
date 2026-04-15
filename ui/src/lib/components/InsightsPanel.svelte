@@ -1,21 +1,18 @@
 <script lang="ts">
 	import type { DigestDetail, DigestSectionRead, DigestStatsData } from '$lib/types';
 	import { renderLinkedMarkdown } from '$lib/markdown';
-	import { fmtTokens, fmtMinutes, barPct, maxVal, gradeColor, gradeBg, copyText } from '$lib/format';
+	import { fmtTokens, fmtMinutes, copyText } from '$lib/format';
 	import { onMount } from 'svelte';
+	import ActivityCharts from './ActivityCharts.svelte';
 
 	let { digest }: { digest: DigestDetail } = $props();
 
-	let showAllSessions = $state(false);
 	let expandedCards: Record<string, boolean> = $state({});
 	let savedExpandState: Record<string, boolean> = {};
-	let savedShowAll = false;
 
 	onMount(() => {
 		const handleExpand = () => {
 			savedExpandState = { ...expandedCards };
-			savedShowAll = showAllSessions;
-			// Expand all cards
 			const allKeys: Record<string, boolean> = {};
 			for (let i = 0; i < 20; i++) {
 				allKeys[`feat-${i}`] = true;
@@ -24,11 +21,9 @@
 				allKeys[`amb-${i}`] = true;
 			}
 			expandedCards = allKeys;
-			showAllSessions = true;
 		};
 		const handleCollapse = () => {
 			expandedCards = savedExpandState;
-			showAllSessions = savedShowAll;
 		};
 		window.addEventListener('export-expand', handleExpand);
 		window.addEventListener('export-collapse', handleCollapse);
@@ -120,89 +115,12 @@
 {#if stats}
 	<section class="sect">
 		<h2 class="sect-title">Activity</h2>
-		<div class="chart-bento">
-			<div class="chart-box chart-wide">
-				<h3>Tools</h3>
-				<div class="hbars">
-					{#each Object.entries(stats.tool_distribution).slice(0, 8) as [name, count]}
-						{@const pct = barPct(count, maxVal(stats.tool_distribution))}
-						<div class="hbar">
-							<span class="hbar-name">{name}</span>
-							<div class="hbar-track"><div class="hbar-fill hbar-c1" style="width:{pct}%"></div></div>
-							<span class="hbar-val">{count}</span>
-						</div>
-					{/each}
-				</div>
-			</div>
-			<div class="chart-box">
-				<h3>Languages</h3>
-				<div class="hbars">
-					{#each Object.entries(stats.language_distribution).slice(0, 6) as [lang, count]}
-						{@const pct = barPct(count, maxVal(stats.language_distribution))}
-						<div class="hbar">
-							<span class="hbar-name">{lang}</span>
-							<div class="hbar-track"><div class="hbar-fill hbar-c2" style="width:{pct}%"></div></div>
-							<span class="hbar-val">{count}</span>
-						</div>
-					{/each}
-					{#if Object.keys(stats.language_distribution).length === 0}
-						<span class="chart-empty">No data</span>
-					{/if}
-				</div>
-			</div>
-			<div class="chart-box">
-				<h3>Coding hours</h3>
-				<div class="hour-bars">
-					{#each Object.entries(stats.time_of_day) as [hour, count]}
-						{@const pct = barPct(count, maxVal(stats.time_of_day))}
-						<div class="hour-col" title="{hour}:00 — {count} sessions">
-							<div class="hour-fill" style="height:{pct}%"></div>
-							<span class="hour-label">{hour}</span>
-						</div>
-					{/each}
-				</div>
-			</div>
-			<div class="chart-box">
-				<h3>Errors</h3>
-				<div class="hbars">
-					{#each Object.entries(stats.error_types).slice(0, 5) as [type, count]}
-						{@const pct = barPct(count, maxVal(stats.error_types))}
-						<div class="hbar">
-							<span class="hbar-name">{type}</span>
-							<div class="hbar-track"><div class="hbar-fill hbar-c4" style="width:{pct}%"></div></div>
-							<span class="hbar-val">{count}</span>
-						</div>
-					{/each}
-					{#if Object.keys(stats.error_types).length === 0}
-						<span class="chart-empty">No errors</span>
-					{/if}
-				</div>
-			</div>
-		</div>
-	</section>
-
-	<!-- Session Health -->
-	{@const healthLimit = 20}
-	{@const healthItems = showAllSessions ? stats.session_health : stats.session_health.slice(0, healthLimit)}
-	<section class="sect">
-		<h2 class="sect-title">Session health <span class="count-badge">{stats.session_health.length}</span></h2>
-		<div class="health-grid">
-			{#each healthItems as h}
-				{@const sessionNum = sessionIds.indexOf(h.session_id) + 1}
-				<a href="/sessions/{h.session_id}" class="health-pill" style="background:{gradeBg(h.grade)}">
-					<span class="health-grade" style="color:{gradeColor(h.grade)}">{h.grade}</span>
-					<div class="health-info">
-						{#if sessionNum > 0}<span class="health-name">Session {sessionNum}</span>{/if}
-						<span class="health-meta">{h.duration_minutes}m &middot; {h.tool_count} tools &middot; {fmtTokens(h.total_tokens ?? 0)}</span>
-					</div>
-				</a>
-			{/each}
-		</div>
-		{#if stats.session_health.length > healthLimit}
-			<button class="show-more" onclick={() => showAllSessions = !showAllSessions}>
-				{showAllSessions ? 'Show fewer' : `Show all ${stats.session_health.length}`}
-			</button>
-		{/if}
+		<ActivityCharts
+			toolDistribution={stats.tool_distribution}
+			languageDistribution={stats.language_distribution}
+			timeOfDay={stats.time_of_day}
+			errorTypes={stats.error_types}
+		/>
 	</section>
 {/if}
 
@@ -440,38 +358,6 @@
 	.gc-violet h3 { color: #6d28d9; }
 	.gc-violet ul { color: #4c1d95; }
 
-	/* Bento charts */
-	.chart-bento { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-	.chart-box { background: white; border-radius: 16px; padding: 22px 24px; }
-	.chart-wide { grid-column: span 2; }
-	.chart-box h3 { font-size: 13px; font-weight: 700; color: #232326; margin-bottom: 16px; }
-	.chart-empty { color: #a1a1aa; font-size: 13px; }
-	.hbars { display: flex; flex-direction: column; gap: 8px; }
-	.hbar { display: flex; align-items: center; gap: 10px; }
-	.hbar-name { width: 100px; font-size: 13px; color: #52525b; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.hbar-track { flex: 1; height: 10px; background: #f4f4f5; border-radius: 5px; overflow: hidden; }
-	.hbar-fill { height: 100%; border-radius: 5px; transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
-	.hbar-c1 { background: linear-gradient(90deg, #6366f1, #a5b4fc); }
-	.hbar-c2 { background: linear-gradient(90deg, #10b981, #6ee7b7); }
-	.hbar-c4 { background: linear-gradient(90deg, #ef4444, #fca5a5); }
-	.hbar-val { width: 40px; font-size: 13px; font-weight: 600; color: #71717a; text-align: right; font-variant-numeric: tabular-nums; }
-	.hbar-link { text-decoration: none; border-radius: 8px; padding: 2px 0; transition: background 0.15s; }
-	.hbar-link:hover { background: #f9fafb; }
-	.hour-bars { display: flex; align-items: flex-end; gap: 4px; height: 120px; padding-top: 8px; }
-	.hour-col { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; }
-	.hour-fill { width: 100%; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, #8b5cf6, #ddd6fe); transition: height 0.4s; min-height: 2px; }
-	.hour-label { font-size: 10px; color: #a1a1aa; margin-top: 4px; }
-
-	/* Health */
-	.health-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
-	.health-pill { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 12px; text-decoration: none; color: inherit; transition: transform 0.15s, box-shadow 0.15s; }
-	.health-pill:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
-	.health-grade { font-size: 22px; font-weight: 800; flex-shrink: 0; }
-	.health-info { display: flex; flex-direction: column; min-width: 0; }
-	.health-name { font-size: 13px; font-weight: 600; color: #232326; }
-	.health-meta { font-size: 12px; color: #a1a1aa; }
-	.show-more { display: block; margin: 16px auto 0; background: white; border: none; border-radius: 10px; padding: 10px 24px; font-size: 13px; font-weight: 500; color: #70707a; cursor: pointer; transition: all 0.15s; }
-	.show-more:hover { color: #232326; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
 
 	/* Duo grid */
 	.duo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
@@ -538,8 +424,6 @@
 	.accent-card :global(code), .persona :global(code), .content-card :global(code) { background: #f4f4f5; padding: 1px 6px; border-radius: 4px; font-size: 0.9em; }
 
 	@media (max-width: 768px) {
-		.chart-bento { grid-template-columns: 1fr; }
-		.chart-wide { grid-column: span 1; }
 		.glance-grid { grid-template-columns: 1fr; }
 		.duo-grid { grid-template-columns: 1fr; }
 	}

@@ -53,6 +53,7 @@ class SessionRead(BaseModel):
     total_tokens: int
     status: SessionStatus
     tool_call_count: int
+    error_count: int
     insight_count: int
     active_duration_ms: float | None = None
 
@@ -128,6 +129,13 @@ async def list_sessions(
     )
     tool_counts: dict[str, int] = {sid: cnt for sid, cnt in tc_result.all()}
 
+    err_result = await db.exec(
+        select(ToolCall.session_id, func.count())
+        .where(col(ToolCall.session_id).in_(session_ids), ToolCall.success == False)  # noqa: E712
+        .group_by(ToolCall.session_id)
+    )
+    error_counts: dict[str, int] = {sid: cnt for sid, cnt in err_result.all()}
+
     ins_result = await db.exec(
         select(Insight.session_id, func.count())
         .where(col(Insight.session_id).in_(session_ids))
@@ -161,6 +169,7 @@ async def list_sessions(
             total_tokens=s.total_tokens,
             status=s.status,
             tool_call_count=tool_counts.get(s.id, 0),
+            error_count=error_counts.get(s.id, 0),
             insight_count=insight_counts.get(s.id, 0),
             active_duration_ms=_active_ms(s),
         )
