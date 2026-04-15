@@ -5,7 +5,7 @@ Everything you need to go from zero to your first insights report.
 ## Prerequisites
 
 - Python 3.11+ (3.12 recommended)
-- An Anthropic API key (or another LLM provider key)
+- An LLM provider API key (Anthropic, OpenAI, etc.) — or [Ollama](https://ollama.com) for local inference without an API key
 
 ## Install
 
@@ -37,6 +37,18 @@ API keys come from environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
 
 cinsights uses Haiku by default. A full refresh of 50 sessions costs roughly $0.10-0.30. This is intentional - insights should be cheap enough to run daily.
 
+### Using Ollama (no API key needed)
+
+If you don't have an API key or want to try cinsights without any cloud calls:
+
+```bash
+brew install ollama
+ollama pull qwen2.5:14b
+cinsights setup --provider openai --model qwen2.5:14b --base-url http://localhost:11434/v1
+```
+
+Local models are slower than cloud APIs (a digest takes ~2-3 minutes vs seconds) but free and work offline. Use `qwen2.5:14b` for best quality or `qwen2.5:7b` on machines with less RAM.
+
 See [configuration](configuration.md) for the full reference.
 
 ## Choose a source
@@ -52,7 +64,7 @@ cinsights supports three data sources. Pick one to start:
 Using the local source as an example:
 
 ```bash
-# Set your API key
+# Set your API key (skip if using Ollama)
 export ANTHROPIC_API_KEY=sk-ant-...
 
 # 1. Index sessions - discovers sessions, computes quality metrics, scores them.
