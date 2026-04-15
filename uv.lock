@@ -682,7 +682,7 @@ requires-dist = [
     { name = "genai-prices", specifier = ">=0.0.56" },
     { name = "httpx", specifier = ">=0.28,<1.0" },
     { name = "jinja2", specifier = ">=3.1,<4.0" },
-    { name = "pydantic-ai", extras = ["anthropic"], specifier = ">=1.0" },
+    { name = "pydantic-ai", specifier = ">=1.0" },
     { name = "pydantic-settings", specifier = ">=2.7,<3.0" },
     { name = "rich", specifier = ">=13.0,<14.0" },
     { name = "sqlmodel", specifier = ">=0.0.22,<0.1" },

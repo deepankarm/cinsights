@@ -473,6 +473,7 @@ async def _run_one_digest(
             period_end=end,
             session_count=stats.session_count,
             stats_json=stats.model_dump_json(),
+            analysis_model=analyzer._llm_config.model if analyzer else None,
             status=DigestStatus.ANALYZING,
         )
         db.add(digest_record)
@@ -1095,9 +1096,8 @@ async def _analyze_async(
     sessionmaker = get_sessionmaker()
 
     llm = get_llm_config()
-    model = llm.build_model()
-    analyzer = SessionAnalyzer(model=model)
-    project_detector = ProjectDetector(model=model)
+    analyzer = SessionAnalyzer(llm_config=llm)
+    project_detector = ProjectDetector(llm_config=llm)
 
     async with sessionmaker() as _kp_db:
         kp_result = await _kp_db.exec(
@@ -1318,7 +1318,7 @@ async def _digest_async(
         from cinsights.analysis.digest import DigestAnalyzer
         from cinsights.settings import get_llm_config
 
-        analyzer = DigestAnalyzer(model=get_llm_config().build_model())
+        analyzer = DigestAnalyzer(llm_config=get_llm_config())
 
     console.print(f"[bold]Running digest for {label} (last {days} days)...[/bold]\n")
 
