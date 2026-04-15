@@ -136,8 +136,6 @@
 			};
 		});
 	});
-	const totalSessions = $derived(trends.reduce((s, t) => s + t.session_count, 0));
-	const totalTokens = $derived(trends.reduce((s, t) => s + t.total_tokens, 0));
 </script>
 
 {#if trends.length > 1}

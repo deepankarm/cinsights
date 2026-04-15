@@ -57,14 +57,11 @@ async def update_daily_trend(db: AsyncSession, session: CodingSession) -> None:
         db.add(trend)
 
     # Re-aggregate from all sessions for this (date, user, project)
-    query = (
-        select(CodingSession)
-        .where(
-            CodingSession.user_id == user_id,
-            CodingSession.start_time >= datetime.fromisoformat(f"{date_str}T00:00:00"),
-            CodingSession.start_time < datetime.fromisoformat(f"{date_str}T23:59:59"),
-            col(CodingSession.status).in_([SessionStatus.INDEXED, SessionStatus.ANALYZED]),
-        )
+    query = select(CodingSession).where(
+        CodingSession.user_id == user_id,
+        CodingSession.start_time >= datetime.fromisoformat(f"{date_str}T00:00:00"),
+        CodingSession.start_time < datetime.fromisoformat(f"{date_str}T23:59:59"),
+        col(CodingSession.status).in_([SessionStatus.INDEXED, SessionStatus.ANALYZED]),
     )
     if project:
         query = query.where(CodingSession.project_name == project)
@@ -95,8 +92,7 @@ async def update_daily_trend(db: AsyncSession, session: CodingSession) -> None:
 
     # Tool call count
     tc_result = await db.exec(
-        select(ToolCall.session_id)
-        .where(col(ToolCall.session_id).in_([s.id for s in sessions]))
+        select(ToolCall.session_id).where(col(ToolCall.session_id).in_([s.id for s in sessions]))
     )
     trend.total_tool_calls = len(tc_result.all())
 
@@ -184,9 +180,7 @@ async def update_baseline(db: AsyncSession, session: CodingSession, window: int 
     baseline.avg_turns = round(sum(turn_counts) / len(turn_counts), 1) if turn_counts else 0
 
     # Tool counts (from span_count as proxy — actual tool count would need a join)
-    baseline.avg_tool_count = round(
-        sum(s.span_count for s in sessions) / len(sessions), 1
-    )
+    baseline.avg_tool_count = round(sum(s.span_count for s in sessions) / len(sessions), 1)
 
     # Quality metrics
     for field in _METRIC_FIELDS:
@@ -207,9 +201,7 @@ async def update_baseline(db: AsyncSession, session: CodingSession, window: int 
     # Tool distribution
     tool_counts: Counter[str] = Counter()
     for s in sessions:
-        tc_result = await db.exec(
-            select(ToolCall.tool_name).where(ToolCall.session_id == s.id)
-        )
+        tc_result = await db.exec(select(ToolCall.tool_name).where(ToolCall.session_id == s.id))
         for name in tc_result.all():
             tool_counts[name] += 1
     total_tools = sum(tool_counts.values())

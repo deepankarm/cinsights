@@ -157,9 +157,13 @@ def _run_to_read(run: RefreshRun, digest_context: str | None = None) -> RefreshR
 
 async def _latest_run(db: AsyncSession, command: str) -> RefreshRunRead | None:
     from cinsights.db.models import RefreshRunCommand, RefreshRunStatus
+
     q = (
         select(RefreshRun)
-        .where(RefreshRun.command == RefreshRunCommand(command), RefreshRun.status == RefreshRunStatus.SUCCESS)
+        .where(
+            RefreshRun.command == RefreshRunCommand(command),
+            RefreshRun.status == RefreshRunStatus.SUCCESS,
+        )
         .order_by(col(RefreshRun.started_at).desc())
         .limit(1)
     )
@@ -169,13 +173,14 @@ async def _latest_run(db: AsyncSession, command: str) -> RefreshRunRead | None:
 
 
 async def _enrich_with_digest_context(
-    db: AsyncSession, runs: list[RefreshRun],
+    db: AsyncSession,
+    runs: list[RefreshRun],
 ) -> dict[str, str]:
     """For digest/refresh runs, find which projects were targeted."""
     from cinsights.db.models import RefreshRunCommand
+
     digest_runs = [
-        r for r in runs
-        if r.command in (RefreshRunCommand.DIGEST, RefreshRunCommand.REFRESH)
+        r for r in runs if r.command in (RefreshRunCommand.DIGEST, RefreshRunCommand.REFRESH)
     ]
     if not digest_runs:
         return {}
@@ -183,9 +188,8 @@ async def _enrich_with_digest_context(
     context: dict[str, str] = {}
     for run in digest_runs:
         end = run.completed_at or run.started_at
-        q = (
-            select(Digest.project_name)
-            .where(Digest.created_at >= run.started_at, Digest.created_at <= end)
+        q = select(Digest.project_name).where(
+            Digest.created_at >= run.started_at, Digest.created_at <= end
         )
         rows = (await db.exec(q)).all()
         projects = [p for p in rows if p]
@@ -236,6 +240,7 @@ async def get_health(db: AsyncSession = Depends(get_db)) -> SystemHealthResponse
 
     # Current config
     from cinsights.settings import LimitsConfig, get_config
+
     config = get_config()
     limits_schema = LimitsConfig.model_json_schema().get("properties", {})
     limits_list = [
@@ -307,43 +312,55 @@ async def get_cost(db: AsyncSession = Depends(get_db)) -> CostSummaryResponse:
         p, c = prompt or 0, comp or 0
         total_prompt += p
         total_completion += c
-        by_command.append(CommandCost(
-            command=str(cmd),
-            prompt_tokens=p,
-            completion_tokens=c,
-            estimated_cost_usd=estimate_cost(p, c),
-            run_count=cnt,
-        ))
+        by_command.append(
+            CommandCost(
+                command=str(cmd),
+                prompt_tokens=p,
+                completion_tokens=c,
+                estimated_cost_usd=estimate_cost(p, c),
+                run_count=cnt,
+            )
+        )
 
     # By project (from session analysis tokens)
-    proj_q = select(
-        CodingSession.project_name,
-        func.sum(CodingSession.analysis_prompt_tokens),
-        func.sum(CodingSession.analysis_completion_tokens),
-        func.count(),
-    ).where(
-        CodingSession.status == SessionStatus.ANALYZED,
-    ).group_by(CodingSession.project_name)
+    proj_q = (
+        select(
+            CodingSession.project_name,
+            func.sum(CodingSession.analysis_prompt_tokens),
+            func.sum(CodingSession.analysis_completion_tokens),
+            func.count(),
+        )
+        .where(
+            CodingSession.status == SessionStatus.ANALYZED,
+        )
+        .group_by(CodingSession.project_name)
+    )
     proj_rows = (await db.exec(proj_q)).all()
 
     by_project = []
     for proj, prompt, comp, cnt in proj_rows:
         p, c = prompt or 0, comp or 0
-        by_project.append(ProjectCost(
-            project_name=proj or "unknown",
-            prompt_tokens=p,
-            completion_tokens=c,
-            estimated_cost_usd=estimate_cost(p, c),
-            session_count=cnt,
-        ))
+        by_project.append(
+            ProjectCost(
+                project_name=proj or "unknown",
+                prompt_tokens=p,
+                completion_tokens=c,
+                estimated_cost_usd=estimate_cost(p, c),
+                session_count=cnt,
+            )
+        )
     by_project.sort(key=lambda x: (x.prompt_tokens + x.completion_tokens), reverse=True)
 
     # Daily trend
-    daily_q = select(
-        func.date(RefreshRun.started_at),
-        func.sum(RefreshRun.total_prompt_tokens),
-        func.sum(RefreshRun.total_completion_tokens),
-    ).group_by(func.date(RefreshRun.started_at)).order_by(func.date(RefreshRun.started_at))
+    daily_q = (
+        select(
+            func.date(RefreshRun.started_at),
+            func.sum(RefreshRun.total_prompt_tokens),
+            func.sum(RefreshRun.total_completion_tokens),
+        )
+        .group_by(func.date(RefreshRun.started_at))
+        .order_by(func.date(RefreshRun.started_at))
+    )
     daily_rows = (await db.exec(daily_q)).all()
 
     daily_trend = [
@@ -389,18 +406,22 @@ async def get_coverage(db: AsyncSession = Depends(get_db)) -> CoverageResponse:
             proj_data[name]["scores"].append((avg_score, count))
 
     projects = []
-    for name, d in sorted(proj_data.items(), key=lambda x: x[1]["analyzed"] / max(x[1]["total"], 1)):
+    for name, d in sorted(
+        proj_data.items(), key=lambda x: x[1]["analyzed"] / max(x[1]["total"], 1)
+    ):
         total_w = sum(c for _, c in d["scores"])
         avg_int = sum(s * c for s, c in d["scores"]) / total_w if total_w else None
-        projects.append(ProjectCoverage(
-            project_name=name,
-            total_sessions=d["total"],
-            indexed=d["indexed"],
-            analyzed=d["analyzed"],
-            failed=d["failed"],
-            coverage_pct=round(d["analyzed"] / max(d["total"], 1) * 100, 1),
-            avg_interestingness=round(avg_int, 3) if avg_int is not None else None,
-        ))
+        projects.append(
+            ProjectCoverage(
+                project_name=name,
+                total_sessions=d["total"],
+                indexed=d["indexed"],
+                analyzed=d["analyzed"],
+                failed=d["failed"],
+                coverage_pct=round(d["analyzed"] / max(d["total"], 1) * 100, 1),
+                avg_interestingness=round(avg_int, 3) if avg_int is not None else None,
+            )
+        )
 
     # Score distribution
     score_q = select(CodingSession.interestingness_score).where(

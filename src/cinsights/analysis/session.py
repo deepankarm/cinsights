@@ -14,8 +14,11 @@ from cinsights.sources.base import SpanData, TraceData
 logger = logging.getLogger(__name__)
 
 MAX_IO_CHARS = 500  # Truncate tool I/O to keep prompt manageable
+
+
 def _get_limits():
     from cinsights.settings import get_config
+
     return get_config().limits
 
 
