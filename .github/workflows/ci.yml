@@ -26,6 +26,8 @@ jobs:
         run: cd ui && npm ci
       - name: ESLint
         run: cd ui && npx eslint .
+      - name: Svelte check
+        run: cd ui && npm run check
 
   tests:
     runs-on: ubuntu-latest
