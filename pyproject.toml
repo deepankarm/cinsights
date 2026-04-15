@@ -1,7 +1,7 @@
 [project]
 name = "cinsights"
 version = "0.1.0"
-description = "LLM-powered insights from coding agent sessions"
+description = "Coding agent insights for teams"
 readme = "README.md"
 license = "Apache-2.0"
 authors = [{ name = "Deepankar Mahapatro" }]
