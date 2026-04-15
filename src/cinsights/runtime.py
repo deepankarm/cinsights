@@ -97,11 +97,14 @@ async def _track_run(command: str) -> AsyncIterator[_RunHandle]:
 
     try:
         from cinsights.settings import get_config
+
         config = get_config()
-        run_metadata = _json.dumps({
-            "model": config.llm.model,
-            "provider": config.llm.provider,
-        })
+        run_metadata = _json.dumps(
+            {
+                "model": config.llm.model,
+                "provider": config.llm.provider,
+            }
+        )
     except Exception:
         run_metadata = None
 

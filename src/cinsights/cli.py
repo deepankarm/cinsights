@@ -40,9 +40,7 @@ def index(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
     source: str | None = typer.Option(None, help="Override source (phoenix, entireio, local)."),
     repo: str | None = typer.Option(None, help="Repo path for entireio source."),
-    trace_ids: list[str] | None = typer.Argument(
-        None, help="Specific trace/session IDs to index."
-    ),
+    trace_ids: list[str] | None = typer.Argument(None, help="Specific trace/session IDs to index."),
 ) -> None:
     """Discover sessions, extract metadata + quality metrics, score against baselines. Zero LLM cost."""
     _apply_source_overrides(source, repo)
@@ -89,7 +87,9 @@ def analyze(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
     source: str | None = typer.Option(None, help="Override source (phoenix, entireio, local)."),
     repo: str | None = typer.Option(None, help="Repo path for entireio source."),
-    min_score: float = typer.Option(0.0, "--min-score", help="Only analyze sessions with score >= this."),
+    min_score: float = typer.Option(
+        0.0, "--min-score", help="Only analyze sessions with score >= this."
+    ),
     trace_ids: list[str] | None = typer.Argument(
         None, help="Specific trace/session IDs to analyze."
     ),
@@ -158,7 +158,9 @@ def refresh(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
     source: str | None = typer.Option(None, help="Override source (phoenix, entireio, local)."),
     repo: str | None = typer.Option(None, help="Repo path for entireio source."),
-    min_score: float = typer.Option(0.4, "--min-score", help="Only analyze sessions with score >= this."),
+    min_score: float = typer.Option(
+        0.4, "--min-score", help="Only analyze sessions with score >= this."
+    ),
 ) -> None:
     """Refresh: index → analyze (scored). Run digest separately per project/user."""
     _apply_source_overrides(source, repo)

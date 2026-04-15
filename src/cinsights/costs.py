@@ -39,7 +39,9 @@ def chars_to_tokens(total_chars: int) -> int:
     return int(total_chars / chars_per_token) + SCHEMA_OVERHEAD_TOKENS
 
 
-def estimate_cost(input_tokens: int, output_tokens: int = ESTIMATED_RESPONSE_TOKENS) -> float | None:
+def estimate_cost(
+    input_tokens: int, output_tokens: int = ESTIMATED_RESPONSE_TOKENS
+) -> float | None:
     """Estimate dollar cost for an LLM call using the configured model.
 
     Uses genai-prices with the LLM provider and model from config.
@@ -98,7 +100,8 @@ def estimate_session_analysis_tokens(spans: list[SpanData]) -> int:
 
     # Tool spans (same filter as _build_prompts)
     tool_spans = [
-        s for s in spans
+        s
+        for s in spans
         if s.parent_id is not None
         and (s.tool_name or "Permission" in s.name or "Notification" in s.name)
     ]
@@ -137,7 +140,6 @@ def estimate_session_analysis_tokens(spans: list[SpanData]) -> int:
         timeline_chars += line_chars
 
     total_prompt_chars = (
-        _system_prompt_chars + overview_chars + tool_dist_chars
-        + query_chars + timeline_chars
+        _system_prompt_chars + overview_chars + tool_dist_chars + query_chars + timeline_chars
     )
     return chars_to_tokens(total_prompt_chars) + ESTIMATED_RESPONSE_TOKENS

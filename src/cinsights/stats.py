@@ -76,6 +76,7 @@ _ERROR_PATTERNS = [
 
 class WeeklyTrend(BaseModel):
     """One week of aggregated quality metrics."""
+
     week: str  # ISO date of Monday
     session_count: int
     avg_read_edit_ratio: float | None = None
@@ -365,7 +366,9 @@ async def compute_session_health(
     user_id: str | None = None,
 ) -> list[SessionHealthScore]:
     result = await db.exec(
-        _base_query(start, end, project_name, user_id).order_by(col(CodingSession.start_time).desc())
+        _base_query(start, end, project_name, user_id).order_by(
+            col(CodingSession.start_time).desc()
+        )
     )
     sessions = result.all()
     if not sessions:
@@ -596,8 +599,9 @@ async def collect_session_summaries(
 ) -> list[dict]:
     # Session summaries depend on Insight rows → ANALYZED only
     sessions_result = await db.exec(
-        _base_query(start, end, project_name, user_id, analyzed_only=True)
-        .order_by(CodingSession.start_time)
+        _base_query(start, end, project_name, user_id, analyzed_only=True).order_by(
+            CodingSession.start_time
+        )
     )
     sessions = sessions_result.all()
     if not sessions:
@@ -687,6 +691,7 @@ async def collect_session_summaries(
     # Sort by tool_count desc so the LLM sees the most substantial sessions first.
     # Cap to keep digest prompts within context limits.
     from cinsights.settings import get_config
+
     max_summaries = get_config().limits.max_digest_session_summaries
     summaries.sort(key=lambda x: x["tool_count"], reverse=True)
     return summaries[:max_summaries]

@@ -131,6 +131,7 @@ export interface DigestStatsData {
 		duration_minutes: number;
 		tool_count: number;
 		error_count: number;
+		total_tokens: number;
 		grade: string;
 		model: string | null;
 	}>;

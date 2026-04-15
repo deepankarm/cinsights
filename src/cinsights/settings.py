@@ -92,13 +92,27 @@ class LLMConfig(BaseModel):
 class LimitsConfig(BaseModel):
     """Context window and prompt size limits."""
 
-    max_timeline_spans: int = Field(200, description="Max tool call spans included in session analysis prompt")
-    timeline_head_tail: int = Field(30, description="Number of spans sampled from head and tail of timeline")
-    max_digest_session_summaries: int = Field(30, description="Max session summaries included in digest prompt")
-    max_digest_session_health: int = Field(50, description="Max session health entries included in digest prompt")
-    small_project_threshold: int = Field(5, description="Projects with this many sessions or fewer get all sessions analyzed")
-    min_coverage_per_user_project: int = Field(2, description="Minimum sessions analyzed per (user, project) pair")
-    min_coverage_per_project: int = Field(3, description="Minimum sessions analyzed per project globally")
+    max_timeline_spans: int = Field(
+        200, description="Max tool call spans included in session analysis prompt"
+    )
+    timeline_head_tail: int = Field(
+        30, description="Number of spans sampled from head and tail of timeline"
+    )
+    max_digest_session_summaries: int = Field(
+        30, description="Max session summaries included in digest prompt"
+    )
+    max_digest_session_health: int = Field(
+        50, description="Max session health entries included in digest prompt"
+    )
+    small_project_threshold: int = Field(
+        5, description="Projects with this many sessions or fewer get all sessions analyzed"
+    )
+    min_coverage_per_user_project: int = Field(
+        2, description="Minimum sessions analyzed per (user, project) pair"
+    )
+    min_coverage_per_project: int = Field(
+        3, description="Minimum sessions analyzed per project globally"
+    )
 
 
 class AppConfig(BaseModel):
