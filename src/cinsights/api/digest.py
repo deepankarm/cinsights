@@ -33,6 +33,7 @@ class DigestRead(BaseModel):
     status: str
     analysis_prompt_tokens: int
     analysis_completion_tokens: int
+    analysis_model: str | None = None
     created_at: datetime
     completed_at: datetime | None
     sessions_since: int = 0
@@ -50,6 +51,7 @@ class DigestDetail(BaseModel):
     sections: list[DigestSectionRead]
     analysis_prompt_tokens: int
     analysis_completion_tokens: int
+    analysis_model: str | None = None
     created_at: datetime
     completed_at: datetime | None
     sessions_since: int = 0
@@ -109,6 +111,7 @@ async def list_digests(
                 status=d.status,
                 analysis_prompt_tokens=d.analysis_prompt_tokens,
                 analysis_completion_tokens=d.analysis_completion_tokens,
+                analysis_model=d.analysis_model,
                 created_at=d.created_at,
                 completed_at=d.completed_at,
                 sessions_since=sessions_since,
@@ -176,6 +179,7 @@ async def get_digest(digest_id: str, db: AsyncSession = Depends(get_db)) -> Dige
         ],
         analysis_prompt_tokens=digest.analysis_prompt_tokens,
         analysis_completion_tokens=digest.analysis_completion_tokens,
+        analysis_model=digest.analysis_model,
         created_at=digest.created_at,
         completed_at=digest.completed_at,
         sessions_since=sessions_since,

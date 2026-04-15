@@ -81,6 +81,26 @@ class LLMConfig(BaseModel):
 
         return provider_cls(**kwargs)
 
+    use_json_schema_mode: bool = Field(
+        default=False,
+        description=(
+            "Use response_format json_schema instead of pydantic-ai tool-calling. "
+            "Required for Ollama and other local models that don't support tool use. "
+            "Auto-enabled when base_url points to localhost."
+        ),
+    )
+
+    @property
+    def is_local_ollama(self) -> bool:
+        """True when we should use direct json_schema mode."""
+        if self.use_json_schema_mode:
+            return True
+        if not self.base_url:
+            return False
+        return any(
+            self.base_url.startswith(prefix) for prefix in ("http://localhost", "http://127.0.0.1")
+        )
+
     def build_model(self):
         """Build a pydantic-ai Model via ``infer_model("provider:model")``."""
         from pydantic_ai.models import infer_model

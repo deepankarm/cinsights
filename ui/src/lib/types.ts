@@ -96,6 +96,7 @@ export interface DigestDetail {
 	sections: DigestSectionRead[];
 	analysis_prompt_tokens: number;
 	analysis_completion_tokens: number;
+	analysis_model: string | null;
 	created_at: string;
 	completed_at: string | null;
 	sessions_since: number;
