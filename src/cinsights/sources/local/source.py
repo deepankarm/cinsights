@@ -19,6 +19,7 @@ from cinsights.sources.local.parsers import (
 
 logger = logging.getLogger(__name__)
 
+
 def _project_from_cc_slug(slug: str) -> str | None:
     """Derive project name from a Claude Code project directory slug.
 

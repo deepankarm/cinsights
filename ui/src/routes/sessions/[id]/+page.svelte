@@ -16,7 +16,7 @@
 	let durHoverIdx: number | null = $state(null);
 	let copied = $state(false);
 
-	const id = $derived(page.params.id);
+	const id = $derived(page.params.id ?? '');
 
 	const W = 720, H = 180;
 	const PAD = { l: 52, r: 16, t: 16, b: 28 };
@@ -79,10 +79,12 @@
 		return session.context_growth.reduce((s, p) => s + (p.duration_ms ?? 0), 0);
 	});
 
-	const turnCount = $derived(session?.context_growth?.length ?? 0);
-
-	const errorCount = $derived(session?.tool_calls.filter(tc => !tc.success).length ?? 0);
-	const errorRate = $derived(session?.tool_calls.length ? (errorCount / session.tool_calls.length * 100) : 0);
+	const turnCount = $derived.by(() => session?.context_growth?.length ?? 0);
+	const errorCount = $derived.by(() => session?.tool_calls?.filter(tc => !tc.success).length ?? 0);
+	const errorRate = $derived.by(() => {
+		const len = session?.tool_calls?.length ?? 0;
+		return len > 0 ? (errorCount / len) * 100 : 0;
+	});
 
 	const grade = $derived.by(() => {
 		const rate = errorRate / 100;
@@ -157,7 +159,7 @@
 		return ms > 0 ? ms : null;
 	});
 
-	const toolsPerTurn = $derived(turnCount > 0 ? (session?.tool_calls.length ?? 0) / turnCount : 0);
+	const toolsPerTurn = $derived.by(() => turnCount > 0 ? (session?.tool_calls?.length ?? 0) / turnCount : 0);
 
 
 	function categoryColor(cat: string): string {
@@ -265,7 +267,7 @@
 	<div class="section">
 		<ActivityCharts {toolDistribution} {languageDistribution} {timeOfDay} {errorTypes} {errorDetails}>
 			{#snippet extra()}
-				{#if session.context_growth && session.context_growth.length > 1}
+				{#if session?.context_growth && session.context_growth.length > 1}
 					{@const pts = session.context_growth}
 					{@const n = pts.length}
 					{@const maxY = Math.max(...pts.map(p => p.prompt_tokens), 1)}
@@ -316,8 +318,8 @@
 					</div>
 
 					<!-- Turn Duration -->
-					{#if session.context_growth.some(p => p.duration_ms != null)}
-						{@const dPts = session.context_growth.filter(p => p.duration_ms != null)}
+					{#if session?.context_growth?.some(p => p.duration_ms != null)}
+						{@const dPts = session!.context_growth!.filter(p => p.duration_ms != null)}
 						{@const dn = dPts.length}
 						{#if dn > 1}
 							{@const durations = dPts.map(p => p.duration_ms!)}

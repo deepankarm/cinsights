@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { DigestDetail, DigestSectionRead, DigestStatsData } from '$lib/types';
 	import { renderLinkedMarkdown } from '$lib/markdown';
-	import { fmtTokens, fmtMinutes, copyText } from '$lib/format';
+	import { copyText } from '$lib/format';
 	import { onMount } from 'svelte';
 	import ActivityCharts from './ActivityCharts.svelte';
 
@@ -56,7 +56,7 @@
 	let recommendations = $derived(getSection('recommendations')?.metadata as Array<{name: string; description: string; rationale: string; starter_prompt: string | null; difficulty: string}> | undefined);
 	// Legacy support for old digests
 	let patterns = $derived(getSection('workflow_patterns')?.metadata as Array<{name: string; description: string; rationale: string; starter_prompt: string}> | undefined);
-	let ambitious = $derived(getSection('ambitious_workflows')?.metadata as Array<{name: string; description: string; rationale: string; starter_prompt: string}> | undefined);
+
 </script>
 
 <!-- At a Glance -->
@@ -278,7 +278,7 @@
 								<div class="code-wrap">
 									<span class="code-label">Starter prompt</span>
 									<pre>{r.starter_prompt}</pre>
-									<button class="btn-copy" onclick={(e) => copyText(r.starter_prompt, e.currentTarget as HTMLButtonElement)}>Copy</button>
+									<button class="btn-copy" onclick={(e) => copyText(r.starter_prompt ?? '', e.currentTarget as HTMLButtonElement)}>Copy</button>
 								</div>
 							{/if}
 						</div>

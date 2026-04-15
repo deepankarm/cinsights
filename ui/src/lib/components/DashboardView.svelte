@@ -3,7 +3,7 @@
 	import { onMount } from 'svelte';
 	import { getStats, getTrends, getUsers, getProjects, getSessions, getTokenDistribution, type TrendPoint, type UserSummary, type ProjectRead, type TokenDistribution } from '$lib/api';
 	import type { StatsResponse, SessionRead } from '$lib/types';
-	import { fmtTokens, fmtDur, userQualityMetrics, aggregateQualityMetrics, type QualityMetric } from '$lib/format';
+	import { fmtTokens, userQualityMetrics, aggregateQualityMetrics, type QualityMetric } from '$lib/format';
 	import QualityBar from './QualityBar.svelte';
 	import HeroMetrics from './HeroMetrics.svelte';
 	import TrendCharts from './TrendCharts.svelte';

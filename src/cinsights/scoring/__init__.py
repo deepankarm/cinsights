@@ -71,6 +71,7 @@ def select_for_analysis(
     from collections import defaultdict
 
     from cinsights.settings import get_config
+
     limits = get_config().limits
     if min_per_user_project is None:
         min_per_user_project = limits.min_coverage_per_user_project
@@ -83,7 +84,9 @@ def select_for_analysis(
 
     # Group by project and by (user, project)
     by_project: dict[str | None, list[tuple[CodingSession, float]]] = defaultdict(list)
-    by_user_project: dict[tuple[str, str | None], list[tuple[CodingSession, float]]] = defaultdict(list)
+    by_user_project: dict[tuple[str, str | None], list[tuple[CodingSession, float]]] = defaultdict(
+        list
+    )
     for session, score, _ in scored:
         by_project[session.project_name].append((session, score))
         key = (session.user_id or "unknown", session.project_name)

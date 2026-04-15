@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { getDigests, getDigest } from '$lib/api';
-	import { renderMarkdown, renderLinkedMarkdown as _renderLinked } from '$lib/markdown';
+	import { renderLinkedMarkdown as _renderLinked } from '$lib/markdown';
 	import { fmtTokens, fmtMinutes, barPct, maxVal, gradeColor, gradeBg, copyText } from '$lib/format';
 	import type { DigestDetail, DigestSectionRead, DigestStatsData } from '$lib/types';
 
@@ -18,12 +18,12 @@
 	onMount(async () => {
 		// Redirect project-scoped reports to the unified project page
 		if (projectFilter) {
-			goto(`/projects/${encodeURIComponent(projectFilter)}`, { replaceState: true });
+			void goto(`/projects/${encodeURIComponent(projectFilter)}`, { replaceState: true });
 			return;
 		}
 
 		try {
-			const digests = await getDigests(projectFilter ?? undefined);
+			const digests = await getDigests(undefined);
 			if (digests.length > 0 && digests[0].status === 'complete') {
 				digest = await getDigest(digests[0].id);
 			}
@@ -38,6 +38,10 @@
 		return digest?.sections.find((s) => s.section_type === type);
 	}
 
+	import type { WeeklyTrend } from '$lib/types';
+
+	let stats: DigestStatsData | null = $derived((digest as DigestDetail | null)?.stats ?? null);
+
 	let sessionIds = $derived(
 		(stats?.session_summaries ?? []).map((s: { session_id: string }) => s.session_id) as string[]
 	);
@@ -45,10 +49,6 @@
 	function renderLinkedMarkdown(text: string): string {
 		return _renderLinked(text, sessionIds);
 	}
-
-	import type { WeeklyTrend } from '$lib/types';
-
-	let stats = $derived(digest?.stats as DigestStatsData | null);
 
 	function sparkDelta(trends: WeeklyTrend[], field: keyof WeeklyTrend): { value: string; up: boolean } | null {
 		const vals = trends.map(t => t[field]).filter((v): v is number => v != null);

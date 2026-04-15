@@ -108,7 +108,7 @@ async def _store_indexed(
             start_time=trace.start_time,
             end_time=trace.end_time,
             model=(root.model_name if root and root.model_name else None)
-                or next((s.model_name for s in turn_spans if s.model_name), None),
+            or next((s.model_name for s in turn_spans if s.model_name), None),
             total_tokens=total_tokens,
             prompt_tokens=total_prompt,
             completion_tokens=total_completion,
@@ -427,10 +427,12 @@ async def _run_one_digest(
                 select_fn(DigestSection)
                 .where(DigestSection.digest_id == latest_complete.id)
                 .where(
-                    col(DigestSection.section_type).in_([
-                        DigestSectionType.AT_A_GLANCE,
-                        DigestSectionType.FRICTION_ANALYSIS,
-                    ])
+                    col(DigestSection.section_type).in_(
+                        [
+                            DigestSectionType.AT_A_GLANCE,
+                            DigestSectionType.FRICTION_ANALYSIS,
+                        ]
+                    )
                 )
             )
             prev_parts = []
@@ -574,9 +576,7 @@ async def _discover_work_items(
             work_items.append((sid, sid, trace, spans))
 
         if not_found:
-            console.print(
-                f"  [dim]{not_found} session(s) not found in source, skipped[/dim]"
-            )
+            console.print(f"  [dim]{not_found} session(s) not found in source, skipped[/dim]")
     else:
         start_time = datetime.now(UTC) - timedelta(hours=hours)
 
@@ -640,7 +640,10 @@ async def _discover_work_items(
 
 
 def _get_project_name(
-    settings, source: TraceSource, trace_id: str, previous_tag: str | None,
+    settings,
+    source: TraceSource,
+    trace_id: str,
+    previous_tag: str | None,
 ) -> tuple[str | None, str]:
     """Determine project name for a session based on source type."""
     if settings.source == SourceType.ENTIREIO and settings.entireio_repo_path:
@@ -684,16 +687,20 @@ async def _index_async(
     sessionmaker = get_sessionmaker()
 
     work_items = await _discover_work_items(
-        settings, source, sessionmaker, hours, limit, force, trace_ids,
+        settings,
+        source,
+        sessionmaker,
+        hours,
+        limit,
+        force,
+        trace_ids,
     )
 
     if not work_items:
         console.print("[yellow]No sessions to index.[/yellow]")
         return
 
-    console.print(
-        f"\n[bold]Indexing {len(work_items)} session(s)...[/bold]\n"
-    )
+    console.print(f"\n[bold]Indexing {len(work_items)} session(s)...[/bold]\n")
 
     # Fetch previous project tags
     async with sessionmaker() as _prev_db:
@@ -711,7 +718,14 @@ async def _index_async(
             try:
                 existing = await db.get(CodingSession, trace_id)
                 coding_session = await _store_indexed(
-                    db, trace_id, session_id, trace, spans, source, force, existing,
+                    db,
+                    trace_id,
+                    session_id,
+                    trace,
+                    spans,
+                    source,
+                    force,
+                    existing,
                     project_name=pn,
                 )
                 await update_daily_trend(db, coding_session)
@@ -739,8 +753,11 @@ async def _index_async(
             baseline = await db.get(SessionBaseline, baseline_id)
             if not baseline:
                 baseline = SessionBaseline(
-                    id=baseline_id, user_id=user_id_val, project_name=project_val,
-                    tenant_id=cs.tenant_id, session_count=0,
+                    id=baseline_id,
+                    user_id=user_id_val,
+                    project_name=project_val,
+                    tenant_id=cs.tenant_id,
+                    session_count=0,
                 )
             total, breakdown = score_session(cs, baseline)
             cs.interestingness_score = total
@@ -766,7 +783,9 @@ async def _index_async(
     table.add_row("Failed", str(failed))
     if scored_rows:
         table.add_row("High interest (≥0.6)", str(sum(1 for _, s, _ in scored_rows if s >= 0.6)))
-        table.add_row("Medium interest (≥0.4)", str(sum(1 for _, s, _ in scored_rows if 0.4 <= s < 0.6)))
+        table.add_row(
+            "Medium interest (≥0.4)", str(sum(1 for _, s, _ in scored_rows if 0.4 <= s < 0.6))
+        )
         table.add_row("Low interest (<0.4)", str(sum(1 for _, s, _ in scored_rows if s < 0.4)))
     console.print(table)
 
@@ -822,8 +841,11 @@ async def _score_async(
             baseline = await db.get(SessionBaseline, baseline_id)
             if not baseline:
                 baseline = SessionBaseline(
-                    id=baseline_id, user_id=user_id_val, project_name=project_val,
-                    tenant_id=cs.tenant_id, session_count=0,
+                    id=baseline_id,
+                    user_id=user_id_val,
+                    project_name=project_val,
+                    tenant_id=cs.tenant_id,
+                    session_count=0,
                 )
             total, breakdown = score_session(cs, baseline)
             cs.interestingness_score = total
@@ -936,12 +958,16 @@ async def _score_async(
     console.print(sim_table)
 
     # --- 3. Coverage detail at chosen threshold ---
-    to_analyze_ms, _ = select_for_analysis(scored_tuples, min_score=min_score, min_per_user_project=2)
+    to_analyze_ms, _ = select_for_analysis(
+        scored_tuples, min_score=min_score, min_per_user_project=2
+    )
     selected_ids = {s.id for s in to_analyze_ms}
 
     # Build nested project → user stats
     by_proj_user: dict[str, dict[str, dict]] = defaultdict(
-        lambda: defaultdict(lambda: {"total": 0, "selected": 0, "analyzed": 0, "top_score": 0.0, "est_cost": 0.0})
+        lambda: defaultdict(
+            lambda: {"total": 0, "selected": 0, "analyzed": 0, "top_score": 0.0, "est_cost": 0.0}
+        )
     )
     for sid, uid, proj, status, score, _ in scored_rows:
         p = proj or "Unknown"
@@ -976,7 +1002,9 @@ async def _score_async(
     cov_table.add_column("Top Score", justify="right")
     cov_table.add_column("Est. Cost", justify="right")
 
-    sorted_projects = sorted(by_proj_user, key=lambda p: sum(u["total"] for u in by_proj_user[p].values()), reverse=True)
+    sorted_projects = sorted(
+        by_proj_user, key=lambda p: sum(u["total"] for u in by_proj_user[p].values()), reverse=True
+    )
     for i, proj in enumerate(sorted_projects):
         users = by_proj_user[proj]
         # Project totals
@@ -989,9 +1017,13 @@ async def _score_async(
 
         pc_str = f"${pc:.2f}" if pc else "-"
         cov_table.add_row(
-            f"[bold]{proj}[/bold]", "",
-            f"[bold]{pt}[/bold]", f"[bold]{ps}[/bold]", f"[bold]{_pct(ps, pt)}[/bold]",
-            f"[bold]{pa}[/bold]", f"[bold]{_pct(pa, pt)}[/bold]",
+            f"[bold]{proj}[/bold]",
+            "",
+            f"[bold]{pt}[/bold]",
+            f"[bold]{ps}[/bold]",
+            f"[bold]{_pct(ps, pt)}[/bold]",
+            f"[bold]{pa}[/bold]",
+            f"[bold]{_pct(pa, pt)}[/bold]",
             f"[bold][{style}]{pts:.2f}[/{style}][/bold]",
             f"[bold]{pc_str}[/bold]",
         )
@@ -1002,9 +1034,13 @@ async def _score_async(
             style = _score_style(d["top_score"])
             uc_str = f"${d['est_cost']:.2f}" if d["est_cost"] else "-"
             cov_table.add_row(
-                "", f"  {uid}",
-                str(d["total"]), str(d["selected"]), _pct(d["selected"], d["total"]),
-                str(d["analyzed"]), _pct(d["analyzed"], d["total"]),
+                "",
+                f"  {uid}",
+                str(d["total"]),
+                str(d["selected"]),
+                _pct(d["selected"], d["total"]),
+                str(d["analyzed"]),
+                _pct(d["analyzed"], d["total"]),
                 f"[{style}]{d['top_score']:.2f}[/{style}]",
                 uc_str,
             )
@@ -1074,7 +1110,13 @@ async def _analyze_async(
     if trace_ids:
         # Analyze specific sessions by ID
         work_items = await _discover_work_items(
-            settings, source, sessionmaker, hours, limit, force, trace_ids,
+            settings,
+            source,
+            sessionmaker,
+            hours,
+            limit,
+            force,
+            trace_ids,
         )
     else:
         # Select INDEXED sessions using scoring + coverage fills
@@ -1093,7 +1135,9 @@ async def _analyze_async(
 
         if not all_indexed:
             console.print("[yellow]No scored INDEXED sessions found.[/yellow]")
-            console.print("  Run [cyan]cinsights index[/cyan] first to discover and score sessions.")
+            console.print(
+                "  Run [cyan]cinsights index[/cyan] first to discover and score sessions."
+            )
             return
 
         # Build scored tuples and apply selection with coverage fills
@@ -1276,9 +1320,7 @@ async def _digest_async(
 
         analyzer = DigestAnalyzer(model=get_llm_config().build_model())
 
-    console.print(
-        f"[bold]Running digest for {label} (last {days} days)...[/bold]\n"
-    )
+    console.print(f"[bold]Running digest for {label} (last {days} days)...[/bold]\n")
 
     result = await _run_one_digest(
         sessionmaker=sessionmaker,
@@ -1298,7 +1340,9 @@ async def _digest_async(
     status = result[0] if isinstance(result, tuple) else result
     if status is True:
         console.print(f"  [green]✓[/green] {label} — done")
-        url_path = f"/projects/{scope_value}" if scope_type == "project" else f"/users/{scope_value}"
+        url_path = (
+            f"/projects/{scope_value}" if scope_type == "project" else f"/users/{scope_value}"
+        )
         console.print(f"\n  View at: [bold]http://localhost:{settings.port}{url_path}[/bold]")
     elif status == "empty":
         console.print(f"  [yellow]·[/yellow] {label} — no sessions")

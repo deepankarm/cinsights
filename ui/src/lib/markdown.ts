@@ -17,7 +17,7 @@ export function renderMarkdown(src: string): string {
 
 export function linkifySessions(text: string, sessionIds: string[]): string {
 	if (!sessionIds.length) return text;
-	return text.replace(/Session (\d+)('s)?/gi, (match, num, possessive) => {
+	return text.replace(/Session (\d+)('s)?/gi, (match, num, _possessive) => {
 		const idx = parseInt(num) - 1;
 		if (idx >= 0 && idx < sessionIds.length) {
 			return `[${match}](/sessions/${sessionIds[idx]})`;

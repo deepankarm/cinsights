@@ -9,7 +9,7 @@
 	import ExportHTML from '$lib/components/ExportHTML.svelte';
 	import SessionTable from '$lib/components/SessionTable.svelte';
 
-	const userId = $derived(decodeURIComponent(page.params.id));
+	const userId = $derived(decodeURIComponent(page.params.id ?? ''));
 
 	let user: UserSummary | null = $state(null);
 	let digest: DigestDetail | null = $state(null);

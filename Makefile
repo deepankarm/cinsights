@@ -63,20 +63,23 @@ test: ## Run all tests
 test-cov: ## Run tests with coverage report
 	uv run pytest --cov=cinsights --cov-report=term-missing
 
-lint: ## Run linter (check only)
+lint: ## Run all linters (Python + UI)
 	uv run ruff check src/ tests/
+	cd ui && npx eslint .
 
 fix: ## Auto-fix lint issues
 	uv run ruff check --fix src/ tests/
 
-fmt: ## Format code
+fmt: ## Format all code (Python + UI)
 	uv run ruff format src/ tests/
+	cd ui && npm run fmt
 
 check: lint test ## Run lint + tests
 
 init: ## First-time project setup
 	uv sync
 	cd ui && npm install
+	uv run pre-commit install
 	@echo "\nReady. Run 'make dev' to start developing."
 
 clean: ## Remove generated files

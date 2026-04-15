@@ -47,7 +47,15 @@ async def list_projects(db: AsyncSession = Depends(get_db)) -> list[ProjectRead]
     rows = rows_result.all()
 
     results: list[ProjectRead] = []
-    for project_name, session_count, total_tokens, latest, analyzed_count, dev_count, active_days in rows:
+    for (
+        project_name,
+        session_count,
+        total_tokens,
+        latest,
+        analyzed_count,
+        dev_count,
+        active_days,
+    ) in rows:
         # Top tools for this project
         tool_result = await db.exec(
             select(ToolCall.tool_name, func.count())

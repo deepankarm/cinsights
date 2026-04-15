@@ -8,7 +8,7 @@
 	import InsightsPanel from '$lib/components/InsightsPanel.svelte';
 	import ExportHTML from '$lib/components/ExportHTML.svelte';
 
-	const projectName = $derived(decodeURIComponent(page.params.name));
+	const projectName = $derived(decodeURIComponent(page.params.name ?? ''));
 
 	let project: ProjectRead | null = $state(null);
 	let digest: DigestDetail | null = $state(null);
