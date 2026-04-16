@@ -8,16 +8,23 @@ When the provider is a local Ollama endpoint, ``_run_llm`` bypasses
 pydantic-ai's tool-calling approach (which Ollama doesn't handle reliably)
 and instead uses ``response_format: json_schema`` directly.  This will be
 removed once pydantic/pydantic-ai#4160 lands upstream.
+
+Every call goes through a best-effort ``LLMCallLog`` insert for per-call
+cost attribution (ticket M-001). Callers are required to pass
+``call_kind`` and should pass a ``scope_id`` when one is available.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import BaseModel
 from pydantic_ai import Agent
 from pydantic_ai.settings import ModelSettings
+
+from cinsights.db.models import LLMCallKind, LLMCallScopeType, LLMCallStatus
 
 if TYPE_CHECKING:
     from cinsights.settings import LLMConfig
@@ -25,6 +32,65 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
+
+
+async def _persist_llm_call(
+    *,
+    call_kind: LLMCallKind,
+    scope_type: LLMCallScopeType,
+    scope_id: str | None,
+    model: str,
+    provider: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    duration_ms: float,
+    status: LLMCallStatus,
+    error_message: str | None,
+) -> None:
+    """Best-effort insert of an ``LLMCallLog`` row.
+
+    Failures here must never propagate — the LLM call already succeeded (or
+    the caller is handling its failure); observability bugs should not
+    corrupt either outcome. Exceptions are logged and swallowed.
+    """
+    try:
+        from cinsights.costs import estimate_cost
+        from cinsights.db.engine import get_sessionmaker
+        from cinsights.db.models import LLMCallLog
+        from cinsights.settings import get_settings
+
+        dollar_cost = (
+            estimate_cost(
+                input_tokens=prompt_tokens,
+                output_tokens=completion_tokens,
+                model=model,
+                provider=provider,
+            )
+            if status == LLMCallStatus.SUCCESS and prompt_tokens > 0
+            else None
+        )
+
+        settings = get_settings()
+        sessionmaker = get_sessionmaker()
+        async with sessionmaker() as db:
+            row = LLMCallLog(
+                tenant_id=settings.tenant_id,
+                call_kind=call_kind,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                model=model,
+                provider=provider,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                duration_ms=duration_ms,
+                status=status,
+                error_message=error_message[:2000] if error_message else None,
+                dollar_cost=dollar_cost,
+            )
+            db.add(row)
+            await db.commit()
+    except Exception as exc:
+        logger.warning("Failed to persist LLMCallLog row: %s", exc)
 
 
 class LLMAnalyzer:
@@ -44,17 +110,54 @@ class LLMAnalyzer:
         output_type: type[T],
         system_prompt: str,
         user_prompt: str,
+        *,
+        call_kind: LLMCallKind,
+        scope_type: LLMCallScopeType = LLMCallScopeType.UNKNOWN,
+        scope_id: str | None = None,
         max_tokens: int = 4096,
     ) -> tuple[T, int, int]:
         """Run a single LLM call with structured output.
 
         Returns (output, prompt_tokens, completion_tokens).
+
+        Every invocation writes a best-effort ``LLMCallLog`` row capturing
+        duration, tokens, dollar cost, and success/failure status. The
+        ``call_kind`` argument is required; callers must tag with one of
+        the :class:`LLMCallKind` enum values.
         """
-        if self._llm_config.is_local_ollama:
-            return await self._run_ollama_direct(
-                output_type, system_prompt, user_prompt, max_tokens
+        start = time.perf_counter()
+        prompt_tokens = completion_tokens = 0
+        status = LLMCallStatus.SUCCESS
+        error_message: str | None = None
+
+        try:
+            if self._llm_config.is_local_ollama:
+                output, prompt_tokens, completion_tokens = await self._run_ollama_direct(
+                    output_type, system_prompt, user_prompt, max_tokens
+                )
+            else:
+                output, prompt_tokens, completion_tokens = await self._run_pydantic_ai(
+                    output_type, system_prompt, user_prompt, max_tokens
+                )
+            return output, prompt_tokens, completion_tokens
+        except BaseException as exc:
+            status = LLMCallStatus.FAILURE
+            error_message = f"{type(exc).__name__}: {exc}"
+            raise
+        finally:
+            duration_ms = (time.perf_counter() - start) * 1000.0
+            await _persist_llm_call(
+                call_kind=call_kind,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                model=self._llm_config.model,
+                provider=self._llm_config.provider,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                duration_ms=duration_ms,
+                status=status,
+                error_message=error_message,
             )
-        return await self._run_pydantic_ai(output_type, system_prompt, user_prompt, max_tokens)
 
     async def _run_pydantic_ai(
         self,

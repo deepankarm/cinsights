@@ -40,29 +40,47 @@ def chars_to_tokens(total_chars: int) -> int:
 
 
 def estimate_cost(
-    input_tokens: int, output_tokens: int = ESTIMATED_RESPONSE_TOKENS
+    input_tokens: int,
+    output_tokens: int = ESTIMATED_RESPONSE_TOKENS,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
+    model: str | None = None,
+    provider: str | None = None,
 ) -> float | None:
     """Estimate dollar cost for an LLM call using the configured model.
 
-    Uses genai-prices with the LLM provider and model from config.
-    Detects Bedrock model IDs (e.g. us.anthropic.claude-*) and routes
-    to the aws-bedrock provider automatically.
-    Returns None if pricing info is unavailable.
+    Uses genai-prices with the LLM provider and model from config (or from
+    explicit ``model`` / ``provider`` overrides — used by ``LLMCallLog``
+    persistence where the actual call's model may differ from the current
+    config, e.g. during a model switch mid-run).
+
+    ``cache_read_tokens`` and ``cache_write_tokens`` are priced separately
+    by genai-prices when supplied; default 0 preserves the old behavior.
+
+    Detects Bedrock model IDs (e.g. us.anthropic.claude-*) and routes to
+    the aws-bedrock provider automatically. Returns None if pricing info
+    is unavailable.
     """
     try:
         from genai_prices import Usage, calc_price
 
-        from cinsights.settings import get_llm_config
+        if model is None or provider is None:
+            from cinsights.settings import get_llm_config
 
-        llm = get_llm_config()
-        model = llm.model
-        provider = llm.provider
+            llm = get_llm_config()
+            model = model or llm.model
+            provider = provider or llm.provider
 
         # Bedrock model IDs start with a region prefix (us., eu., ap.)
         if model.startswith(("us.", "eu.", "ap.")) and ".anthropic." in model:
             provider = "aws-bedrock"
 
-        usage = Usage(input_tokens=input_tokens, output_tokens=output_tokens)
+        usage = Usage(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read_tokens or None,
+            cache_write_tokens=cache_write_tokens or None,
+        )
         price = calc_price(usage, model_ref=model, provider_id=provider)
         return float(price.total_price)
     except Exception:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
+import sqlalchemy as sa
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlmodel import col, func, select
@@ -14,6 +15,8 @@ from cinsights.db.engine import get_db
 from cinsights.db.models import (
     CodingSession,
     Digest,
+    LLMCallLog,
+    LLMCallStatus,
     RefreshRun,
     SessionStatus,
 )
@@ -104,6 +107,32 @@ class CostSummaryResponse(BaseModel):
     by_command: list[CommandCost]
     by_project: list[ProjectCost]
     daily_trend: list[DailyCost]
+
+
+class CallKindCost(BaseModel):
+    """Per-call-kind cost breakdown from ``LLMCallLog`` (ticket M-001)."""
+
+    call_kind: str
+    model: str
+    provider: str
+    call_count: int
+    success_count: int
+    failure_count: int
+    prompt_tokens: int
+    completion_tokens: int
+    cache_read_tokens: int
+    cache_write_tokens: int
+    total_duration_ms: float
+    avg_duration_ms: float
+    estimated_cost_usd: float | None  # sum of stored dollar_cost (None-skipped)
+
+
+class CallKindCostResponse(BaseModel):
+    total_calls: int
+    total_cost_usd: float | None
+    total_prompt_tokens: int
+    total_completion_tokens: int
+    by_kind: list[CallKindCost]
 
 
 class ProjectCoverage(BaseModel):
@@ -375,6 +404,95 @@ async def get_cost(db: AsyncSession = Depends(get_db)) -> CostSummaryResponse:
         by_command=by_command,
         by_project=by_project,
         daily_trend=daily_trend,
+    )
+
+
+@router.get("/cost-by-kind", response_model=CallKindCostResponse)
+async def get_cost_by_kind(db: AsyncSession = Depends(get_db)) -> CallKindCostResponse:
+    """Aggregate ``LLMCallLog`` by (call_kind, model, provider).
+
+    Per-call cost attribution added by ticket M-001. Each future metric
+    ticket that adds a new LLM call kind will show up here without any
+    additional wiring, as long as it tags calls with a new
+    :class:`LLMCallKind` enum value.
+    """
+    success_case = func.sum(sa.case((LLMCallLog.status == LLMCallStatus.SUCCESS, 1), else_=0))
+    failure_case = func.sum(sa.case((LLMCallLog.status == LLMCallStatus.FAILURE, 1), else_=0))
+
+    q = select(
+        LLMCallLog.call_kind,
+        LLMCallLog.model,
+        LLMCallLog.provider,
+        func.count().label("call_count"),
+        success_case.label("success_count"),
+        failure_case.label("failure_count"),
+        func.sum(LLMCallLog.prompt_tokens),
+        func.sum(LLMCallLog.completion_tokens),
+        func.sum(LLMCallLog.cache_read_tokens),
+        func.sum(LLMCallLog.cache_write_tokens),
+        func.sum(LLMCallLog.duration_ms),
+        func.sum(LLMCallLog.dollar_cost),
+    ).group_by(LLMCallLog.call_kind, LLMCallLog.model, LLMCallLog.provider)
+    rows = (await db.exec(q)).all()
+
+    by_kind: list[CallKindCost] = []
+    total_calls = 0
+    total_cost = 0.0
+    any_cost = False
+    total_prompt = 0
+    total_completion = 0
+    for (
+        kind,
+        model,
+        provider,
+        call_count,
+        success_count,
+        failure_count,
+        prompt,
+        comp,
+        cache_read,
+        cache_write,
+        total_dur,
+        dollar_sum,
+    ) in rows:
+        call_count = call_count or 0
+        prompt = prompt or 0
+        comp = comp or 0
+        total_dur_f = float(total_dur or 0.0)
+        total_calls += call_count
+        total_prompt += prompt
+        total_completion += comp
+        if dollar_sum is not None:
+            total_cost += float(dollar_sum)
+            any_cost = True
+        by_kind.append(
+            CallKindCost(
+                call_kind=str(kind),
+                model=model,
+                provider=provider,
+                call_count=call_count,
+                success_count=int(success_count or 0),
+                failure_count=int(failure_count or 0),
+                prompt_tokens=prompt,
+                completion_tokens=comp,
+                cache_read_tokens=cache_read or 0,
+                cache_write_tokens=cache_write or 0,
+                total_duration_ms=total_dur_f,
+                avg_duration_ms=(total_dur_f / call_count) if call_count else 0.0,
+                estimated_cost_usd=float(dollar_sum) if dollar_sum is not None else None,
+            )
+        )
+
+    by_kind.sort(
+        key=lambda r: (r.estimated_cost_usd or 0.0, r.prompt_tokens + r.completion_tokens),
+        reverse=True,
+    )
+    return CallKindCostResponse(
+        total_calls=total_calls,
+        total_cost_usd=total_cost if any_cost else None,
+        total_prompt_tokens=total_prompt,
+        total_completion_tokens=total_completion,
+        by_kind=by_kind,
     )
 
 

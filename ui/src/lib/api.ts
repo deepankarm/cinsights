@@ -211,6 +211,30 @@ export interface CostSummaryResponse {
 	daily_trend: DailyCost[];
 }
 
+export interface CallKindCost {
+	call_kind: string;
+	model: string;
+	provider: string;
+	call_count: number;
+	success_count: number;
+	failure_count: number;
+	prompt_tokens: number;
+	completion_tokens: number;
+	cache_read_tokens: number;
+	cache_write_tokens: number;
+	total_duration_ms: number;
+	avg_duration_ms: number;
+	estimated_cost_usd: number | null;
+}
+
+export interface CallKindCostResponse {
+	total_calls: number;
+	total_cost_usd: number | null;
+	total_prompt_tokens: number;
+	total_completion_tokens: number;
+	by_kind: CallKindCost[];
+}
+
 export interface ProjectCoverage { project_name: string; total_sessions: number; indexed: number; analyzed: number; failed: number; coverage_pct: number; avg_interestingness: number | null; }
 export interface ScoreBucket { bucket: string; count: number; }
 
@@ -232,6 +256,10 @@ export async function getDoctorRuns(command?: string, status?: string, skip = 0,
 
 export async function getDoctorCost(): Promise<CostSummaryResponse> {
 	return fetchJSON('/api/doctor/cost');
+}
+
+export async function getDoctorCostByKind(): Promise<CallKindCostResponse> {
+	return fetchJSON('/api/doctor/cost-by-kind');
 }
 
 export async function getDoctorCoverage(): Promise<CoverageResponse> {
