@@ -355,7 +355,7 @@
 
 	{#if costByKind && costByKind.by_kind.length > 0}
 		<div class="cost-table-wrap" style="margin-top: 1.25rem;">
-			<h3>LLM Calls by Kind <span class="hint">(per-call attribution, M-001)</span></h3>
+			<h3>LLM Calls by Kind</h3>
 			<table class="cost-table">
 				<thead>
 					<tr>
@@ -422,14 +422,12 @@
 </div>
 {/if}
 
-<!-- Section 3b: Source Capabilities (M-002) -->
 {#if capabilities}
 <div class="section">
-	<h2>Source Capabilities <span class="hint">(what each source can emit, M-002)</span></h2>
+	<h2>Source Capabilities</h2>
 	<p class="section-desc">
-		Honest declaration of which signals each trace source provides today.
-		Metrics that require capabilities a source doesn't emit are skipped
-		for sessions from that source instead of silently rendering 0.
+		What each trace source emits. Metrics requiring capabilities a source
+		doesn't provide are skipped rather than shown as zero.
 	</p>
 
 	<table class="cap-table">

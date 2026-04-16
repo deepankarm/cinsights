@@ -47,20 +47,7 @@ def estimate_cost(
     model: str | None = None,
     provider: str | None = None,
 ) -> float | None:
-    """Estimate dollar cost for an LLM call using the configured model.
-
-    Uses genai-prices with the LLM provider and model from config (or from
-    explicit ``model`` / ``provider`` overrides — used by ``LLMCallLog``
-    persistence where the actual call's model may differ from the current
-    config, e.g. during a model switch mid-run).
-
-    ``cache_read_tokens`` and ``cache_write_tokens`` are priced separately
-    by genai-prices when supplied; default 0 preserves the old behavior.
-
-    Detects Bedrock model IDs (e.g. us.anthropic.claude-*) and routes to
-    the aws-bedrock provider automatically. Returns None if pricing info
-    is unavailable.
-    """
+    """Returns None if pricing info is unavailable for the model."""
     try:
         from genai_prices import Usage, calc_price
 

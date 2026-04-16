@@ -1,17 +1,7 @@
 """LLM-based analysis: session insights, digest generation, project detection.
 
-All analyzers inherit from ``LLMAnalyzer`` which holds a pydantic-ai model
-and provides ``_run_llm`` — the shared call primitive that creates an Agent,
-runs it, and returns structured output + token usage.
-
-When the provider is a local Ollama endpoint, ``_run_llm`` bypasses
-pydantic-ai's tool-calling approach (which Ollama doesn't handle reliably)
-and instead uses ``response_format: json_schema`` directly.  This will be
-removed once pydantic/pydantic-ai#4160 lands upstream.
-
-Every call goes through a best-effort ``LLMCallLog`` insert for per-call
-cost attribution (ticket M-001). Callers are required to pass
-``call_kind`` and should pass a ``scope_id`` when one is available.
+Ollama uses response_format=json_schema directly because pydantic-ai's
+tool-calling is unreliable on local models (pydantic-ai#4160).
 """
 
 from __future__ import annotations
@@ -47,12 +37,7 @@ async def _persist_llm_call(
     status: LLMCallStatus,
     error_message: str | None,
 ) -> None:
-    """Best-effort insert of an ``LLMCallLog`` row.
-
-    Failures here must never propagate — the LLM call already succeeded (or
-    the caller is handling its failure); observability bugs should not
-    corrupt either outcome. Exceptions are logged and swallowed.
-    """
+    """Log one LLM call. Swallows its own errors — observability must not break the pipeline."""
     try:
         from cinsights.costs import estimate_cost
         from cinsights.db.engine import get_sessionmaker
@@ -94,14 +79,7 @@ async def _persist_llm_call(
 
 
 class LLMAnalyzer:
-    """Base class for all pydantic-ai backed analyzers."""
-
     def __init__(self, llm_config: LLMConfig):
-        """Initialize with an LLMConfig.
-
-        The config determines whether to use pydantic-ai's Agent (default)
-        or Ollama's native json_schema mode for structured output.
-        """
         self._llm_config = llm_config
         self._model = llm_config.build_model()
 
@@ -116,15 +94,7 @@ class LLMAnalyzer:
         scope_id: str | None = None,
         max_tokens: int = 4096,
     ) -> tuple[T, int, int]:
-        """Run a single LLM call with structured output.
-
-        Returns (output, prompt_tokens, completion_tokens).
-
-        Every invocation writes a best-effort ``LLMCallLog`` row capturing
-        duration, tokens, dollar cost, and success/failure status. The
-        ``call_kind`` argument is required; callers must tag with one of
-        the :class:`LLMCallKind` enum values.
-        """
+        """Returns (output, prompt_tokens, completion_tokens). Logs to LLMCallLog."""
         start = time.perf_counter()
         prompt_tokens = completion_tokens = 0
         status = LLMCallStatus.SUCCESS
@@ -166,7 +136,6 @@ class LLMAnalyzer:
         user_prompt: str,
         max_tokens: int,
     ) -> tuple[T, int, int]:
-        """Standard path: use pydantic-ai Agent with tool-calling."""
         agent = Agent(
             self._model,
             output_type=output_type,
@@ -186,14 +155,6 @@ class LLMAnalyzer:
         user_prompt: str,
         max_tokens: int,
     ) -> tuple[T, int, int]:
-        """Ollama path: use response_format json_schema directly.
-
-        Ollama's OpenAI-compatible API supports grammar-enforced JSON output
-        via ``response_format: { type: "json_schema", ... }``.  This is more
-        reliable than pydantic-ai's tool-calling approach for local models.
-
-        See: https://github.com/pydantic/pydantic-ai/issues/242
-        """
         import httpx
 
         base_url = self._llm_config.base_url

@@ -116,21 +116,9 @@ class TraceData:
 class TraceSource(Protocol):
     """Protocol for trace data sources."""
 
-    #: Short stable source identifier used as the key in
-    #: ``cinsights.capabilities.SOURCE_CAPABILITIES``. Must match the
-    #: ``CodingSession.source`` value the adapter writes.
     source_name: str
 
-    def capabilities(self) -> frozenset[str]:
-        """Return the set of ``Capability`` values this source reliably emits.
-
-        Default implementation looks the set up in
-        :data:`cinsights.capabilities.SOURCE_CAPABILITIES` keyed by
-        ``source_name`` — concrete sources rarely need to override this
-        directly; they update the map instead. Returned as raw strings
-        (capability values) so the protocol stays import-light.
-        """
-        ...
+    def capabilities(self) -> frozenset[str]: ...
 
     def get_sessions(
         self,

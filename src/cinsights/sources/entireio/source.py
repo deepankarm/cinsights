@@ -29,7 +29,6 @@ class EntireioSource:
         self._authors: dict[str, str] | None = None
 
     def capabilities(self) -> frozenset[str]:
-        """See :data:`cinsights.capabilities.SOURCE_CAPABILITIES`."""
         from cinsights.capabilities import capabilities_for_source
 
         return frozenset(c.value for c in capabilities_for_source(self.source_name))
