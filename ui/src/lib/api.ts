@@ -235,6 +235,31 @@ export interface CallKindCostResponse {
 	by_kind: CallKindCost[];
 }
 
+export interface CapabilityDescriptor {
+	key: string;
+	description: string;
+}
+
+export interface SourceCapabilities {
+	name: string;
+	capabilities: string[];
+	missing: string[];
+	session_count: number;
+}
+
+export interface MetricRequirement {
+	id: string;
+	requires: string[];
+	available_on: string[];
+	missing_on: string[];
+}
+
+export interface CapabilitiesResponse {
+	capabilities: CapabilityDescriptor[];
+	sources: SourceCapabilities[];
+	metrics: MetricRequirement[];
+}
+
 export interface ProjectCoverage { project_name: string; total_sessions: number; indexed: number; analyzed: number; failed: number; coverage_pct: number; avg_interestingness: number | null; }
 export interface ScoreBucket { bucket: string; count: number; }
 
@@ -260,6 +285,10 @@ export async function getDoctorCost(): Promise<CostSummaryResponse> {
 
 export async function getDoctorCostByKind(): Promise<CallKindCostResponse> {
 	return fetchJSON('/api/doctor/cost-by-kind');
+}
+
+export async function getDoctorCapabilities(): Promise<CapabilitiesResponse> {
+	return fetchJSON('/api/doctor/capabilities');
 }
 
 export async function getDoctorCoverage(): Promise<CoverageResponse> {
