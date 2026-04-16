@@ -1,15 +1,16 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import {
-		getDoctorHealth, getDoctorRuns, getDoctorCost, getDoctorCoverage,
+		getDoctorHealth, getDoctorRuns, getDoctorCost, getDoctorCostByKind, getDoctorCoverage,
 		type SystemHealthResponse, type RefreshRunRead,
-		type CostSummaryResponse, type CoverageResponse,
+		type CostSummaryResponse, type CallKindCostResponse, type CoverageResponse,
 	} from '$lib/api';
 	import { fmtTokens, fmtBytes, fmtCost, fmtAgo, fmtDate, fmtSecs, fmtNum } from '$lib/format';
 
 	let health: SystemHealthResponse | null = $state(null);
 	let runs: RefreshRunRead[] = $state([]);
 	let cost: CostSummaryResponse | null = $state(null);
+	let costByKind: CallKindCostResponse | null = $state(null);
 	let coverage: CoverageResponse | null = $state(null);
 	let loading = $state(true);
 	let error: string | null = $state(null);
@@ -30,15 +31,17 @@
 
 	onMount(async () => {
 		try {
-			const [h, r, c, cov] = await Promise.all([
+			const [h, r, c, ck, cov] = await Promise.all([
 				getDoctorHealth(),
 				getDoctorRuns(undefined, undefined, 0, 200),
 				getDoctorCost(),
+				getDoctorCostByKind(),
 				getDoctorCoverage(),
 			]);
 			health = h;
 			runs = r;
 			cost = c;
+			costByKind = ck;
 			coverage = cov;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load doctor data';
@@ -338,6 +341,50 @@
 		</div>
 	</div>
 
+	{#if costByKind && costByKind.by_kind.length > 0}
+		<div class="cost-table-wrap" style="margin-top: 1.25rem;">
+			<h3>LLM Calls by Kind <span class="hint">(per-call attribution, M-001)</span></h3>
+			<table class="cost-table">
+				<thead>
+					<tr>
+						<th>Kind</th><th>Model</th><th>Calls</th><th>OK / Fail</th>
+						<th>Input</th><th>Output</th><th>Avg Dur</th><th>Est. Cost</th>
+					</tr>
+				</thead>
+				<tbody>
+					{#each costByKind.by_kind as k}
+						<tr>
+							<td><code class="kind-badge">{k.call_kind}</code></td>
+							<td class="proj-name">{k.model}</td>
+							<td>{k.call_count}</td>
+							<td>
+								<span style="color: #16a34a">{k.success_count}</span>
+								{#if k.failure_count > 0}
+									/ <span style="color: #dc2626">{k.failure_count}</span>
+								{:else}
+									/ 0
+								{/if}
+							</td>
+							<td>{fmtTokens(k.prompt_tokens)}</td>
+							<td>{fmtTokens(k.completion_tokens)}</td>
+							<td>{k.avg_duration_ms.toFixed(0)}ms</td>
+							<td>{fmtCost(k.estimated_cost_usd)}</td>
+						</tr>
+					{/each}
+					<tr class="totals-row">
+						<td colspan="2"><strong>Total</strong></td>
+						<td><strong>{costByKind.total_calls}</strong></td>
+						<td></td>
+						<td><strong>{fmtTokens(costByKind.total_prompt_tokens)}</strong></td>
+						<td><strong>{fmtTokens(costByKind.total_completion_tokens)}</strong></td>
+						<td></td>
+						<td><strong>{fmtCost(costByKind.total_cost_usd)}</strong></td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+	{/if}
+
 	{#if cost.daily_trend.length > 1}
 		<div class="daily-chart">
 			<h3>Daily Token Usage</h3>
@@ -484,6 +531,9 @@
 	.cost-table td { padding: 6px 8px; color: #475569; }
 	.cost-table tr:hover td { background: #f8fafc; }
 	.cmd-badge { font-weight: 700; font-size: 11px; }
+	.kind-badge { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; padding: 2px 6px; background: #f1f5f9; color: #334155; border-radius: 4px; }
+	.cost-table-wrap h3 .hint { font-size: 11px; font-weight: 400; color: #94a3b8; margin-left: 6px; }
+	.cost-table tr.totals-row td { border-top: 1px solid #e2e8f0; color: #1e293b; }
 	.proj-name { font-family: monospace; font-weight: 600; color: #232326; }
 
 	.daily-chart { background: white; border: 1px solid #e8e5e0; border-radius: 12px; padding: 16px; }

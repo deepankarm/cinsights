@@ -482,7 +482,7 @@ async def _run_one_digest(
 
         try:
             assert analyzer is not None  # not stats_only path
-            result = await analyzer.analyze(stats)
+            result = await analyzer.analyze(stats, digest_id=digest_record.id)
             await _store_digest_sections(db, digest_record, result, json_mod)
             console.print(
                 f"  [green]✓[/green] {label} — {stats.session_count} sessions, "
@@ -1212,8 +1212,8 @@ async def _analyze_async(
 
     # Project detection for phoenix source (others already have project names)
     if settings.source not in (SourceType.ENTIREIO, SourceType.LOCAL):
-        detect_items_list: list[tuple[str | None, list[SpanData]]] = [
-            (previous_tags[trace_id], _filter_tool_spans(spans))
+        detect_items_list: list[tuple[str, str | None, list[SpanData]]] = [
+            (trace_id, previous_tags[trace_id], _filter_tool_spans(spans))
             for trace_id, _, _, spans in work_items
         ]
         analysis_results, project_guesses = await asyncio.gather(

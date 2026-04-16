@@ -234,6 +234,64 @@ class RefreshRunCommand(StrEnum):
     DIGEST = "digest"
 
 
+class LLMCallKind(StrEnum):
+    """Which cinsights call-site produced the LLM invocation.
+
+    Used for cost attribution on the Doctor page and later digest rollups.
+    Each call site is required to tag its `_run_llm` invocation with one of
+    these — see ticket M-001.
+    """
+
+    SESSION_ANALYSIS = "session_analysis"
+    PROJECT_DETECTION = "project_detection"
+    DIGEST_NARRATIVE = "digest_narrative"
+    DIGEST_ACTIONS = "digest_actions"
+    DIGEST_FORWARD = "digest_forward"
+
+
+class LLMCallScopeType(StrEnum):
+    """What the `scope_id` on an ``LLMCallLog`` row points to."""
+
+    SESSION = "session"  # scope_id is a coding_session.id (trace id)
+    DIGEST = "digest"  # scope_id is a digest.id
+    UNKNOWN = "unknown"  # scope not available at call site
+
+
+class LLMCallStatus(StrEnum):
+    SUCCESS = "success"
+    FAILURE = "failure"
+
+
+class LLMCallLog(SQLModel, table=True):
+    """One row per LLM invocation. Per-call cost attribution.
+
+    Complements ``RefreshRun`` (per-run rollup). The rollup stays authoritative
+    for "how much did this refresh cost" — this table lets us break that down
+    by call kind, model, or scope (session / digest). Ticket M-001.
+    """
+
+    __tablename__ = "llm_call_log"
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    tenant_id: str = Field(default="default", index=True)
+    call_kind: LLMCallKind = Field(index=True)
+    scope_type: LLMCallScopeType = LLMCallScopeType.UNKNOWN
+    scope_id: str | None = Field(default=None, index=True)
+    model: str
+    provider: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    duration_ms: float | None = None
+    status: LLMCallStatus = LLMCallStatus.SUCCESS
+    error_message: str | None = None  # truncated to 2000 chars on failure
+    dollar_cost: float | None = None  # via genai-prices; None when unavailable
+    schema_version: int = 1  # bump when log-row shape changes
+    metadata_json: str | None = None  # extensibility (retries, cache hits, etc.)
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
 class RefreshRun(SQLModel, table=True):
     """Self-observability for cinsights itself.
 

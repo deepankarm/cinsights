@@ -231,10 +231,15 @@ class SessionAnalyzer(LLMAnalyzer):
             len(user_prompt),
         )
 
+        from cinsights.db.models import LLMCallKind, LLMCallScopeType
+
         result, prompt_tokens, completion_tokens = await self._run_llm(
             AnalysisResult,
             system_prompt,
             user_prompt,
+            call_kind=LLMCallKind.SESSION_ANALYSIS,
+            scope_type=LLMCallScopeType.SESSION,
+            scope_id=trace.trace_id,
         )
         result.usage_prompt_tokens = prompt_tokens
         result.usage_completion_tokens = completion_tokens
