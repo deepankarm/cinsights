@@ -135,6 +135,38 @@ class CallKindCostResponse(BaseModel):
     by_kind: list[CallKindCost]
 
 
+class CapabilityDescriptor(BaseModel):
+    key: str
+    description: str
+
+
+class SourceCapabilities(BaseModel):
+    name: str
+    capabilities: list[str]
+    missing: list[str]
+    session_count: int
+
+
+class MetricRequirement(BaseModel):
+    id: str
+    requires: list[str]
+    available_on: list[str]
+    missing_on: list[str]
+
+
+class CapabilitiesResponse(BaseModel):
+    """Capability matrix for the Doctor page (ticket M-002).
+
+    Honest declaration of what each source in use can emit. UI uses this
+    to surface "behavioral signals unavailable on Phoenix sessions"
+    instead of rendering silent zeros.
+    """
+
+    capabilities: list[CapabilityDescriptor]
+    sources: list[SourceCapabilities]
+    metrics: list[MetricRequirement]
+
+
 class ProjectCoverage(BaseModel):
     project_name: str
     total_sessions: int
@@ -493,6 +525,60 @@ async def get_cost_by_kind(db: AsyncSession = Depends(get_db)) -> CallKindCostRe
         total_prompt_tokens=total_prompt,
         total_completion_tokens=total_completion,
         by_kind=by_kind,
+    )
+
+
+@router.get("/capabilities", response_model=CapabilitiesResponse)
+async def get_capabilities(db: AsyncSession = Depends(get_db)) -> CapabilitiesResponse:
+    """Source-capability matrix + per-metric requirements (ticket M-002)."""
+    from cinsights.capabilities import (
+        CAPABILITY_DESCRIPTIONS,
+        METRIC_REQUIREMENTS,
+        Capability,
+        all_known_sources,
+        capabilities_for_source,
+        missing_for_source,
+        session_supports_metric,
+    )
+
+    # Session counts per source (honest view of what's actually in the DB)
+    src_q = select(CodingSession.source, func.count()).group_by(CodingSession.source)
+    src_rows = (await db.exec(src_q)).all()
+    session_counts = {str(s): int(c) for s, c in src_rows}
+
+    capabilities = [
+        CapabilityDescriptor(key=c.value, description=CAPABILITY_DESCRIPTIONS[c])
+        for c in Capability
+    ]
+
+    sources = [
+        SourceCapabilities(
+            name=src,
+            capabilities=sorted(c.value for c in capabilities_for_source(src)),
+            missing=sorted(c.value for c in missing_for_source(src)),
+            session_count=session_counts.get(src, 0),
+        )
+        for src in all_known_sources()
+    ]
+
+    metrics = [
+        MetricRequirement(
+            id=metric_id,
+            requires=sorted(c.value for c in required),
+            available_on=sorted(
+                s for s in all_known_sources() if session_supports_metric(s, metric_id)
+            ),
+            missing_on=sorted(
+                s for s in all_known_sources() if not session_supports_metric(s, metric_id)
+            ),
+        )
+        for metric_id, required in sorted(METRIC_REQUIREMENTS.items())
+    ]
+
+    return CapabilitiesResponse(
+        capabilities=capabilities,
+        sources=sources,
+        metrics=metrics,
     )
 
 

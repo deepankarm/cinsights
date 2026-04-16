@@ -68,12 +68,20 @@ def _df_rows_to_spans(df: pd.DataFrame) -> list[SpanData]:
 class PhoenixSource:
     """Fetch trace data from a local Arize Phoenix instance."""
 
+    source_name = "phoenix"
+
     def __init__(
         self, base_url: str = "http://localhost:6006", project: str = "claude-code"
     ) -> None:
         self.client = Client(base_url=base_url)
         self.project = project
         self._all_spans_df: pd.DataFrame | None = None  # Cache within a run
+
+    def capabilities(self) -> frozenset[str]:
+        """See :data:`cinsights.capabilities.SOURCE_CAPABILITIES`."""
+        from cinsights.capabilities import capabilities_for_source
+
+        return frozenset(c.value for c in capabilities_for_source(self.source_name))
 
     def _fetch_all_spans_df(self) -> pd.DataFrame:
         """Fetch all spans as a dataframe, cached for the lifetime of this source."""

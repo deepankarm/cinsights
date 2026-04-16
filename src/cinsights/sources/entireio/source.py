@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 class EntireioSource:
     """Fetch trace data from Entire.co checkpoints stored on a git branch."""
 
+    source_name = "entireio"
+
     def __init__(
         self,
         repo_path: Path,
@@ -25,6 +27,12 @@ class EntireioSource:
         self.reader = GitReader(repo_path, branch)
         self._session_index: dict[str, _SessionRef] | None = None
         self._authors: dict[str, str] | None = None
+
+    def capabilities(self) -> frozenset[str]:
+        """See :data:`cinsights.capabilities.SOURCE_CAPABILITIES`."""
+        from cinsights.capabilities import capabilities_for_source
+
+        return frozenset(c.value for c in capabilities_for_source(self.source_name))
 
     def _build_index(self) -> dict[str, _SessionRef]:
         """Build an index of session_id → checkpoint/session info.
