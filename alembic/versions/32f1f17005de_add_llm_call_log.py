@@ -1,4 +1,4 @@
-"""add llm_call_log table for per-call cost attribution (M-001)
+"""add llm_call_log table
 
 Revision ID: 32f1f17005de
 Revises: 0929390eaedb

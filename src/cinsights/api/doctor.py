@@ -110,8 +110,6 @@ class CostSummaryResponse(BaseModel):
 
 
 class CallKindCost(BaseModel):
-    """Per-call-kind cost breakdown from ``LLMCallLog`` (ticket M-001)."""
-
     call_kind: str
     model: str
     provider: str
@@ -124,7 +122,7 @@ class CallKindCost(BaseModel):
     cache_write_tokens: int
     total_duration_ms: float
     avg_duration_ms: float
-    estimated_cost_usd: float | None  # sum of stored dollar_cost (None-skipped)
+    estimated_cost_usd: float | None
 
 
 class CallKindCostResponse(BaseModel):
@@ -155,13 +153,6 @@ class MetricRequirement(BaseModel):
 
 
 class CapabilitiesResponse(BaseModel):
-    """Capability matrix for the Doctor page (ticket M-002).
-
-    Honest declaration of what each source in use can emit. UI uses this
-    to surface "behavioral signals unavailable on Phoenix sessions"
-    instead of rendering silent zeros.
-    """
-
     capabilities: list[CapabilityDescriptor]
     sources: list[SourceCapabilities]
     metrics: list[MetricRequirement]
@@ -441,13 +432,6 @@ async def get_cost(db: AsyncSession = Depends(get_db)) -> CostSummaryResponse:
 
 @router.get("/cost-by-kind", response_model=CallKindCostResponse)
 async def get_cost_by_kind(db: AsyncSession = Depends(get_db)) -> CallKindCostResponse:
-    """Aggregate ``LLMCallLog`` by (call_kind, model, provider).
-
-    Per-call cost attribution added by ticket M-001. Each future metric
-    ticket that adds a new LLM call kind will show up here without any
-    additional wiring, as long as it tags calls with a new
-    :class:`LLMCallKind` enum value.
-    """
     success_case = func.sum(sa.case((LLMCallLog.status == LLMCallStatus.SUCCESS, 1), else_=0))
     failure_case = func.sum(sa.case((LLMCallLog.status == LLMCallStatus.FAILURE, 1), else_=0))
 
@@ -530,7 +514,6 @@ async def get_cost_by_kind(db: AsyncSession = Depends(get_db)) -> CallKindCostRe
 
 @router.get("/capabilities", response_model=CapabilitiesResponse)
 async def get_capabilities(db: AsyncSession = Depends(get_db)) -> CapabilitiesResponse:
-    """Source-capability matrix + per-metric requirements (ticket M-002)."""
     from cinsights.capabilities import (
         CAPABILITY_DESCRIPTIONS,
         METRIC_REQUIREMENTS,
@@ -541,7 +524,6 @@ async def get_capabilities(db: AsyncSession = Depends(get_db)) -> CapabilitiesRe
         session_supports_metric,
     )
 
-    # Session counts per source (honest view of what's actually in the DB)
     src_q = select(CodingSession.source, func.count()).group_by(CodingSession.source)
     src_rows = (await db.exec(src_q)).all()
     session_counts = {str(s): int(c) for s, c in src_rows}

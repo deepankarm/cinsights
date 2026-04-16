@@ -235,13 +235,6 @@ class RefreshRunCommand(StrEnum):
 
 
 class LLMCallKind(StrEnum):
-    """Which cinsights call-site produced the LLM invocation.
-
-    Used for cost attribution on the Doctor page and later digest rollups.
-    Each call site is required to tag its `_run_llm` invocation with one of
-    these — see ticket M-001.
-    """
-
     SESSION_ANALYSIS = "session_analysis"
     PROJECT_DETECTION = "project_detection"
     DIGEST_NARRATIVE = "digest_narrative"
@@ -250,11 +243,9 @@ class LLMCallKind(StrEnum):
 
 
 class LLMCallScopeType(StrEnum):
-    """What the `scope_id` on an ``LLMCallLog`` row points to."""
-
-    SESSION = "session"  # scope_id is a coding_session.id (trace id)
-    DIGEST = "digest"  # scope_id is a digest.id
-    UNKNOWN = "unknown"  # scope not available at call site
+    SESSION = "session"
+    DIGEST = "digest"
+    UNKNOWN = "unknown"
 
 
 class LLMCallStatus(StrEnum):
@@ -263,12 +254,7 @@ class LLMCallStatus(StrEnum):
 
 
 class LLMCallLog(SQLModel, table=True):
-    """One row per LLM invocation. Per-call cost attribution.
-
-    Complements ``RefreshRun`` (per-run rollup). The rollup stays authoritative
-    for "how much did this refresh cost" — this table lets us break that down
-    by call kind, model, or scope (session / digest). Ticket M-001.
-    """
+    """Per-call LLM accounting. RefreshRun keeps the run-level rollup."""
 
     __tablename__ = "llm_call_log"
 
@@ -285,10 +271,10 @@ class LLMCallLog(SQLModel, table=True):
     cache_write_tokens: int = 0
     duration_ms: float | None = None
     status: LLMCallStatus = LLMCallStatus.SUCCESS
-    error_message: str | None = None  # truncated to 2000 chars on failure
-    dollar_cost: float | None = None  # via genai-prices; None when unavailable
-    schema_version: int = 1  # bump when log-row shape changes
-    metadata_json: str | None = None  # extensibility (retries, cache hits, etc.)
+    error_message: str | None = None
+    dollar_cost: float | None = None
+    schema_version: int = 1
+    metadata_json: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
 
