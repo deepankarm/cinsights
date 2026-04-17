@@ -239,6 +239,36 @@ class RefreshRunCommand(StrEnum):
     DIGEST = "digest"
 
 
+class BehaviorCategory(StrEnum):
+    OWNERSHIP_DODGE = "ownership_dodge"
+    REASONING_LOOP = "reasoning_loop"
+    PERMISSION_SEEKING = "permission_seeking"
+    PREMATURE_STOP = "premature_stop"
+    SIMPLEST_MENTALITY = "simplest_mentality"
+    SELF_ADMITTED_ERROR = "self_admitted_error"
+
+
+class BehaviorConfidence(StrEnum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class BehavioralEvidence(SQLModel, table=True):
+    __tablename__ = "behavioral_evidence"
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    tenant_id: str = Field(default="default", index=True)
+    session_id: str = Field(foreign_key="coding_session.id", index=True)
+    category: BehaviorCategory
+    turn_id: str
+    quote: str
+    explanation: str
+    confidence: BehaviorConfidence = BehaviorConfidence.MEDIUM
+    validated: bool = True  # False if quote didn't match span data
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class AlertKind(StrEnum):
     DESTRUCTIVE_RM = "destructive_rm"
     FORCE_PUSH = "force_push"

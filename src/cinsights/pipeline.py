@@ -253,6 +253,7 @@ async def _store_insights(
     db: AsyncSession,
     coding_session: CodingSession,
     result: AnalysisResult,
+    spans: list | None = None,
 ) -> int:
     """Store LLM-generated insights on an already-INDEXED session.
 
@@ -287,6 +288,41 @@ async def _store_insights(
             prompt_version=settings.prompt_version_session,
         )
         db.add(insight)
+
+    if result.behaviors and spans:
+        from cinsights.analysis.session import validate_behavioral_evidence
+        from cinsights.db.models import (
+            BehavioralEvidence as BehavioralEvidenceRow,
+        )
+        from cinsights.db.models import (
+            BehaviorCategory,
+            BehaviorConfidence,
+        )
+
+        validated = validate_behavioral_evidence(result.behaviors, spans)
+
+        for item, is_valid in validated:
+            try:
+                cat = BehaviorCategory(item.category)
+            except ValueError:
+                continue
+            try:
+                conf = BehaviorConfidence(item.confidence)
+            except ValueError:
+                conf = BehaviorConfidence.MEDIUM
+
+            db.add(
+                BehavioralEvidenceRow(
+                    tenant_id=coding_session.tenant_id,
+                    session_id=coding_session.id,
+                    category=cat,
+                    turn_id=item.turn_id,
+                    quote=item.quote[:2000],
+                    explanation=item.explanation[:2000],
+                    confidence=conf,
+                    validated=is_valid,
+                )
+            )
 
     coding_session.status = SessionStatus.ANALYZED
     coding_session.analysis_prompt_tokens = result.usage_prompt_tokens
@@ -1290,7 +1326,7 @@ async def _analyze_async(
                     continue
                 if project_guess.project_name and not coding_session.project_name:
                     coding_session.project_name = project_guess.project_name
-                n_insights = await _store_insights(db, coding_session, result)
+                n_insights = await _store_insights(db, coding_session, result, _spans)
                 await update_daily_trend(db, coding_session)
                 await db.commit()
                 analyzed += 1
