@@ -61,6 +61,8 @@ class CodingSession(SQLModel, table=True):
     turn_count: int | None = None
     tool_calls_per_turn: float | None = None
 
+    interrupt_count: int | None = None
+
     # Scoring
     interestingness_score: float | None = None
     skip_reason: str | None = None

@@ -61,6 +61,7 @@ METRIC_REQUIREMENTS: dict[str, frozenset[Capability]] = {
         {Capability.TOKEN_CACHE_READ, Capability.TOKEN_CACHE_WRITE}
     ),
     "llm_call_log.thinking_tokens": frozenset({Capability.TOKEN_THINKING}),
+    "interrupt_count": frozenset({Capability.USER_INTERRUPT_MARKER}),
 }
 
 
