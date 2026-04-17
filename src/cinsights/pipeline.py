@@ -201,6 +201,18 @@ async def _store_indexed(
         if value is not None:
             setattr(coding_session, key, value)
 
+    # Harness attribution from root span (local/entireio only; Phoenix stays None)
+    if root:
+        v = root.attributes.get("harness.agent_version")
+        if v:
+            coding_session.agent_version = str(v)
+        eff = root.attributes.get("harness.effort_level")
+        if eff:
+            coding_session.effort_level = str(eff)
+        atd = root.attributes.get("harness.adaptive_thinking_disabled")
+        if atd is not None:
+            coding_session.adaptive_thinking_disabled = bool(atd)
+
     # Dangerous-op alerts
     from cinsights.alerts import detect_alerts
     from cinsights.db.models import AlertKind, SessionAlert

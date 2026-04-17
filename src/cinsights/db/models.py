@@ -62,6 +62,9 @@ class CodingSession(SQLModel, table=True):
     tool_calls_per_turn: float | None = None
 
     interrupt_count: int | None = None
+    agent_version: str | None = None
+    effort_level: str | None = None  # low / medium / high / max
+    adaptive_thinking_disabled: bool | None = None
 
     # Scoring
     interestingness_score: float | None = None
