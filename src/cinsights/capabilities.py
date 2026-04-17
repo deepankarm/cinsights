@@ -62,6 +62,8 @@ METRIC_REQUIREMENTS: dict[str, frozenset[Capability]] = {
     ),
     "llm_call_log.thinking_tokens": frozenset({Capability.TOKEN_THINKING}),
     "interrupt_count": frozenset({Capability.USER_INTERRUPT_MARKER}),
+    "harness.agent_version": frozenset({Capability.HARNESS_AGENT_VERSION}),
+    "harness.effort_level": frozenset({Capability.HARNESS_EFFORT_LEVEL}),
 }
 
 
