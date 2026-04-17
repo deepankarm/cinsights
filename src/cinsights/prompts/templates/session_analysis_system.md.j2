@@ -97,3 +97,7 @@ For each instance found, return it in the `behaviors` list with:
 - "The build server is returning 503s, which is unrelated to code changes" — genuinely external
 
 Only detect patterns where the agent plausibly caused the problem but deflected. Do not flag legitimate debugging or correct attribution. If no ownership dodges are present, return an empty `behaviors` list — never fabricate instances.
+
+## Reminder
+
+Your output MUST include both `insights` and `behaviors` fields. Check the Turn Exchanges section carefully for ownership_dodge patterns before returning.

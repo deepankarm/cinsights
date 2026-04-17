@@ -12,10 +12,12 @@
 {% endfor %}
 
 {% if user_queries %}
-## User Queries
-What the developer asked the agent each turn (truncated to 200 chars):
+## Turn Exchanges
+What the developer asked and how the agent responded (truncated):
 {% for q in user_queries %}
-- Turn {{ q.turn }}: {{ q.query }}
+- **Turn {{ q.turn }}** User: {{ q.query }}
+{% if q.agent_response is defined and q.agent_response %}  Agent: {{ q.agent_response }}
+{% endif %}
 {% endfor %}
 {% endif %}
 
