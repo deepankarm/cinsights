@@ -6,7 +6,6 @@
 	import { fmtTokens, gradeColor, gradeBg } from '$lib/format';
 	import type { SessionDetail } from '$lib/types';
 	import ActivityCharts, { type ErrorDetail } from '$lib/components/ActivityCharts.svelte';
-	import AgentContext from '$lib/components/AgentContext.svelte';
 	import BehavioralTag from '$lib/components/BehavioralTag.svelte';
 
 	let session: SessionDetail | null = $state(null);
@@ -264,15 +263,6 @@
 			<div class="hero-sub">{session.insights.length} insights</div>
 		</div>
 	</div>
-
-	<!-- Agent Context (collapsible) -->
-	<AgentContext
-		agentVersion={session.agent_version}
-		effortLevel={session.effort_level}
-		adaptiveThinkingDisabled={session.adaptive_thinking_disabled}
-		interruptCount={session.interrupt_count}
-		alerts={session.alerts}
-	/>
 
 	<!-- Activity Charts -->
 	<div class="section">

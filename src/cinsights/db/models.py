@@ -270,28 +270,6 @@ class BehavioralEvidence(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
-class AlertKind(StrEnum):
-    DESTRUCTIVE_RM = "destructive_rm"
-    FORCE_PUSH = "force_push"
-    HARD_RESET = "hard_reset"
-    CREDENTIAL_EXPOSURE = "credential_exposure"
-    PIPE_TO_SHELL = "pipe_to_shell"
-    CHMOD_WORLD_WRITABLE = "chmod_world_writable"
-    SQL_DROP = "sql_drop"
-
-
-class SessionAlert(SQLModel, table=True):
-    __tablename__ = "session_alert"
-
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
-    tenant_id: str = Field(default="default", index=True)
-    session_id: str = Field(foreign_key="coding_session.id", index=True)
-    alert_kind: AlertKind
-    evidence: str  # the command or text that triggered the alert
-    span_id: str | None = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-
-
 class LLMCallKind(StrEnum):
     SESSION_ANALYSIS = "session_analysis"
     PROJECT_DETECTION = "project_detection"
