@@ -37,38 +37,6 @@ class InsightSeverityEnum(StrEnum):
     CRITICAL = "critical"
 
 
-class BehaviorCategoryEnum(StrEnum):
-    OWNERSHIP_DODGE = "ownership_dodge"
-    REASONING_LOOP = "reasoning_loop"
-    PERMISSION_SEEKING = "permission_seeking"
-    PREMATURE_STOP = "premature_stop"
-    SIMPLEST_MENTALITY = "simplest_mentality"
-    SELF_ADMITTED_ERROR = "self_admitted_error"
-
-
-class BehaviorConfidenceEnum(StrEnum):
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-
-
-class BehavioralEvidenceItem(BaseModel):
-    category: BehaviorCategoryEnum = Field(description="Which behavioral pattern was observed")
-    turn_id: str = Field(
-        description="The turn identifier (e.g. 'Turn 3') where this behavior occurred"
-    )
-    quote: str = Field(
-        description="Verbatim excerpt from the agent's response in the original language"
-    )
-    explanation: str = Field(
-        description="One sentence explaining why this qualifies as the given category"
-    )
-    confidence: BehaviorConfidenceEnum = Field(
-        default=BehaviorConfidenceEnum.MEDIUM,
-        description="How confident are you this is a genuine instance, not a false positive",
-    )
-
-
 class InsightItem(BaseModel):
     category: InsightCategoryEnum = Field(
         description="The type of insight: summary, friction, win, recommendation, pattern, or skill_proposal"
@@ -85,44 +53,23 @@ class InsightItem(BaseModel):
         default_factory=list,
         description="Evidence supporting this insight. Reference tool calls by description (e.g., 'the Apply migration Bash call failed') or by pattern (e.g., 'Read was called 8 times on registry.go'). Never reference span numbers.",
     )
+    behavioral_tag: str | None = Field(
+        default=None,
+        description="If this insight describes an agent behavioral pattern, tag it: ownership_dodge, reasoning_loop, permission_seeking, premature_stop, simplest_mentality, or self_admitted_error. null if not behavioral.",
+    )
+    behavioral_quote: str | None = Field(
+        default=None,
+        description="When behavioral_tag is set, the agent's exact words demonstrating the pattern.",
+    )
 
 
 class AnalysisResult(BaseModel):
     insights: list[InsightItem] = Field(
         description="List of insights extracted from the session analysis"
     )
-    behaviors: list[BehavioralEvidenceItem] = Field(
-        default_factory=list,
-        description="Behavioral patterns observed in the agent's responses. IMPORTANT: always check the Turn Exchanges for ownership_dodge patterns and report any found here. Return empty list if genuinely none.",
-    )
     # Populated after LLM call (not part of structured output)
     usage_prompt_tokens: int = 0
     usage_completion_tokens: int = 0
-
-
-def validate_behavioral_evidence(
-    items: list[BehavioralEvidenceItem],
-    spans: list[SpanData],
-) -> list[tuple[BehavioralEvidenceItem, bool]]:
-    """Check each item's quote against span data.
-
-    Returns (item, is_valid) pairs. An item is valid if its quote appears
-    as a substring in any span's input.value or output.value. Invalid items
-    are kept but flagged — the caller decides whether to store them.
-    """
-    # Build a lookup of all text content across spans
-    all_text = ""
-    for s in spans:
-        all_text += (s.attributes.get("input.value") or "") + "\n"
-        all_text += (s.attributes.get("output.value") or "") + "\n"
-
-    results = []
-    for item in items:
-        # Normalize whitespace for fuzzy matching
-        quote = item.quote.strip()
-        valid = len(quote) >= 5 and quote in all_text
-        results.append((item, valid))
-    return results
 
 
 def _truncate(text: str | None, max_chars: int = MAX_IO_CHARS) -> str:

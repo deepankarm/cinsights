@@ -69,35 +69,27 @@ You will receive a session timeline showing tool calls, their durations, success
 - Recommendations must be coding agents configuration changes (CLAUDE.md rules, skills, hooks, permissions), not code changes
 - If the session looks efficient with no major friction, say so — don't invent problems
 
-## Behavioral Detection
+## Behavioral Tagging
 
-In addition to insights, detect **ownership_dodge** patterns in the agent's behavior. An ownership dodge is when the agent attributes a failure, error, or problem to something other than its own actions — the environment, pre-existing issues, the user, or external factors — when the evidence suggests the agent's own changes likely caused it.
+When an insight describes one of these agent behavioral patterns, set `behavioral_tag` on that insight and include the agent's exact words as `behavioral_quote`:
 
-For each instance found, return it in the `behaviors` list with:
-- `category`: "ownership_dodge"
-- `turn_id`: which turn it happened (e.g. "Turn 5")
-- `quote`: the exact words the agent used, verbatim, in the original language
-- `explanation`: one sentence on why this is an ownership dodge
-- `confidence`: "high" if the agent clearly deflected responsibility, "medium" if ambiguous, "low" if you're unsure
+- **ownership_dodge**: agent attributes a failure to external causes (pre-existing issues, environment, user) when its own changes likely caused it
+- **reasoning_loop**: agent reverses its own plan mid-turn with no new information
+- **permission_seeking**: agent asks to continue when no authorization question exists
+- **premature_stop**: agent declares a stopping point when the task is not complete
+- **simplest_mentality**: agent chooses a minimal path it simultaneously flags as suboptimal
+- **self_admitted_error**: agent concedes prior output was wrong after user correction
 
 ### Examples — ownership_dodge
 
-**POSITIVE** (should detect):
-- "This error appears to be a pre-existing issue in the codebase, not related to our changes" — when the agent just edited the file that errors
-- "The test failure seems to be caused by an environment configuration issue" — when the agent's code change broke the test
-- "I notice this was already broken before my changes" — without actually verifying
+**Tag it** (agent plausibly caused the problem but deflected):
+- "This error appears to be a pre-existing issue" — after the agent just edited the failing file
+- "この問題は既存のバグのようです" — after changes to the failing module
+- "I notice this was already broken before my changes" — without verifying
 
-**POSITIVE (non-English)**:
-- "この問題は既存のバグのようです" (This appears to be an existing bug) — when the agent just made changes to the failing module
-- "Ce n'est pas lié à mes modifications" (This is not related to my modifications) — when the evidence suggests otherwise
+**Don't tag** (legitimate debugging):
+- "The test was already failing — I verified by checking out main" — evidence-backed
+- "This is a known flaky test, see issue #123" — citing a reference
+- "Build server returning 503s" — genuinely external
 
-**NEGATIVE** (should NOT detect):
-- "The test was already failing — I verified by checking out main and running it" — legitimate investigation with evidence
-- "This is a known flaky test, see issue #123" — citing a real reference
-- "The build server is returning 503s, which is unrelated to code changes" — genuinely external
-
-Only detect patterns where the agent plausibly caused the problem but deflected. Do not flag legitimate debugging or correct attribution. If no ownership dodges are present, return an empty `behaviors` list — never fabricate instances.
-
-## Reminder
-
-Your output MUST include both `insights` and `behaviors` fields. Check the Turn Exchanges section carefully for ownership_dodge patterns before returning.
+Only tag when the agent plausibly caused the problem. Never fabricate tags.
