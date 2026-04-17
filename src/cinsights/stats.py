@@ -165,6 +165,12 @@ class DigestStats(BaseModel):
     error_types: dict[str, int]
     language_distribution: dict[str, int]
     time_of_day: dict[int, int]
+    hourly_quality: list[dict] | None = (
+        None  # [{hour, sessions, median_read_edit, median_error_rate}]
+    )
+    hourly_variance_ratio: float | None = (
+        None  # max/min median read_edit across hours (>3x = load-sensitive)
+    )
 
     session_durations: list[dict]
     session_health: list[SessionHealthScore]
@@ -341,6 +347,63 @@ async def compute_language_distribution(
             if lang:
                 lang_counts[lang] = lang_counts.get(lang, 0) + 1
     return dict(sorted(lang_counts.items(), key=lambda x: -x[1]))
+
+
+def _compute_hourly_quality(
+    sessions: list,
+) -> tuple[list[dict], float | None]:
+    """Per-hour medians of all Tier-0 metrics. Returns (rows, variance_ratio)."""
+    from statistics import median
+
+    _FIELDS = [
+        ("read_edit_ratio", "median_read_edit"),
+        ("error_rate", "median_error_rate"),
+        ("edits_without_read_pct", "median_edits_without_read"),
+        ("tokens_per_useful_edit", "median_tokens_per_edit"),
+        ("context_pressure_score", "median_context_pressure"),
+        ("research_mutation_ratio", "median_research_mutation"),
+        ("write_vs_edit_pct", "median_write_vs_edit"),
+        ("tool_calls_per_turn", "median_tool_calls_per_turn"),
+    ]
+
+    # Group sessions by start hour
+    by_hour: dict[int, list] = {}
+    for s in sessions:
+        by_hour.setdefault(s.start_time.hour, []).append(s)
+
+    if not by_hour:
+        return [], None
+
+    rows = []
+    read_edit_medians = []
+    for hour in range(24):
+        hour_sessions = by_hour.get(hour, [])
+        if not hour_sessions:
+            continue
+        row: dict = {"hour": hour, "sessions": len(hour_sessions)}
+        for attr, key in _FIELDS:
+            vals = [getattr(s, attr) for s in hour_sessions if getattr(s, attr) is not None]
+            row[key] = round(median(vals), 3) if vals else None
+        # Interrupt count — sum not median (it's a count)
+        int_vals = [s.interrupt_count for s in hour_sessions if s.interrupt_count is not None]
+        row["total_interrupts"] = sum(int_vals) if int_vals else None
+        # Effort level distribution
+        efforts: dict[str, int] = {}
+        for s in hour_sessions:
+            if s.effort_level:
+                efforts[s.effort_level] = efforts.get(s.effort_level, 0) + 1
+        row["effort_distribution"] = efforts or None
+
+        if row.get("median_read_edit") is not None:
+            read_edit_medians.append(row["median_read_edit"])
+        rows.append(row)
+
+    variance_ratio = None
+    positive = [m for m in read_edit_medians if m > 0]
+    if len(positive) >= 2:
+        variance_ratio = round(max(positive) / min(positive), 1)
+
+    return rows, variance_ratio
 
 
 async def compute_time_of_day(
@@ -889,6 +952,8 @@ async def compute_all(
                 )
             )
 
+    hourly_quality, hourly_variance_ratio = _compute_hourly_quality(sessions)
+
     return DigestStats(
         period_start=start,
         period_end=end,
@@ -905,6 +970,8 @@ async def compute_all(
         error_types=error_types,
         language_distribution=lang_dist,
         time_of_day=time_of_day,
+        hourly_quality=hourly_quality,
+        hourly_variance_ratio=hourly_variance_ratio,
         session_durations=session_durations,
         session_health=await compute_session_health(db, start, end, p, u),
         tokens_per_session=tokens_per_session,
