@@ -124,12 +124,23 @@
 
 	const languageDistribution = $derived.by(() => {
 		if (!session) return {};
+		const extToLang: Record<string, string> = {
+			py: 'Python', go: 'Go', js: 'JavaScript', ts: 'TypeScript', tsx: 'TypeScript',
+			jsx: 'JavaScript', rs: 'Rust', java: 'Java', rb: 'Ruby', php: 'PHP',
+			c: 'C', cpp: 'C++', h: 'C/C++', cs: 'C#', swift: 'Swift', kt: 'Kotlin',
+			scala: 'Scala', json: 'JSON', yaml: 'YAML', yml: 'YAML', toml: 'TOML',
+			xml: 'XML', html: 'HTML', css: 'CSS', scss: 'CSS', md: 'Markdown',
+			sql: 'SQL', sh: 'Shell', bash: 'Shell', zsh: 'Shell', dockerfile: 'Docker',
+			tf: 'Terraform', svelte: 'Svelte', vue: 'Vue', j2: 'Jinja2', txt: 'Text',
+		};
 		const counts: Record<string, number> = {};
 		const langTools = ['Read', 'Edit', 'Write', 'Glob', 'Grep'];
 		for (const tc of session.tool_calls) {
 			if (!langTools.includes(tc.tool_name) || !tc.input_value) continue;
 			const ext = tc.input_value.match(/\.(\w{1,6})(?:['")\s,]|$)/)?.[1];
-			if (ext) counts[ext] = (counts[ext] ?? 0) + 1;
+			if (!ext) continue;
+			const lang = extToLang[ext.toLowerCase()];
+			if (lang) counts[lang] = (counts[lang] ?? 0) + 1;
 		}
 		return Object.fromEntries(Object.entries(counts).sort((a, b) => b[1] - a[1]));
 	});
@@ -393,14 +404,25 @@
 
 	<!-- Notable Quotes -->
 	{#if session.notable_quotes && session.notable_quotes.length > 0}
-		<div class="quotes-section">
-			{#each session.notable_quotes as q}
-				<div class="quote-card">
-					<span class="quote-vibe">{q.vibe}</span>
-					<span class="quote-text">"{q.quote}"</span>
-				</div>
-			{/each}
-		</div>
+		{@const vibeEmoji = (v: string) => {
+			const map: Record<string, string> = {
+				frustration: '😤', humor: '😄', impatience: '⏳', delight: '✨',
+				sarcasm: '😏', curiosity: '🤔', rage: '🔥', relief: '😮‍💨',
+				gratitude: '🙏', confusion: '😵', determination: '💪', surprise: '😲',
+				disappointment: '😞', excitement: '🎉', apology: '🙇',
+			};
+			return map[v.toLowerCase()] || '💬';
+		}}
+		<details class="quotes-card">
+			<summary class="quotes-toggle">
+				{session.notable_quotes.map(q => vibeEmoji(q.vibe)).join(' ')} Things you said
+			</summary>
+			<div class="quotes-list">
+				{#each session.notable_quotes as q}
+					<p class="quote-line">{vibeEmoji(q.vibe)} <em>"{q.quote}"</em></p>
+				{/each}
+			</div>
+		</details>
 	{/if}
 
 	<!-- Insights -->
@@ -525,10 +547,12 @@
 	.h2-count { font-size: 13px; font-weight: 500; color: #94a3b8; }
 
 	.insights-grid { display: flex; flex-direction: column; gap: 14px; }
-	.quotes-section { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
-	.quote-card { display: flex; align-items: baseline; gap: 8px; padding: 10px 14px; background: #fafaf9; border: 1px solid #e8e5e0; border-radius: 10px; font-size: 13px; }
-	.quote-vibe { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #94a3b8; white-space: nowrap; }
-	.quote-text { color: #334155; font-style: italic; }
+	.quotes-card { background: #fefce8; border: 1px solid #fde68a; border-radius: 10px; padding: 0; margin-bottom: 20px; font-size: 13px; }
+	.quotes-toggle { padding: 10px 14px; cursor: pointer; color: #92400e; font-weight: 500; list-style: none; }
+	.quotes-toggle::-webkit-details-marker { display: none; }
+	.quotes-toggle::marker { display: none; content: ''; }
+	.quotes-list { padding: 0 14px 12px; }
+	.quote-line { margin: 6px 0; color: #334155; line-height: 1.5; }
 	.insight-card { border: 1px solid; border-radius: 12px; padding: 20px; }
 	.insight-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 	.insight-category { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
