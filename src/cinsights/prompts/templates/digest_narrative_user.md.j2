@@ -29,6 +29,13 @@
 - {{ lang }}: {{ count }} file operations
 {% endfor %}
 
+{% if insight_labels %}
+## Recurring Patterns (from insight labels across sessions)
+{% for label, count in insight_labels.items() %}
+- {{ label }}: {{ count }}x
+{% endfor %}
+{% endif %}
+
 ## Time of Day (hours, UTC)
 {% for hour, count in time_of_day.items() %}
 - {{ hour }}:00: {{ count }} sessions

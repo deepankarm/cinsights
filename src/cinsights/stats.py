@@ -58,6 +58,10 @@ _EXT_TO_LANG: dict[str, str] = {
     ".tf": "Terraform",
     ".svelte": "Svelte",
     ".vue": "Vue",
+    ".j2": "Jinja2",
+    ".jinja": "Jinja2",
+    ".jinja2": "Jinja2",
+    ".txt": "Text",
 }
 
 _FILE_TOOLS = {"Read", "Edit", "Write", "Glob", "Grep", "NotebookEdit"}
@@ -189,6 +193,7 @@ class DigestStats(BaseModel):
 
     cost_context: CostContext = CostContext()
     benchmarks: Benchmarks | None = None
+    insight_labels: dict[str, int] | None = None  # label → count across sessions
 
 
 def _session_filter(
@@ -954,7 +959,27 @@ async def compute_all(
 
     hourly_quality, hourly_variance_ratio = _compute_hourly_quality(sessions)
 
-    # Aggregate behavioral evidence for sessions in scope
+    # Aggregate insight labels
+    import json as _jmod
+
+    insight_labels: dict[str, int] = {}
+    session_ids = [s.id for s in sessions]
+    if session_ids:
+        label_rows = (
+            await db.exec(
+                select(Insight.metadata_json)
+                .where(col(Insight.session_id).in_(session_ids))
+                .where(Insight.metadata_json != None)  # noqa: E711
+            )
+        ).all()
+        for meta_str in label_rows:
+            try:
+                lbl = _jmod.loads(meta_str).get("label")
+                if lbl:
+                    insight_labels[lbl] = insight_labels.get(lbl, 0) + 1
+            except Exception:
+                pass
+
     return DigestStats(
         period_start=start,
         period_end=end,
@@ -986,4 +1011,5 @@ async def compute_all(
         analysis_tokens_used=analysis_tokens,
         cost_context=_compute_cost_context(sessions, total_duration, error_breakdown),
         benchmarks=await _compute_benchmarks(db, start, end, project_name, user_id),
+        insight_labels=insight_labels or None,
     )
