@@ -93,7 +93,7 @@ class AnalysisResult(BaseModel):
     )
     behaviors: list[BehavioralEvidenceItem] = Field(
         default_factory=list,
-        description="Behavioral patterns observed in the agent's responses. Only populate categories explicitly requested in the system prompt.",
+        description="Behavioral patterns observed in the agent's responses. IMPORTANT: always check the Turn Exchanges for ownership_dodge patterns and report any found here. Return empty list if genuinely none.",
     )
     # Populated after LLM call (not part of structured output)
     usage_prompt_tokens: int = 0
@@ -250,14 +250,23 @@ def _build_prompts(trace: TraceData, spans: list[SpanData]) -> tuple[str, str]:
     user_queries = []
     for ts in turn_spans:
         query = ts.input_value
+        agent_response = (ts.attributes.get("output.value") or "").strip()
         if query and query.strip():
             turn_num = ts.name.replace("Turn ", "")
-            user_queries.append(
-                {
-                    "turn": turn_num,
-                    "query": query.strip()[:200],
-                }
-            )
+            entry: dict = {
+                "turn": turn_num,
+                "query": query.strip()[:200],
+            }
+            if agent_response:
+                # First + last to catch both opening reasoning and concluding assessments
+                max_half = 300
+                if len(agent_response) <= max_half * 2:
+                    entry["agent_response"] = agent_response
+                else:
+                    entry["agent_response"] = (
+                        agent_response[:max_half] + "\n...\n" + agent_response[-max_half:]
+                    )
+            user_queries.append(entry)
 
     system_prompt = render(PromptTemplates.SESSION_SYSTEM)
     user_prompt = render(

@@ -120,10 +120,18 @@ def parse_full_jsonl(
         total_prompt = sum(p for p, _ in msg_tokens.values())
         total_completion = sum(c for _, c in msg_tokens.values())
 
-        # User query
         user_query = ""
         if user_line:
             user_query = extract_user_content(user_line.get("message", {}))
+
+        # Collect assistant text blocks (non-tool-use content)
+        assistant_text_parts = []
+        for aline in assistant_lines:
+            msg = aline.get("message", {})
+            for block in msg.get("content", []):
+                if isinstance(block, dict) and block.get("type") == "text":
+                    assistant_text_parts.append(block.get("text", ""))
+        assistant_text = "\n".join(assistant_text_parts)
 
         turn_span = SpanData(
             span_id=turn_id,
@@ -136,6 +144,7 @@ def parse_full_jsonl(
             end_time=turn_end,
             attributes={
                 "input.value": user_query[:2000] if user_query else "",
+                "output.value": assistant_text[:2000] if assistant_text else "",
                 "llm.token_count.prompt": total_prompt,
                 "llm.token_count.completion": total_completion,
                 "llm.model_name": model_name,
