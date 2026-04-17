@@ -37,7 +37,16 @@ class InsightRead(BaseModel):
     title: str
     content: str
     severity: InsightSeverity
+    behavioral_tag: str | None = None
+    behavioral_quote: str | None = None
     created_at: datetime
+
+
+class AlertRead(BaseModel):
+    id: str
+    alert_kind: str
+    evidence: str
+    span_id: str | None = None
 
 
 class SessionRead(BaseModel):
@@ -56,6 +65,10 @@ class SessionRead(BaseModel):
     error_count: int
     insight_count: int
     active_duration_ms: float | None = None
+    interrupt_count: int | None = None
+    alert_count: int = 0
+    agent_version: str | None = None
+    effort_level: str | None = None
 
 
 class SessionDetail(BaseModel):
@@ -73,6 +86,11 @@ class SessionDetail(BaseModel):
     status: SessionStatus
     tool_calls: list[ToolCallRead]
     insights: list[InsightRead]
+    alerts: list[AlertRead] = []
+    interrupt_count: int | None = None
+    agent_version: str | None = None
+    effort_level: str | None = None
+    adaptive_thinking_disabled: bool | None = None
 
 
 class StatsResponse(BaseModel):
@@ -143,6 +161,15 @@ async def list_sessions(
     )
     insight_counts: dict[str, int] = {sid: cnt for sid, cnt in ins_result.all()}
 
+    from cinsights.db.models import SessionAlert
+
+    alert_result = await db.exec(
+        select(SessionAlert.session_id, func.count())
+        .where(col(SessionAlert.session_id).in_(session_ids))
+        .group_by(SessionAlert.session_id)
+    )
+    alert_counts: dict[str, int] = {sid: cnt for sid, cnt in alert_result.all()}
+
     import json as json_mod
 
     def _active_ms(s: CodingSession) -> float | None:
@@ -172,6 +199,10 @@ async def list_sessions(
             error_count=error_counts.get(s.id, 0),
             insight_count=insight_counts.get(s.id, 0),
             active_duration_ms=_active_ms(s),
+            interrupt_count=s.interrupt_count,
+            alert_count=alert_counts.get(s.id, 0),
+            agent_version=s.agent_version,
+            effort_level=s.effort_level,
         )
         for s in sessions
     ]
@@ -240,6 +271,18 @@ async def get_session_detail(session_id: str, db: AsyncSession = Depends(get_db)
     )
     insights = ins_result.all()
 
+    from cinsights.db.models import BehavioralEvidence, SessionAlert
+
+    alert_result = await db.exec(select(SessionAlert).where(SessionAlert.session_id == session_id))
+    alerts = alert_result.all()
+
+    # Map behavioral evidence to insights by matching turn_id to insight title
+    bev_result = await db.exec(
+        select(BehavioralEvidence).where(BehavioralEvidence.session_id == session_id)
+    )
+    bev_rows = bev_result.all()
+    bev_by_title = {b.turn_id: b for b in bev_rows}
+
     return SessionDetail(
         id=session.id,
         session_id=session.session_id,
@@ -274,10 +317,24 @@ async def get_session_detail(session_id: str, db: AsyncSession = Depends(get_db)
                 title=ins.title,
                 content=ins.content,
                 severity=ins.severity,
+                behavioral_tag=(
+                    bev_by_title[ins.title].category if ins.title in bev_by_title else None
+                ),
+                behavioral_quote=(
+                    bev_by_title[ins.title].quote if ins.title in bev_by_title else None
+                ),
                 created_at=ins.created_at,
             )
             for ins in insights
         ],
+        alerts=[
+            AlertRead(id=a.id, alert_kind=a.alert_kind, evidence=a.evidence, span_id=a.span_id)
+            for a in alerts
+        ],
+        interrupt_count=session.interrupt_count,
+        agent_version=session.agent_version,
+        effort_level=session.effort_level,
+        adaptive_thinking_disabled=session.adaptive_thinking_disabled,
     )
 
 

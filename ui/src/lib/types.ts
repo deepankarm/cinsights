@@ -14,6 +14,10 @@ export interface SessionRead {
 	error_count: number;
 	insight_count: number;
 	active_duration_ms: number | null;
+	interrupt_count: number | null;
+	alert_count: number;
+	agent_version: string | null;
+	effort_level: string | null;
 }
 
 export interface ToolCallRead {
@@ -32,7 +36,16 @@ export interface InsightRead {
 	title: string;
 	content: string;
 	severity: 'info' | 'warning' | 'critical';
+	behavioral_tag: string | null;
+	behavioral_quote: string | null;
 	created_at: string;
+}
+
+export interface AlertRead {
+	id: string;
+	alert_kind: string;
+	evidence: string;
+	span_id: string | null;
 }
 
 export interface SessionDetail {
@@ -50,6 +63,11 @@ export interface SessionDetail {
 	status: string;
 	tool_calls: ToolCallRead[];
 	insights: InsightRead[];
+	alerts: AlertRead[];
+	interrupt_count: number | null;
+	agent_version: string | null;
+	effort_level: string | null;
+	adaptive_thinking_disabled: boolean | null;
 }
 
 export interface StatsResponse {
