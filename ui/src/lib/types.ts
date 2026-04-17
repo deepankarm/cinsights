@@ -15,7 +15,6 @@ export interface SessionRead {
 	insight_count: number;
 	active_duration_ms: number | null;
 	interrupt_count: number | null;
-	alert_count: number;
 	agent_version: string | null;
 	effort_level: string | null;
 }
@@ -41,12 +40,6 @@ export interface InsightRead {
 	created_at: string;
 }
 
-export interface AlertRead {
-	id: string;
-	alert_kind: string;
-	evidence: string;
-	span_id: string | null;
-}
 
 export interface SessionDetail {
 	id: string;
@@ -63,7 +56,6 @@ export interface SessionDetail {
 	status: string;
 	tool_calls: ToolCallRead[];
 	insights: InsightRead[];
-	alerts: AlertRead[];
 	interrupt_count: number | null;
 	agent_version: string | null;
 	effort_level: string | null;

@@ -1,7 +1,6 @@
 <script lang="ts">
 	import type { SessionRead } from '$lib/types';
 	import { fmtTokens, gradeColor, gradeBg } from '$lib/format';
-	import AlertBadge from './AlertBadge.svelte';
 
 	let { sessions, compact = false, limit = 10 }: { sessions: SessionRead[]; compact?: boolean; limit?: number } = $props();
 
@@ -137,7 +136,6 @@
 						<span class="status" style="color: {statusColor(s.status)}">
 							{statusIcon(s.status)} {s.status}
 						</span>
-						<AlertBadge count={s.alert_count ?? 0} />
 						{#if s.interrupt_count && s.interrupt_count > 0}
 							<span class="interrupt-mini" title="{s.interrupt_count} user interrupt{s.interrupt_count > 1 ? 's' : ''}">{s.interrupt_count}x</span>
 						{/if}

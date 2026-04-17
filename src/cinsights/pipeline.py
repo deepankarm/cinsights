@@ -213,29 +213,6 @@ async def _store_indexed(
         if atd is not None:
             coding_session.adaptive_thinking_disabled = bool(atd)
 
-    # Dangerous-op alerts
-    from cinsights.alerts import detect_alerts
-    from cinsights.db.models import AlertKind, SessionAlert
-
-    # Clear old alerts on re-index
-    if force or existing:
-        old_alerts = await db.exec(
-            select_fn(SessionAlert).where(SessionAlert.session_id == trace_id)
-        )
-        for a in old_alerts.all():
-            await db.delete(a)
-
-    for kind, evidence, span_id in detect_alerts(tool_call_rows):
-        db.add(
-            SessionAlert(
-                tenant_id=tenant_id,
-                session_id=trace_id,
-                alert_kind=AlertKind(kind),
-                evidence=evidence,
-                span_id=span_id,
-            )
-        )
-
     # User-interrupt count (structural, no LLM)
     _INTERRUPT_MARKER = "[Request interrupted by user]"
     coding_session.interrupt_count = sum(
