@@ -225,6 +225,12 @@
 				<a href="/projects/{session.project_name}" class="tag-link project">{session.project_name}</a>
 			{/if}
 			<span class="tag-static">{fmtDate(session.start_time)}</span>
+			{#if session.agent_version}
+				<span class="tag-static mono">v{session.agent_version}</span>
+			{/if}
+			{#if session.effort_level}
+				<span class="tag-static effort-{session.effort_level}">{session.effort_level}</span>
+			{/if}
 		</div>
 	</div>
 
@@ -276,6 +282,7 @@
 					{@const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, n).toFixed(1)} ${yOf(p.prompt_tokens).toFixed(1)}`).join(' ')}
 					{@const areaPath = `${linePath} L ${xOf(n-1, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
 					{@const compactionIdxs = pts.map((p, i) => (i > 0 && p.prompt_tokens < pts[i-1].prompt_tokens * 0.85 ? i : -1)).filter(i => i >= 0)}
+					{@const interruptIdxs = pts.map((p, i) => (p.interrupted ? i : -1)).filter(i => i >= 0)}
 					{@const hover = hoverIdx !== null ? pts[hoverIdx] : null}
 					<!-- Context Growth -->
 					<div class="chart-card">
@@ -287,6 +294,9 @@
 								{/if}
 								{#if compactionIdxs.length > 0}
 									<span class="trend-badge down">{compactionIdxs.length} compaction{compactionIdxs.length > 1 ? 's' : ''}</span>
+								{/if}
+								{#if interruptIdxs.length > 0}
+									<span class="trend-badge interrupt">{interruptIdxs.length} interrupt{interruptIdxs.length > 1 ? 's' : ''}</span>
 								{/if}
 							</div>
 						</div>
@@ -309,6 +319,10 @@
 							<path d={linePath} fill="none" stroke="#6366f1" stroke-width="1.5" stroke-linejoin="round" />
 							{#each compactionIdxs as i}
 								<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#f59e0b" stroke="white" stroke-width="1" />
+							{/each}
+							{#each interruptIdxs as i}
+								<line x1={xOf(i, n)} x2={xOf(i, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#ef4444" stroke-width="1" stroke-opacity="0.4" />
+								<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#ef4444" stroke="white" stroke-width="1" />
 							{/each}
 							{#if hoverIdx !== null}
 								<line x1={xOf(hoverIdx, n)} x2={xOf(hoverIdx, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
@@ -480,6 +494,10 @@
 	.chart-total { font-size: 11px; font-weight: 600; color: #10b981; }
 	.trend-badge { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 5px; }
 	.trend-badge.down { background: #fef3c7; color: #92400e; }
+	.trend-badge.interrupt { background: #fef2f2; color: #dc2626; }
+	.effort-high, .effort-max { color: #16a34a; font-weight: 600; }
+	.effort-medium { color: #d97706; font-weight: 600; }
+	.effort-low { color: #94a3b8; }
 	.trend-svg { width: 100%; height: auto; cursor: crosshair; }
 	.ax { font-size: 10px; fill: #94a3b8; font-family: inherit; }
 

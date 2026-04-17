@@ -82,6 +82,7 @@ async def _store_indexed(
     total_completion = sum(s.completion_tokens for s in turn_spans)
     total_tokens = total_prompt + total_completion
 
+    _INTERRUPT_MARKER = "[Request interrupted by user]"
     context_growth = json_mod.dumps(
         [
             {
@@ -89,6 +90,7 @@ async def _store_indexed(
                 "prompt_tokens": s.prompt_tokens,
                 "completion_tokens": s.completion_tokens,
                 "duration_ms": s.duration_ms,
+                "interrupted": _INTERRUPT_MARKER in (s.attributes.get("input.value") or ""),
             }
             for s in turn_spans
         ]

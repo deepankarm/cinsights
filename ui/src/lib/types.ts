@@ -52,7 +52,7 @@ export interface SessionDetail {
 	total_tokens: number;
 	prompt_tokens: number;
 	completion_tokens: number;
-	context_growth: Array<{ turn: number; prompt_tokens: number; completion_tokens: number; duration_ms?: number }> | null;
+	context_growth: Array<{ turn: number; prompt_tokens: number; completion_tokens: number; duration_ms?: number; interrupted?: boolean }> | null;
 	status: string;
 	tool_calls: ToolCallRead[];
 	insights: InsightRead[];
