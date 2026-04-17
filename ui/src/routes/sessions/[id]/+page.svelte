@@ -391,6 +391,18 @@
 		</ActivityCharts>
 	</div>
 
+	<!-- Notable Quotes -->
+	{#if session.notable_quotes && session.notable_quotes.length > 0}
+		<div class="quotes-section">
+			{#each session.notable_quotes as q}
+				<div class="quote-card">
+					<span class="quote-vibe">{q.vibe}</span>
+					<span class="quote-text">"{q.quote}"</span>
+				</div>
+			{/each}
+		</div>
+	{/if}
+
 	<!-- Insights -->
 	{#if session.insights.length > 0}
 		<div class="section">
@@ -513,6 +525,10 @@
 	.h2-count { font-size: 13px; font-weight: 500; color: #94a3b8; }
 
 	.insights-grid { display: flex; flex-direction: column; gap: 14px; }
+	.quotes-section { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+	.quote-card { display: flex; align-items: baseline; gap: 8px; padding: 10px 14px; background: #fafaf9; border: 1px solid #e8e5e0; border-radius: 10px; font-size: 13px; }
+	.quote-vibe { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #94a3b8; white-space: nowrap; }
+	.quote-text { color: #334155; font-style: italic; }
 	.insight-card { border: 1px solid; border-radius: 12px; padding: 20px; }
 	.insight-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 	.insight-category { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
