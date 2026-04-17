@@ -201,7 +201,12 @@ async def _store_indexed(
         if value is not None:
             setattr(coding_session, key, value)
 
-    # Estimate analysis cost from actual span data
+    # User-interrupt count (structural, no LLM)
+    _INTERRUPT_MARKER = "[Request interrupted by user]"
+    coding_session.interrupt_count = sum(
+        1 for s in spans if _INTERRUPT_MARKER in (s.attributes.get("input.value") or "")
+    )
+
     from cinsights.costs import estimate_session_analysis_tokens
 
     coding_session.estimated_analysis_tokens = estimate_session_analysis_tokens(spans)
