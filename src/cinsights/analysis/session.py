@@ -246,27 +246,39 @@ def _build_prompts(trace: TraceData, spans: list[SpanData]) -> tuple[str, str]:
 
     timeline_spans, truncation_notice = _sample_timeline_spans(spans)
 
-    # Extract user queries from Turn spans for richer interaction analysis.
+    # Determine which turns get agent text (error_adjacent: error turns ± 1)
+    _turn_tool_map: dict[str, list[SpanData]] = {}
+    for s in tool_spans:
+        _turn_tool_map.setdefault(s.parent_id, []).append(s)
+
+    _error_turn_indices: set[int] = set()
+    for i, ts in enumerate(turn_spans):
+        children = _turn_tool_map.get(ts.span_id, [])
+        if any(not c.is_success for c in children):
+            _error_turn_indices.update(range(max(0, i - 1), min(len(turn_spans), i + 2)))
+
     user_queries = []
-    for ts in turn_spans:
+    for i, ts in enumerate(turn_spans):
         query = ts.input_value
+        if not query or not query.strip():
+            continue
+        turn_num = ts.name.replace("Turn ", "")
+        entry: dict = {
+            "turn": turn_num,
+            "query": query.strip()[:200],
+        }
+        # Include agent text only for turns near errors (or all if few turns)
+        include_agent = i in _error_turn_indices or len(turn_spans) <= 20
         agent_response = (ts.attributes.get("output.value") or "").strip()
-        if query and query.strip():
-            turn_num = ts.name.replace("Turn ", "")
-            entry: dict = {
-                "turn": turn_num,
-                "query": query.strip()[:200],
-            }
-            if agent_response:
-                # First + last to catch both opening reasoning and concluding assessments
-                max_half = 300
-                if len(agent_response) <= max_half * 2:
-                    entry["agent_response"] = agent_response
-                else:
-                    entry["agent_response"] = (
-                        agent_response[:max_half] + "\n...\n" + agent_response[-max_half:]
-                    )
-            user_queries.append(entry)
+        if agent_response and include_agent:
+            max_half = 300
+            if len(agent_response) <= max_half * 2:
+                entry["agent_response"] = agent_response
+            else:
+                entry["agent_response"] = (
+                    agent_response[:max_half] + "\n...\n" + agent_response[-max_half:]
+                )
+        user_queries.append(entry)
 
     system_prompt = render(PromptTemplates.SESSION_SYSTEM)
     user_prompt = render(
