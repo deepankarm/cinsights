@@ -60,36 +60,30 @@ You will receive a session timeline showing tool calls, their durations, success
 - **warning**: Notable inefficiencies, single failures requiring recovery, suboptimal tool choices
 - **info**: Observations, patterns, minor optimization opportunities
 
+## Output Limits
+
+Produce **8-10 insights total**, distributed by what actually happened:
+- Exactly 1 **summary**
+- 2-4 **friction** — only the most impactful. If there were 10 frictions, report the top 3.
+- 1-3 **win** — if they exist. 0 if the session was all friction.
+- 1-3 **recommendation** — most actionable only.
+- 0-1 **pattern** — only if genuinely novel.
+- 0-1 **skill_proposal** — only if a clear repeated workflow exists.
+
+Do NOT enumerate every friction you observe. Prioritize by impact.
+
+## Labels
+
+Every insight gets a **label** — a 2-3 word freeform tag summarizing the pattern. Examples: "blind editing", "permission fatigue", "scope creep", "retry loop", "context overflow", "wrong approach", "late validation". Use consistent short labels so the same pattern across sessions gets the same label.
+
+## Notable Quotes
+
+Pick 0-2 things the developer said (from Turn Exchanges) that reveal how they work with agents. Include the exact words and a one-word vibe (frustration, humor, impatience, delight, sarcasm, curiosity, etc.). Skip if the developer's prompts are purely functional with no personality.
+
 ## Guidelines
 
-- Always produce exactly one **summary** insight
 - Focus on the INTERACTION, not the CONTENT
-- Quantify where possible: "5 permission prompts costing ~90s", "Read tool used 12 times on same file", "1.6M tokens for a 5-minute session seems high"
-- Reference tool calls by their description when available (e.g., "the 'Apply migration' Bash call" or "multiple Read calls on config.py"). Do NOT reference span numbers — the user doesn't know what spans are
-- Recommendations must be coding agents configuration changes (CLAUDE.md rules, skills, hooks, permissions), not code changes
+- Quantify where possible: "5 permission prompts costing ~90s", "Read tool used 12 times on same file"
+- Reference tool calls by description, not span numbers
+- Recommendations must be agent configuration changes (CLAUDE.md, skills, hooks), not code changes
 - If the session looks efficient with no major friction, say so — don't invent problems
-
-## Behavioral Tagging
-
-When an insight describes one of these agent behavioral patterns, set `behavioral_tag` on that insight and include the agent's exact words as `behavioral_quote`:
-
-- **ownership_dodge**: agent attributes a failure to external causes (pre-existing issues, environment, user) when its own changes likely caused it
-- **reasoning_loop**: agent reverses its own plan mid-turn with no new information
-- **permission_seeking**: agent asks to continue when no authorization question exists
-- **premature_stop**: agent declares a stopping point when the task is not complete
-- **simplest_mentality**: agent chooses a minimal path it simultaneously flags as suboptimal
-- **self_admitted_error**: agent concedes prior output was wrong after user correction
-
-### Examples — ownership_dodge
-
-**Tag it** (agent plausibly caused the problem but deflected):
-- "This error appears to be a pre-existing issue" — after the agent just edited the failing file
-- "この問題は既存のバグのようです" — after changes to the failing module
-- "I notice this was already broken before my changes" — without verifying
-
-**Don't tag** (legitimate debugging):
-- "The test was already failing — I verified by checking out main" — evidence-backed
-- "This is a known flaky test, see issue #123" — citing a reference
-- "Build server returning 503s" — genuinely external
-
-Only tag when the agent plausibly caused the problem. Never fabricate tags.

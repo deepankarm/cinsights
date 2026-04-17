@@ -32,11 +32,10 @@ export interface ToolCallRead {
 export interface InsightRead {
 	id: string;
 	category: 'summary' | 'friction' | 'win' | 'recommendation' | 'pattern' | 'skill_proposal';
+	label: string | null;
 	title: string;
 	content: string;
 	severity: 'info' | 'warning' | 'critical';
-	behavioral_tag: string | null;
-	behavioral_quote: string | null;
 	created_at: string;
 }
 
@@ -56,6 +55,7 @@ export interface SessionDetail {
 	status: string;
 	tool_calls: ToolCallRead[];
 	insights: InsightRead[];
+	notable_quotes: Array<{ quote: string; vibe: string }> | null;
 	interrupt_count: number | null;
 	agent_version: string | null;
 	effort_level: string | null;
