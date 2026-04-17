@@ -189,6 +189,7 @@ class DigestStats(BaseModel):
 
     cost_context: CostContext = CostContext()
     benchmarks: Benchmarks | None = None
+    behavioral_evidence: list[dict] | None = None  # [{category, count, quotes}]
 
 
 def _session_filter(
@@ -347,6 +348,35 @@ async def compute_language_distribution(
             if lang:
                 lang_counts[lang] = lang_counts.get(lang, 0) + 1
     return dict(sorted(lang_counts.items(), key=lambda x: -x[1]))
+
+
+async def _compute_behavioral_evidence(
+    db: AsyncSession, session_ids: list[str]
+) -> list[dict] | None:
+    """Aggregate behavioral evidence across sessions for digest prompts."""
+    if not session_ids:
+        return None
+
+    from cinsights.db.models import BehavioralEvidence
+
+    rows = (
+        await db.exec(
+            select(BehavioralEvidence).where(col(BehavioralEvidence.session_id).in_(session_ids))
+        )
+    ).all()
+
+    if not rows:
+        return None
+
+    by_cat: dict[str, list[str]] = {}
+    for r in rows:
+        cat = str(r.category)
+        by_cat.setdefault(cat, []).append(r.quote[:200] if r.quote else "")
+
+    return [
+        {"category": cat, "count": len(quotes), "quotes": quotes[:5]}
+        for cat, quotes in sorted(by_cat.items(), key=lambda x: -len(x[1]))
+    ]
 
 
 def _compute_hourly_quality(
@@ -954,6 +984,9 @@ async def compute_all(
 
     hourly_quality, hourly_variance_ratio = _compute_hourly_quality(sessions)
 
+    # Aggregate behavioral evidence for sessions in scope
+    behavioral_evidence = await _compute_behavioral_evidence(db, [s.id for s in sessions])
+
     return DigestStats(
         period_start=start,
         period_end=end,
@@ -985,4 +1018,5 @@ async def compute_all(
         analysis_tokens_used=analysis_tokens,
         cost_context=_compute_cost_context(sessions, total_duration, error_breakdown),
         benchmarks=await _compute_benchmarks(db, start, end, project_name, user_id),
+        behavioral_evidence=behavioral_evidence,
     )

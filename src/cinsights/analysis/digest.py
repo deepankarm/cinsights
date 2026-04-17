@@ -69,10 +69,22 @@ class FeatureRecommendation(BaseModel):
     )
 
 
+class StopHookSuggestion(BaseModel):
+    pattern: str = Field(
+        description="What behavioral pattern to catch, e.g. 'ownership dodging after errors'"
+    )
+    hook_config: str = Field(description="Copy-paste JSON for .claude/settings.json Stop hook")
+    evidence: str = Field(description="Which sessions/patterns motivated this suggestion")
+
+
 class ActionsResult(BaseModel):
     friction_analysis: list[FrictionItem]
     claude_md_suggestions: list[ClaudeMdSuggestion]
     feature_recommendations: list[FeatureRecommendation]
+    stop_hook_suggestions: list[StopHookSuggestion] = Field(
+        default_factory=list,
+        description="Stop hook configurations to catch problematic agent behaviors. Only suggest if behavioral evidence data is provided.",
+    )
 
 
 class WinItem(BaseModel):

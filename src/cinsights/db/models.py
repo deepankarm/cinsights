@@ -185,6 +185,7 @@ class DigestSectionType(StrEnum):
     RECOMMENDATIONS = "recommendations"
     WORKFLOW_PATTERNS = "workflow_patterns"
     AMBITIOUS_WORKFLOWS = "ambitious_workflows"
+    STOP_HOOK_SUGGESTIONS = "stop_hook_suggestions"
     # Legacy values kept for SQLite CHECK constraint compatibility.
     FUN_ENDING = "fun_ending"
 

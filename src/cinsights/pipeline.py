@@ -388,6 +388,16 @@ async def _store_digest_sections(
         ),
     ]
 
+    if result.actions.stop_hook_suggestions:
+        sections.append(
+            (
+                DigestSectionType.STOP_HOOK_SUGGESTIONS,
+                "Stop Hook Suggestions",
+                "",
+                _dump(result.actions.stop_hook_suggestions),
+            )
+        )
+
     settings = get_settings()
     for i, (stype, title, content, meta) in enumerate(sections):
         db.add(
