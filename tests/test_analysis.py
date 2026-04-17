@@ -86,6 +86,7 @@ async def test_analyze_structured_output():
         insights=[
             {
                 "category": "summary",
+                "label": "session overview",
                 "title": "Test Summary",
                 "content": "A test session that did things.",
                 "severity": "info",
@@ -93,6 +94,7 @@ async def test_analyze_structured_output():
             },
             {
                 "category": "friction",
+                "label": "missing files",
                 "title": "File not found errors",
                 "content": "Agent tried to read missing files.",
                 "severity": "warning",
@@ -131,6 +133,7 @@ async def test_analyze_batch():
         insights=[
             {
                 "category": "summary",
+                "label": "overview",
                 "title": "Summary",
                 "content": "Done.",
                 "severity": "info",

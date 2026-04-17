@@ -41,31 +41,35 @@ class InsightItem(BaseModel):
     category: InsightCategoryEnum = Field(
         description="The type of insight: summary, friction, win, recommendation, pattern, or skill_proposal"
     )
-    title: str = Field(description="Short descriptive title for this insight (5-15 words)")
-    content: str = Field(
-        description="Detailed markdown content explaining the insight with evidence from the timeline"
+    label: str = Field(
+        description="2-3 word freeform label summarizing this insight, e.g. 'blind editing', 'permission fatigue', 'scope creep'"
     )
+    title: str = Field(description="Short descriptive title (5-15 words)")
+    content: str = Field(description="Detailed markdown content with evidence from the timeline")
     severity: InsightSeverityEnum = Field(
         default=InsightSeverityEnum.INFO,
-        description="Impact level: info for observations, warning for notable issues, critical for major problems",
+        description="Impact level: info, warning, or critical",
     )
     evidence: list[str] = Field(
         default_factory=list,
-        description="Evidence supporting this insight. Reference tool calls by description (e.g., 'the Apply migration Bash call failed') or by pattern (e.g., 'Read was called 8 times on registry.go'). Never reference span numbers.",
+        description="Evidence references. Use tool call descriptions, not span numbers.",
     )
-    behavioral_tag: str | None = Field(
-        default=None,
-        description="If this insight describes an agent behavioral pattern, tag it: ownership_dodge, reasoning_loop, permission_seeking, premature_stop, simplest_mentality, or self_admitted_error. null if not behavioral.",
-    )
-    behavioral_quote: str | None = Field(
-        default=None,
-        description="When behavioral_tag is set, the agent's exact words demonstrating the pattern.",
+
+
+class NotableQuote(BaseModel):
+    quote: str = Field(description="Exact words the developer used, verbatim")
+    vibe: str = Field(
+        description="One-word mood: frustration, humor, impatience, delight, sarcasm, curiosity, etc."
     )
 
 
 class AnalysisResult(BaseModel):
     insights: list[InsightItem] = Field(
-        description="List of insights extracted from the session analysis"
+        description="8-10 insights total. Prioritize by impact, not completeness.",
+    )
+    notable_quotes: list[NotableQuote] = Field(
+        default_factory=list,
+        description="0-2 interesting things the developer said that reveal how they work with agents.",
     )
     # Populated after LLM call (not part of structured output)
     usage_prompt_tokens: int = 0

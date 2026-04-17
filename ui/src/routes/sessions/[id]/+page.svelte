@@ -6,7 +6,7 @@
 	import { fmtTokens, gradeColor, gradeBg } from '$lib/format';
 	import type { SessionDetail } from '$lib/types';
 	import ActivityCharts, { type ErrorDetail } from '$lib/components/ActivityCharts.svelte';
-	import BehavioralTag from '$lib/components/BehavioralTag.svelte';
+	import InsightLabel from '$lib/components/BehavioralTag.svelte';
 
 	let session: SessionDetail | null = $state(null);
 	let loading = $state(true);
@@ -400,8 +400,8 @@
 					<div class="insight-card" style="background: {categoryBg(insight.category)}; border-color: {categoryBorder(insight.category)};">
 						<div class="insight-header">
 							<span class="insight-category" style="color: {categoryColor(insight.category)}">{categoryLabel(insight.category)}</span>
-							{#if insight.behavioral_tag}
-								<BehavioralTag tag={insight.behavioral_tag} quote={insight.behavioral_quote} />
+							{#if insight.label}
+								<InsightLabel label={insight.label} />
 							{/if}
 							{#if severityIcon(insight.severity)}
 								<span class="severity-badge severity-{insight.severity}">{severityIcon(insight.severity)}</span>

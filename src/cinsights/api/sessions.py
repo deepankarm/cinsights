@@ -34,11 +34,10 @@ class ToolCallRead(BaseModel):
 class InsightRead(BaseModel):
     id: str
     category: InsightCategory
+    label: str | None = None
     title: str
     content: str
     severity: InsightSeverity
-    behavioral_tag: str | None = None
-    behavioral_quote: str | None = None
     created_at: datetime
 
 
@@ -78,6 +77,7 @@ class SessionDetail(BaseModel):
     status: SessionStatus
     tool_calls: list[ToolCallRead]
     insights: list[InsightRead]
+    notable_quotes: list[dict] | None = None
     interrupt_count: int | None = None
     agent_version: str | None = None
     effort_level: str | None = None
@@ -235,6 +235,15 @@ async def get_stats(db: AsyncSession = Depends(get_db)) -> StatsResponse:
     )
 
 
+def _parse_metadata(ins, key: str):
+    if not ins.metadata_json:
+        return None
+    try:
+        return json.loads(ins.metadata_json).get(key)
+    except Exception:
+        return None
+
+
 @router.get("/{session_id}", response_model=SessionDetail)
 async def get_session_detail(session_id: str, db: AsyncSession = Depends(get_db)) -> SessionDetail:
     """Get session detail with tool calls and insights."""
@@ -251,15 +260,6 @@ async def get_session_detail(session_id: str, db: AsyncSession = Depends(get_db)
         select(Insight).where(Insight.session_id == session_id).order_by(Insight.created_at)
     )
     insights = ins_result.all()
-
-    from cinsights.db.models import BehavioralEvidence
-
-    # Map behavioral evidence to insights by matching turn_id to insight title
-    bev_result = await db.exec(
-        select(BehavioralEvidence).where(BehavioralEvidence.session_id == session_id)
-    )
-    bev_rows = bev_result.all()
-    bev_by_title = {b.turn_id: b for b in bev_rows}
 
     return SessionDetail(
         id=session.id,
@@ -292,24 +292,30 @@ async def get_session_detail(session_id: str, db: AsyncSession = Depends(get_db)
             InsightRead(
                 id=ins.id,
                 category=ins.category,
+                label=_parse_metadata(ins, "label"),
                 title=ins.title,
                 content=ins.content,
                 severity=ins.severity,
-                behavioral_tag=(
-                    bev_by_title[ins.title].category if ins.title in bev_by_title else None
-                ),
-                behavioral_quote=(
-                    bev_by_title[ins.title].quote if ins.title in bev_by_title else None
-                ),
                 created_at=ins.created_at,
             )
             for ins in insights
         ],
+        notable_quotes=_parse_notable_quotes(session),
         interrupt_count=session.interrupt_count,
         agent_version=session.agent_version,
         effort_level=session.effort_level,
         adaptive_thinking_disabled=session.adaptive_thinking_disabled,
     )
+
+
+def _parse_notable_quotes(session) -> list[dict] | None:
+    if not session.metadata_json:
+        return None
+    try:
+        meta = json.loads(session.metadata_json)
+        return meta.get("notable_quotes")
+    except Exception:
+        return None
 
 
 class SessionUpdate(BaseModel):

@@ -237,6 +237,8 @@ async def _store_insights(
 
     Updates status to ANALYZED. Returns the number of insights persisted.
     """
+    import json as json_mod
+
     from cinsights.db.models import (
         Insight,
         InsightCategory,
@@ -245,6 +247,11 @@ async def _store_insights(
     )
 
     settings = get_settings()
+
+    # Clear old insights on re-analysis
+    old_insights = await db.exec(select_fn(Insight).where(Insight.session_id == coding_session.id))
+    for old in old_insights.all():
+        await db.delete(old)
 
     for item in result.insights:
         try:
@@ -256,6 +263,7 @@ async def _store_insights(
         except ValueError:
             sev = InsightSeverity.INFO
 
+        meta = json_mod.dumps({"label": item.label}) if item.label else None
         insight = Insight(
             tenant_id=coding_session.tenant_id,
             session_id=coding_session.id,
@@ -264,39 +272,20 @@ async def _store_insights(
             content=item.content,
             severity=sev,
             prompt_version=settings.prompt_version_session,
+            metadata_json=meta,
         )
         db.add(insight)
 
-        # Store behavioral tag as a BehavioralEvidence row if present
-        if item.behavioral_tag:
-            from cinsights.db.models import (
-                BehavioralEvidence as BehavioralEvidenceRow,
-            )
-            from cinsights.db.models import BehaviorCategory, BehaviorConfidence
+    # Store notable quotes on session metadata
+    if result.notable_quotes:
+        import contextlib
 
-            try:
-                bcat = BehaviorCategory(item.behavioral_tag)
-            except ValueError:
-                bcat = None
-            if bcat:
-                # Map insight severity → behavioral confidence
-                conf_map = {"critical": "high", "warning": "medium", "info": "low"}
-                try:
-                    bconf = BehaviorConfidence(conf_map.get(str(sev), "medium"))
-                except ValueError:
-                    bconf = BehaviorConfidence.MEDIUM
-
-                db.add(
-                    BehavioralEvidenceRow(
-                        tenant_id=coding_session.tenant_id,
-                        session_id=coding_session.id,
-                        category=bcat,
-                        turn_id=item.title,  # best we have — insight title as reference
-                        quote=(item.behavioral_quote or "")[:2000],
-                        explanation=item.content[:2000],
-                        confidence=bconf,
-                    )
-                )
+        existing_meta = {}
+        if coding_session.metadata_json:
+            with contextlib.suppress(Exception):
+                existing_meta = json_mod.loads(coding_session.metadata_json)
+        existing_meta["notable_quotes"] = [q.model_dump() for q in result.notable_quotes]
+        coding_session.metadata_json = json_mod.dumps(existing_meta)
 
     coding_session.status = SessionStatus.ANALYZED
     coding_session.analysis_prompt_tokens = result.usage_prompt_tokens
