@@ -613,7 +613,7 @@ async def _discover_work_items(
                         spans=spans,
                     )
                     work_items.append((tid, tid, trace, spans))
-                else:
+                elif hasattr(source, "get_spans"):
                     spans = await asyncio.to_thread(source.get_spans, tid)
                     if spans:
                         trace = TraceData(

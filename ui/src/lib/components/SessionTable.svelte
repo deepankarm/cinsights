@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { SessionRead } from '$lib/types';
 	import { fmtTokens, gradeColor, gradeBg } from '$lib/format';
+	import AlertBadge from './AlertBadge.svelte';
 
 	let { sessions, compact = false, limit = 10 }: { sessions: SessionRead[]; compact?: boolean; limit?: number } = $props();
 
@@ -120,7 +121,7 @@
 					</td>
 					{#if !compact}
 						<td>
-							<span class="badge" style="background: {agentColor(s.agent_type)}10; color: {agentColor(s.agent_type)}; border-color: {agentColor(s.agent_type)}25">
+							<span class="badge" style="background: {agentColor(s.agent_type)}10; color: {agentColor(s.agent_type)}; border-color: {agentColor(s.agent_type)}25" title={s.agent_version ? `v${s.agent_version}` : ''}>
 								{s.agent_type ?? '-'}
 							</span>
 						</td>
@@ -136,6 +137,10 @@
 						<span class="status" style="color: {statusColor(s.status)}">
 							{statusIcon(s.status)} {s.status}
 						</span>
+						<AlertBadge count={s.alert_count ?? 0} />
+						{#if s.interrupt_count && s.interrupt_count > 0}
+							<span class="interrupt-mini" title="{s.interrupt_count} user interrupt{s.interrupt_count > 1 ? 's' : ''}">{s.interrupt_count}x</span>
+						{/if}
 					</td>
 				</tr>
 			{/each}
@@ -203,6 +208,7 @@
 	.cell-dim { font-size: 12px; color: #64748b; white-space: nowrap; }
 	.cell-num { text-align: right; font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace; font-size: 12px; color: #475569; }
 	.cell-err.has-errors { color: #ef4444; font-weight: 600; }
+	.interrupt-mini { font-size: 9px; font-weight: 600; color: #92400e; background: #fffbeb; padding: 1px 4px; border-radius: 3px; margin-left: 4px; }
 
 	.badge {
 		display: inline-block;
