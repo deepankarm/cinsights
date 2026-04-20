@@ -121,6 +121,7 @@
 			timeOfDay={stats.time_of_day}
 			errorTypes={stats.error_types}
 			insightLabels={stats.insight_labels}
+			labelTrends={stats.label_trends}
 		/>
 	</section>
 {/if}
