@@ -155,29 +155,27 @@
 	{/if}
 
 	{#if labelTrends && labelTrends.length > 1 && trendLabels().length > 0}
+		{@const labels = trendLabels()}
+		{@const dates = labelTrends.map(d => d.date)}
 		<div class="chart-box chart-wide">
 			<h3>Pattern Trends</h3>
-			<div class="trend-legend">
-				{#each trendLabels() as label, i}
-					<span class="trend-legend-item">
-						<span class="trend-dot" style="background:{LABEL_COLORS[i % LABEL_COLORS.length]}"></span>
-						<span style="text-transform:capitalize">{label}</span>
-					</span>
+			<div class="dot-grid" style="grid-template-columns: 140px repeat({dates.length}, 1fr)">
+				<!-- Header row: dates -->
+				<div></div>
+				{#each dates as date}
+					<div class="dot-date">{date.slice(5)}</div>
 				{/each}
-			</div>
-			<div class="trend-grid" style="grid-template-columns: repeat({labelTrends.length}, 1fr)">
-				{#each labelTrends as day}
-					<div class="trend-col" title="{day.date}">
-						<div class="trend-bars">
-							{#each trendLabels() as label, i}
-								{@const val = day.labels[label] ?? 0}
-								{#if val > 0}
-									<div class="trend-bar" style="height:{(val / trendMax()) * 80}px; background:{LABEL_COLORS[i % LABEL_COLORS.length]}" title="{label}: {val}"></div>
-								{/if}
-							{/each}
+				<!-- One row per label -->
+				{#each labels as label, li}
+					<div class="dot-label" title="{label}">{label}</div>
+					{#each labelTrends as day}
+						{@const val = day.labels[label] ?? 0}
+						<div class="dot-cell">
+							{#if val > 0}
+								<div class="dot-circle" style="background:{LABEL_COLORS[li % LABEL_COLORS.length]}; width:{12 + val * 6}px; height:{12 + val * 6}px" title="{label}: {val}"></div>
+							{/if}
 						</div>
-						<span class="trend-date">{day.date.slice(5)}</span>
-					</div>
+					{/each}
 				{/each}
 			</div>
 		</div>
@@ -221,15 +219,13 @@
 
 	.show-more { display: block; margin: 12px auto 0; font-size: 13px; color: #6366f1; background: none; border: none; cursor: pointer; font-weight: 600; }
 
-	/* Pattern trends */
-	.trend-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
-	.trend-legend-item { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #52525b; }
-	.trend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-	.trend-grid { display: grid; gap: 4px; align-items: end; height: 100px; }
-	.trend-col { display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; }
-	.trend-bars { display: flex; gap: 2px; align-items: flex-end; flex: 1; }
-	.trend-bar { width: 100%; min-width: 4px; border-radius: 3px 3px 0 0; transition: height 0.3s; }
-	.trend-date { font-size: 10px; color: #a1a1aa; margin-top: 4px; white-space: nowrap; }
+	/* Pattern trends — dot grid */
+	.dot-grid { display: grid; gap: 0; align-items: center; }
+	.dot-date { font-size: 11px; color: #a1a1aa; text-align: center; padding-bottom: 8px; font-weight: 600; }
+	.dot-label { font-size: 13px; color: #52525b; text-transform: capitalize; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px 8px 6px 0; }
+	.dot-cell { display: flex; align-items: center; justify-content: center; padding: 6px 0; }
+	.dot-circle { border-radius: 50%; opacity: 0.85; transition: transform 0.2s; }
+	.dot-circle:hover { transform: scale(1.3); opacity: 1; }
 
 	@media (max-width: 768px) {
 		.chart-bento { grid-template-columns: 1fr; }
