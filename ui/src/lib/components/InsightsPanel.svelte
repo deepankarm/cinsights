@@ -124,6 +124,26 @@
 	</section>
 {/if}
 
+<!-- Insight Labels (pattern frequency) -->
+{#if stats?.insight_labels && Object.keys(stats.insight_labels).length > 0}
+	{@const sorted = Object.entries(stats.insight_labels).sort((a, b) => b[1] - a[1])}
+	{@const maxCount = sorted[0]?.[1] ?? 1}
+	<section class="sect">
+		<h2 class="sect-title">Detected Patterns</h2>
+		<div class="label-freq-grid">
+			{#each sorted as [label, count]}
+				<div class="label-freq-row">
+					<span class="label-freq-name">{label}</span>
+					<div class="label-freq-bar-bg">
+						<div class="label-freq-bar" style="width: {Math.max(8, (count / maxCount) * 100)}%"></div>
+					</div>
+					<span class="label-freq-count">{count}</span>
+				</div>
+			{/each}
+		</div>
+	</section>
+{/if}
+
 <!-- Work Areas + Persona -->
 {#if (workAreas && workAreas.length > 0) || persona}
 	<section class="sect">
@@ -361,6 +381,14 @@
 	.gc-violet h3 { color: #6d28d9; }
 	.gc-violet ul { color: #4c1d95; }
 
+
+	/* Label frequency */
+	.label-freq-grid { display: flex; flex-direction: column; gap: 8px; background: white; border-radius: 14px; padding: 20px; }
+	.label-freq-row { display: flex; align-items: center; gap: 12px; }
+	.label-freq-name { font-size: 13px; font-weight: 600; color: #334155; min-width: 140px; text-transform: capitalize; }
+	.label-freq-bar-bg { flex: 1; height: 22px; background: #f1f5f9; border-radius: 6px; overflow: hidden; }
+	.label-freq-bar { height: 100%; background: linear-gradient(90deg, #818cf8, #6366f1); border-radius: 6px; transition: width 0.3s ease; }
+	.label-freq-count { font-size: 13px; font-weight: 700; color: #6366f1; min-width: 28px; text-align: right; }
 
 	/* Duo grid */
 	.duo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
