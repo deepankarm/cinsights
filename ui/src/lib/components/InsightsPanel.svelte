@@ -123,6 +123,10 @@
 			insightLabels={stats.insight_labels}
 			labelCategories={stats.label_categories}
 			labelTrends={stats.label_trends}
+			analyzedCount={stats.analyzed_count}
+			sessionCount={stats.session_count}
+			scopeUser={digest.user_id ?? undefined}
+			scopeProject={digest.project_name ?? undefined}
 		/>
 	</section>
 {/if}
