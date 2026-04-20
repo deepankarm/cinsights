@@ -112,8 +112,15 @@ class DigestAnalysisResult(BaseModel):
 class DigestAnalyzer(LLMAnalyzer):
     """Analyze cross-session patterns using 3 concurrent LLM calls."""
 
-    async def analyze(self, stats: DigestStats) -> DigestAnalysisResult:
-        """Run 3 concurrent LLM calls and combine results."""
+    async def analyze(
+        self, stats: DigestStats, *, digest_id: str | None = None
+    ) -> DigestAnalysisResult:
+        """Run 3 concurrent LLM calls and combine results.
+
+        ``digest_id`` is threaded into each ``LLMCallLog`` row as the
+        ``scope_id`` so per-digest cost attribution works.
+        """
+        from cinsights.db.models import LLMCallKind
         from cinsights.settings import get_config
 
         limits = get_config().limits
@@ -127,18 +134,24 @@ class DigestAnalyzer(LLMAnalyzer):
             user_template=PromptTemplates.DIGEST_NARRATIVE_USER,
             result_cls=NarrativeResult,
             template_vars=stats_dict,
+            call_kind=LLMCallKind.DIGEST_NARRATIVE,
+            scope_id=digest_id,
         )
         actions_task = self._call_llm(
             system_template=PromptTemplates.DIGEST_ACTIONS_SYSTEM,
             user_template=PromptTemplates.DIGEST_ACTIONS_USER,
             result_cls=ActionsResult,
             template_vars=stats_dict,
+            call_kind=LLMCallKind.DIGEST_ACTIONS,
+            scope_id=digest_id,
         )
         forward_task = self._call_llm(
             system_template=PromptTemplates.DIGEST_FORWARD_SYSTEM,
             user_template=PromptTemplates.DIGEST_FORWARD_USER,
             result_cls=ForwardResult,
             template_vars=stats_dict,
+            call_kind=LLMCallKind.DIGEST_FORWARD,
+            scope_id=digest_id,
         )
 
         results = await asyncio.gather(narrative_task, actions_task, forward_task)
@@ -169,8 +182,13 @@ class DigestAnalyzer(LLMAnalyzer):
         user_template: str,
         result_cls: type[BaseModel],
         template_vars: dict,
+        *,
+        call_kind,
+        scope_id: str | None = None,
     ) -> tuple[BaseModel, tuple[int, int]]:
         """Make a single LLM call with structured output."""
+        from cinsights.db.models import LLMCallScopeType
+
         system_prompt = render(system_template)
         user_prompt = render(user_template, **template_vars)
 
@@ -180,5 +198,9 @@ class DigestAnalyzer(LLMAnalyzer):
             result_cls,
             system_prompt,
             user_prompt,
+            call_kind=call_kind,
+            scope_type=LLMCallScopeType.DIGEST if scope_id else LLMCallScopeType.UNKNOWN,
+            scope_id=scope_id,
+            max_tokens=8192,
         )
         return output, (prompt_tokens, completion_tokens)

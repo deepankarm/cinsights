@@ -58,6 +58,10 @@ _EXT_TO_LANG: dict[str, str] = {
     ".tf": "Terraform",
     ".svelte": "Svelte",
     ".vue": "Vue",
+    ".j2": "Jinja2",
+    ".jinja": "Jinja2",
+    ".jinja2": "Jinja2",
+    ".txt": "Text",
 }
 
 _FILE_TOOLS = {"Read", "Edit", "Write", "Glob", "Grep", "NotebookEdit"}
@@ -165,6 +169,12 @@ class DigestStats(BaseModel):
     error_types: dict[str, int]
     language_distribution: dict[str, int]
     time_of_day: dict[int, int]
+    hourly_quality: list[dict] | None = (
+        None  # [{hour, sessions, median_read_edit, median_error_rate}]
+    )
+    hourly_variance_ratio: float | None = (
+        None  # max/min median read_edit across hours (>3x = load-sensitive)
+    )
 
     session_durations: list[dict]
     session_health: list[SessionHealthScore]
@@ -183,6 +193,10 @@ class DigestStats(BaseModel):
 
     cost_context: CostContext = CostContext()
     benchmarks: Benchmarks | None = None
+    insight_labels: dict[str, int] | None = None  # label → count across sessions
+    label_categories: dict[str, str] | None = None  # label → dominant category
+    label_members: dict[str, list[str]] | None = None  # canonical → [raw labels in cluster]
+    label_trends: list[dict] | None = None  # [{date, labels: {label: count}}]
 
 
 def _session_filter(
@@ -341,6 +355,63 @@ async def compute_language_distribution(
             if lang:
                 lang_counts[lang] = lang_counts.get(lang, 0) + 1
     return dict(sorted(lang_counts.items(), key=lambda x: -x[1]))
+
+
+def _compute_hourly_quality(
+    sessions: list,
+) -> tuple[list[dict], float | None]:
+    """Per-hour medians of all Tier-0 metrics. Returns (rows, variance_ratio)."""
+    from statistics import median
+
+    _FIELDS = [
+        ("read_edit_ratio", "median_read_edit"),
+        ("error_rate", "median_error_rate"),
+        ("edits_without_read_pct", "median_edits_without_read"),
+        ("tokens_per_useful_edit", "median_tokens_per_edit"),
+        ("context_pressure_score", "median_context_pressure"),
+        ("research_mutation_ratio", "median_research_mutation"),
+        ("write_vs_edit_pct", "median_write_vs_edit"),
+        ("tool_calls_per_turn", "median_tool_calls_per_turn"),
+    ]
+
+    # Group sessions by start hour
+    by_hour: dict[int, list] = {}
+    for s in sessions:
+        by_hour.setdefault(s.start_time.hour, []).append(s)
+
+    if not by_hour:
+        return [], None
+
+    rows = []
+    read_edit_medians = []
+    for hour in range(24):
+        hour_sessions = by_hour.get(hour, [])
+        if not hour_sessions:
+            continue
+        row: dict = {"hour": hour, "sessions": len(hour_sessions)}
+        for attr, key in _FIELDS:
+            vals = [getattr(s, attr) for s in hour_sessions if getattr(s, attr) is not None]
+            row[key] = round(median(vals), 3) if vals else None
+        # Interrupt count — sum not median (it's a count)
+        int_vals = [s.interrupt_count for s in hour_sessions if s.interrupt_count is not None]
+        row["total_interrupts"] = sum(int_vals) if int_vals else None
+        # Effort level distribution
+        efforts: dict[str, int] = {}
+        for s in hour_sessions:
+            if s.effort_level:
+                efforts[s.effort_level] = efforts.get(s.effort_level, 0) + 1
+        row["effort_distribution"] = efforts or None
+
+        if row.get("median_read_edit") is not None:
+            read_edit_medians.append(row["median_read_edit"])
+        rows.append(row)
+
+    variance_ratio = None
+    positive = [m for m in read_edit_medians if m > 0]
+    if len(positive) >= 2:
+        variance_ratio = round(max(positive) / min(positive), 1)
+
+    return rows, variance_ratio
 
 
 async def compute_time_of_day(
@@ -790,6 +861,140 @@ async def _compute_benchmarks(
     )
 
 
+def _cluster_and_aggregate_labels(
+    raw_labels: dict[str, int],
+    cat_counts: dict[str, dict[str, int]],
+    label_by_day: dict[str, dict[str, int]],
+    similarity_threshold: float = 0.6,
+) -> tuple[dict[str, int], dict[str, str], list[dict] | None, dict[str, list[str]]]:
+    """Cluster raw labels using sentence embeddings and aggregate counts.
+
+    Clusters labels *within* each category separately so that a friction
+    label like "repeatedly fixing same bug" never merges with a win label
+    like "successfully fixed complex bug".
+
+    Returns (clustered_labels, label_categories, label_trends, label_members).
+    """
+    import logging
+
+    _logger = logging.getLogger(__name__)
+
+    if not raw_labels:
+        return {}, {}, None, {}
+
+    # Determine dominant category per raw label
+    raw_cat: dict[str, str] = {}
+    for lbl, cats in cat_counts.items():
+        raw_cat[lbl] = max(cats, key=cats.get)
+
+    unique = list(raw_labels.keys())
+
+    if len(unique) <= 3:
+        return raw_labels, raw_cat, None, {}
+
+    try:
+        import numpy as np
+        from sentence_transformers import SentenceTransformer
+        from sklearn.metrics.pairwise import cosine_similarity
+
+        model = SentenceTransformer("all-MiniLM-L6-v2")
+        embeddings = model.encode(unique)
+        sim = cosine_similarity(embeddings)
+    except Exception as exc:
+        _logger.warning("Embedding clustering unavailable, using raw labels: %s", exc)
+        return raw_labels, raw_cat, None, {}
+
+    # Build label index → position mapping
+    label_idx = {lbl: i for i, lbl in enumerate(unique)}
+
+    # Group labels by dominant category, then cluster within each group
+    from collections import defaultdict as _defaultdict
+
+    by_cat: dict[str, list[str]] = _defaultdict(list)
+    for lbl in unique:
+        by_cat[raw_cat.get(lbl, "pattern")].append(lbl)
+
+    clustered_labels: dict[str, int] = {}
+    label_categories: dict[str, str] = {}
+    label_map: dict[str, str] = {}
+    label_members: dict[str, list[str]] = {}
+
+    for cat, cat_labels in by_cat.items():
+        if len(cat_labels) <= 1:
+            # Single label in category — no clustering needed
+            for lbl in cat_labels:
+                clustered_labels[lbl] = raw_labels[lbl]
+                label_categories[lbl] = cat
+                label_map[lbl] = lbl
+                label_members[lbl] = [lbl]
+            continue
+
+        # Average-linkage clustering within this category:
+        # a label joins a cluster if its AVERAGE similarity to all
+        # members is above threshold (prevents chaining)
+        cat_indices = [label_idx[lbl] for lbl in cat_labels]
+        assigned: set[int] = set()
+        clusters: list[list[int]] = []
+
+        for ci in cat_indices:
+            if ci in assigned:
+                continue
+            cluster = [ci]
+            assigned.add(ci)
+            changed = True
+            while changed:
+                changed = False
+                for cj in cat_indices:
+                    if cj in assigned:
+                        continue
+                    avg_sim = sum(sim[cj, ck] for ck in cluster) / len(cluster)
+                    if avg_sim >= similarity_threshold:
+                        cluster.append(cj)
+                        assigned.add(cj)
+                        changed = True
+            clusters.append(cluster)
+
+        # Name each cluster
+        for indices in clusters:
+            members = [unique[idx] for idx in indices]
+            total = sum(raw_labels[m] for m in members)
+
+            most_freq = max(members, key=lambda lbl: raw_labels[lbl])
+
+            cluster_embs = embeddings[indices]
+            centroid = cluster_embs.mean(axis=0)
+            dists = cosine_similarity([centroid], cluster_embs)[0]
+            most_central = unique[indices[int(np.argmax(dists))]]
+
+            if raw_labels[most_freq] > raw_labels.get(most_central, 0) * 5:
+                canonical = most_freq
+            else:
+                canonical = most_central
+
+            clustered_labels[canonical] = total
+            label_categories[canonical] = cat
+            label_members[canonical] = members
+            for m in members:
+                label_map[m] = canonical
+
+    # Build label_trends with clustered names
+    label_trends: list[dict] | None = None
+    frequent = {lbl for lbl, cnt in clustered_labels.items() if cnt > 1}
+    if label_by_day and frequent:
+        trends: list[dict] = []
+        for day, day_labels in sorted(label_by_day.items()):
+            merged: dict[str, int] = {}
+            for raw_lbl, cnt in day_labels.items():
+                canonical = label_map.get(raw_lbl, raw_lbl)
+                if canonical in frequent:
+                    merged[canonical] = merged.get(canonical, 0) + cnt
+            if merged:
+                trends.append({"date": day, "labels": merged})
+        label_trends = trends or None
+
+    return clustered_labels, label_categories, label_trends, label_members
+
+
 async def compute_all(
     db: AsyncSession,
     start: datetime,
@@ -889,6 +1094,42 @@ async def compute_all(
                 )
             )
 
+    hourly_quality, hourly_variance_ratio = _compute_hourly_quality(sessions)
+
+    # Aggregate insight labels + per-day trends
+    import json as _jmod
+    from collections import defaultdict
+
+    insight_labels: dict[str, int] = {}
+    label_by_day: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    label_cat_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    session_ids = [s.id for s in sessions]
+    session_dates = {s.id: s.start_time.strftime("%Y-%m-%d") for s in sessions}
+    if session_ids:
+        label_rows = (
+            await db.exec(
+                select(Insight.metadata_json, Insight.session_id, Insight.category)
+                .where(col(Insight.session_id).in_(session_ids))
+                .where(Insight.metadata_json != None)  # noqa: E711
+            )
+        ).all()
+        for meta_str, sid, cat in label_rows:
+            try:
+                lbl = _jmod.loads(meta_str).get("label")
+                if lbl:
+                    insight_labels[lbl] = insight_labels.get(lbl, 0) + 1
+                    label_cat_counts[lbl][cat] += 1
+                    day = session_dates.get(sid, "")
+                    if day:
+                        label_by_day[day][lbl] += 1
+            except Exception:
+                pass
+
+    # Cluster labels by embedding similarity, then aggregate
+    clustered_labels, label_categories, label_trends, label_members = _cluster_and_aggregate_labels(
+        insight_labels, label_cat_counts, label_by_day
+    )
+
     return DigestStats(
         period_start=start,
         period_end=end,
@@ -905,6 +1146,8 @@ async def compute_all(
         error_types=error_types,
         language_distribution=lang_dist,
         time_of_day=time_of_day,
+        hourly_quality=hourly_quality,
+        hourly_variance_ratio=hourly_variance_ratio,
         session_durations=session_durations,
         session_health=await compute_session_health(db, start, end, p, u),
         tokens_per_session=tokens_per_session,
@@ -918,4 +1161,8 @@ async def compute_all(
         analysis_tokens_used=analysis_tokens,
         cost_context=_compute_cost_context(sessions, total_duration, error_breakdown),
         benchmarks=await _compute_benchmarks(db, start, end, project_name, user_id),
+        insight_labels=clustered_labels or None,
+        label_categories=label_categories or None,
+        label_members=label_members or None,
+        label_trends=label_trends,
     )

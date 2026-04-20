@@ -41,23 +41,35 @@ class InsightItem(BaseModel):
     category: InsightCategoryEnum = Field(
         description="The type of insight: summary, friction, win, recommendation, pattern, or skill_proposal"
     )
-    title: str = Field(description="Short descriptive title for this insight (5-15 words)")
-    content: str = Field(
-        description="Detailed markdown content explaining the insight with evidence from the timeline"
+    label: str = Field(
+        description="3-4 word descriptive phrase summarizing the pattern in plain language. Self-explanatory to someone unfamiliar with the codebase. Examples: 'edits without reading first', 'permission prompts block flow', 'same file edited repeatedly'."
     )
+    title: str = Field(description="Short descriptive title (5-15 words)")
+    content: str = Field(description="Detailed markdown content with evidence from the timeline")
     severity: InsightSeverityEnum = Field(
         default=InsightSeverityEnum.INFO,
-        description="Impact level: info for observations, warning for notable issues, critical for major problems",
+        description="Impact level: info, warning, or critical",
     )
     evidence: list[str] = Field(
         default_factory=list,
-        description="Evidence supporting this insight. Reference tool calls by description (e.g., 'the Apply migration Bash call failed') or by pattern (e.g., 'Read was called 8 times on registry.go'). Never reference span numbers.",
+        description="Evidence references. Use tool call descriptions, not span numbers.",
+    )
+
+
+class NotableQuote(BaseModel):
+    quote: str = Field(description="Exact words the developer used, verbatim")
+    vibe: str = Field(
+        description="One-word mood: frustration, humor, impatience, delight, sarcasm, curiosity, etc."
     )
 
 
 class AnalysisResult(BaseModel):
     insights: list[InsightItem] = Field(
-        description="List of insights extracted from the session analysis"
+        description="8-10 insights total. Prioritize by impact, not completeness.",
+    )
+    notable_quotes: list[NotableQuote] = Field(
+        default_factory=list,
+        description="0-2 interesting things the developer said that reveal how they work with agents.",
     )
     # Populated after LLM call (not part of structured output)
     usage_prompt_tokens: int = 0
@@ -146,6 +158,82 @@ def _sample_timeline_spans(spans: list[SpanData]) -> tuple[list[SpanData], str |
     return sampled, notice
 
 
+def _compute_metrics_from_spans(tool_spans: list[SpanData], total_tokens: int) -> dict:
+    """Compute Tier-0 quality metrics directly from spans (no DB needed)."""
+    import json as _json
+
+    _READ = {"Read", "Glob", "Grep", "Search", "ListDir", "WebFetch", "WebSearch"}
+    _EDIT = {"Edit", "NotebookEdit"}
+    _WRITE = {"Write"}
+    _MUTATION = _EDIT | _WRITE
+    _SUBAGENT = {"Agent", "Task"}
+
+    reads = sum(1 for s in tool_spans if s.tool_name in _READ)
+    edits = sum(1 for s in tool_spans if s.tool_name in _EDIT)
+    writes = sum(1 for s in tool_spans if s.tool_name in _WRITE)
+    mutations = sum(1 for s in tool_spans if s.tool_name in _MUTATION)
+    errors = sum(1 for s in tool_spans if not s.is_success)
+    subagents = sum(1 for s in tool_spans if s.tool_name in _SUBAGENT)
+    total = len(tool_spans)
+
+    # Blind edits: edits to files not previously read
+    read_files: set[str] = set()
+    blind = 0
+    for s in tool_spans:
+        inp = s.input_value or ""
+        fp = None
+        if '"file_path"' in inp:
+            try:
+                d = _json.loads(inp)
+                fp = d.get("file_path") if isinstance(d, dict) else None
+            except (ValueError, TypeError):
+                pass
+        if not fp:
+            for part in inp.split()[:5]:
+                if "/" in part and not part.startswith("http"):
+                    fp = part.strip('"').strip("'")
+                    break
+        if fp:
+            if s.tool_name in _READ:
+                read_files.add(fp)
+            elif s.tool_name in _EDIT and fp not in read_files:
+                blind += 1
+
+    # Repeated edits to same file
+    repeated = 0
+    last_edit_file = None
+    for s in tool_spans:
+        if s.tool_name in _EDIT:
+            inp = s.input_value or ""
+            fp = None
+            if '"file_path"' in inp:
+                try:
+                    d = _json.loads(inp)
+                    fp = d.get("file_path") if isinstance(d, dict) else None
+                except (ValueError, TypeError):
+                    pass
+            if fp and fp == last_edit_file:
+                repeated += 1
+            last_edit_file = fp
+        else:
+            last_edit_file = None
+
+    useful_mutations = sum(1 for s in tool_spans if s.tool_name in _MUTATION and s.is_success)
+
+    return {
+        "read_edit_ratio": round(reads / edits, 1) if edits else None,
+        "research_mutation_ratio": round(reads / mutations, 1) if mutations else None,
+        "edits_without_read_pct": round(blind / edits * 100, 1) if edits else None,
+        "write_vs_edit_pct": round(writes / mutations * 100, 1) if mutations else None,
+        "error_rate": round(errors / total * 100, 1) if total else None,
+        "repeated_edits": repeated,
+        "subagent_pct": round(subagents / total * 100, 1) if total else None,
+        "tokens_per_useful_edit": (
+            round(total_tokens / useful_mutations) if useful_mutations else None
+        ),
+    }
+
+
 def _build_prompts(trace: TraceData, spans: list[SpanData]) -> tuple[str, str]:
     """Build system and user prompts from Jinja templates."""
     root = trace.root_span
@@ -185,18 +273,42 @@ def _build_prompts(trace: TraceData, spans: list[SpanData]) -> tuple[str, str]:
 
     timeline_spans, truncation_notice = _sample_timeline_spans(spans)
 
-    # Extract user queries from Turn spans for richer interaction analysis.
+    # Determine which turns get agent text (error_adjacent: error turns ± 1)
+    _turn_tool_map: dict[str, list[SpanData]] = {}
+    for s in tool_spans:
+        _turn_tool_map.setdefault(s.parent_id, []).append(s)
+
+    _error_turn_indices: set[int] = set()
+    for i, ts in enumerate(turn_spans):
+        children = _turn_tool_map.get(ts.span_id, [])
+        if any(not c.is_success for c in children):
+            _error_turn_indices.update(range(max(0, i - 1), min(len(turn_spans), i + 2)))
+
     user_queries = []
-    for ts in turn_spans:
+    for i, ts in enumerate(turn_spans):
         query = ts.input_value
-        if query and query.strip():
-            turn_num = ts.name.replace("Turn ", "")
-            user_queries.append(
-                {
-                    "turn": turn_num,
-                    "query": query.strip()[:200],
-                }
-            )
+        if not query or not query.strip():
+            continue
+        turn_num = ts.name.replace("Turn ", "")
+        entry: dict = {
+            "turn": turn_num,
+            "query": query.strip()[:200],
+        }
+        # Include agent text only for turns near errors (or all if few turns)
+        include_agent = i in _error_turn_indices or len(turn_spans) <= 20
+        agent_response = (ts.attributes.get("output.value") or "").strip()
+        if agent_response and include_agent:
+            max_half = 300
+            if len(agent_response) <= max_half * 2:
+                entry["agent_response"] = agent_response
+            else:
+                entry["agent_response"] = (
+                    agent_response[:max_half] + "\n...\n" + agent_response[-max_half:]
+                )
+        user_queries.append(entry)
+
+    # Compute quality metrics from spans for the LLM to reference
+    metrics = _compute_metrics_from_spans(tool_spans, total_tokens)
 
     system_prompt = render(PromptTemplates.SESSION_SYSTEM)
     user_prompt = render(
@@ -213,6 +325,7 @@ def _build_prompts(trace: TraceData, spans: list[SpanData]) -> tuple[str, str]:
         spans=[_SpanView(s) for s in timeline_spans],
         truncation_notice=truncation_notice,
         user_queries=user_queries,
+        metrics=metrics,
     )
     return system_prompt, user_prompt
 
@@ -231,13 +344,23 @@ class SessionAnalyzer(LLMAnalyzer):
             len(user_prompt),
         )
 
+        from cinsights.db.models import LLMCallKind, LLMCallScopeType
+
         result, prompt_tokens, completion_tokens = await self._run_llm(
             AnalysisResult,
             system_prompt,
             user_prompt,
+            call_kind=LLMCallKind.SESSION_ANALYSIS,
+            scope_type=LLMCallScopeType.SESSION,
+            scope_id=trace.trace_id,
         )
         result.usage_prompt_tokens = prompt_tokens
         result.usage_completion_tokens = completion_tokens
+
+        # Normalize labels: lowercase, collapse whitespace
+        for insight in result.insights:
+            insight.label = " ".join(insight.label.split())
+
         return result
 
     async def analyze_batch(

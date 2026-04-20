@@ -113,10 +113,10 @@ class LimitsConfig(BaseModel):
     """Context window and prompt size limits."""
 
     max_timeline_spans: int = Field(
-        200, description="Max tool call spans included in session analysis prompt"
+        75, description="Max tool call spans included in session analysis prompt"
     )
     timeline_head_tail: int = Field(
-        30, description="Number of spans sampled from head and tail of timeline"
+        15, description="Number of spans sampled from head and tail of timeline"
     )
     max_digest_session_summaries: int = Field(
         30, description="Max session summaries included in digest prompt"

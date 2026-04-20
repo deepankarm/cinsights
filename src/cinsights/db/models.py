@@ -61,6 +61,11 @@ class CodingSession(SQLModel, table=True):
     turn_count: int | None = None
     tool_calls_per_turn: float | None = None
 
+    interrupt_count: int | None = None
+    agent_version: str | None = None
+    effort_level: str | None = None  # low / medium / high / max
+    adaptive_thinking_disabled: bool | None = None
+
     # Scoring
     interestingness_score: float | None = None
     skip_reason: str | None = None
@@ -104,6 +109,9 @@ class Insight(SQLModel, table=True):
     severity: InsightSeverity = InsightSeverity.INFO
     prompt_version: str | None = None  # set when written; lets us iterate prompts safely
     metadata_json: str | None = None
+    cluster_label: str | None = Field(
+        default=None, index=True
+    )  # canonical label set during digest clustering
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     session: CodingSession = Relationship(back_populates="insights")
@@ -180,6 +188,7 @@ class DigestSectionType(StrEnum):
     RECOMMENDATIONS = "recommendations"
     WORKFLOW_PATTERNS = "workflow_patterns"
     AMBITIOUS_WORKFLOWS = "ambitious_workflows"
+    STOP_HOOK_SUGGESTIONS = "stop_hook_suggestions"
     # Legacy values kept for SQLite CHECK constraint compatibility.
     FUN_ENDING = "fun_ending"
 
@@ -232,6 +241,50 @@ class RefreshRunCommand(StrEnum):
     REFRESH = "refresh"
     ANALYZE = "analyze"
     DIGEST = "digest"
+
+
+class LLMCallKind(StrEnum):
+    SESSION_ANALYSIS = "session_analysis"
+    PROJECT_DETECTION = "project_detection"
+    DIGEST_NARRATIVE = "digest_narrative"
+    DIGEST_ACTIONS = "digest_actions"
+    DIGEST_FORWARD = "digest_forward"
+
+
+class LLMCallScopeType(StrEnum):
+    SESSION = "session"
+    DIGEST = "digest"
+    UNKNOWN = "unknown"
+
+
+class LLMCallStatus(StrEnum):
+    SUCCESS = "success"
+    FAILURE = "failure"
+
+
+class LLMCallLog(SQLModel, table=True):
+    """Per-call LLM accounting. RefreshRun keeps the run-level rollup."""
+
+    __tablename__ = "llm_call_log"
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    tenant_id: str = Field(default="default", index=True)
+    call_kind: LLMCallKind = Field(index=True)
+    scope_type: LLMCallScopeType = LLMCallScopeType.UNKNOWN
+    scope_id: str | None = Field(default=None, index=True)
+    model: str
+    provider: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    duration_ms: float | None = None
+    status: LLMCallStatus = LLMCallStatus.SUCCESS
+    error_message: str | None = None
+    dollar_cost: float | None = None
+    schema_version: int = 1
+    metadata_json: str | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
 
 class RefreshRun(SQLModel, table=True):

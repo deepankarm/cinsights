@@ -6,16 +6,30 @@
 - **Tokens**: {{ total_tokens }}
 - **Start**: {{ start_time }}
 
+## Quality Metrics (pre-computed)
+These metrics are computed from the full session data. Use them to anchor your analysis — if a metric is flagged, look for specific examples in the timeline below.
+{% if metrics.read_edit_ratio is not none %}- **Read:Edit ratio**: {{ metrics.read_edit_ratio }} (benchmark: good ≥5, concerning <3, poor <2)
+{% endif %}{% if metrics.edits_without_read_pct is not none %}- **Blind edit %**: {{ metrics.edits_without_read_pct }}% of edits made without reading the file first (benchmark: good <10%, concerning >20%, poor >30%)
+{% endif %}{% if metrics.research_mutation_ratio is not none %}- **Research:Mutation ratio**: {{ metrics.research_mutation_ratio }} (benchmark: good ≥5, concerning <3)
+{% endif %}{% if metrics.write_vs_edit_pct is not none %}- **Write vs Edit %**: {{ metrics.write_vs_edit_pct }}% of mutations are full-file Write (benchmark: good <10%, concerning >20%)
+{% endif %}{% if metrics.error_rate is not none %}- **Error rate**: {{ metrics.error_rate }}%
+{% endif %}{% if metrics.repeated_edits > 0 %}- **Repeated edits**: {{ metrics.repeated_edits }} consecutive edits to the same file (thrashing indicator)
+{% endif %}{% if metrics.subagent_pct is not none and metrics.subagent_pct > 0 %}- **Sub-agent usage**: {{ metrics.subagent_pct }}% of tool calls
+{% endif %}{% if metrics.tokens_per_useful_edit is not none %}- **Tokens per useful edit**: {{ metrics.tokens_per_useful_edit | int }} (lower = more efficient)
+{% endif %}
+
 ## Tool Distribution
 {% for name, count in tool_counts %}
 - {{ name }}: {{ count }}
 {% endfor %}
 
 {% if user_queries %}
-## User Queries
-What the developer asked the agent each turn (truncated to 200 chars):
+## Turn Exchanges
+What the developer asked and how the agent responded (truncated):
 {% for q in user_queries %}
-- Turn {{ q.turn }}: {{ q.query }}
+- **Turn {{ q.turn }}** User: {{ q.query }}
+{% if q.agent_response is defined and q.agent_response %}  Agent: {{ q.agent_response }}
+{% endif %}
 {% endfor %}
 {% endif %}
 
