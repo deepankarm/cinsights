@@ -123,12 +123,33 @@ async def list_sessions(
     if project_name:
         query = query.where(CodingSession.project_name == project_name)
     if label:
-        # Find sessions that have an insight with this label (substring match)
+        # Find sessions with insights matching any label in the cluster.
+        # Look up cluster members from the latest digest, fall back to substring match.
+        search_labels = [label]
+        try:
+            from cinsights.db.models import Digest
+
+            latest_digest = (
+                await db.exec(
+                    select(Digest)
+                    .where(Digest.status == "complete")
+                    .order_by(col(Digest.created_at).desc())
+                    .limit(1)
+                )
+            ).first()
+            if latest_digest and latest_digest.stats_json:
+                digest_stats = json.loads(latest_digest.stats_json)
+                members = (digest_stats.get("label_members") or {}).get(label)
+                if members:
+                    search_labels = members
+        except Exception:
+            pass  # fall back to single label
+
+        from sqlalchemy import or_
+
+        label_conditions = [Insight.metadata_json.contains(sl) for sl in search_labels]
         label_sessions = (
-            select(Insight.session_id)
-            .where(Insight.metadata_json.contains(label))
-            .distinct()
-            .subquery()
+            select(Insight.session_id).where(or_(*label_conditions)).distinct().subquery()
         )
         query = query.where(col(CodingSession.id).in_(select(label_sessions.c.session_id)))
     query = query.offset(skip).limit(limit)
