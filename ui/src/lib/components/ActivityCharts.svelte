@@ -18,6 +18,10 @@
 		insightLabels = undefined,
 		labelCategories = undefined,
 		labelTrends = undefined,
+		analyzedCount = undefined,
+		sessionCount = undefined,
+		scopeUser = undefined,
+		scopeProject = undefined,
 		extra = undefined,
 	}: {
 		toolDistribution?: Record<string, number>;
@@ -28,8 +32,19 @@
 		insightLabels?: Record<string, number> | null;
 		labelCategories?: Record<string, string> | null;
 		labelTrends?: Array<{ date: string; labels: Record<string, number> }> | null;
+		analyzedCount?: number;
+		sessionCount?: number;
+		scopeUser?: string;
+		scopeProject?: string;
 		extra?: Snippet;
 	} = $props();
+
+	function patternLink(label: string): string {
+		let url = `/sessions?label=${encodeURIComponent(label)}&cat=${labelCategories?.[label] ?? ''}`;
+		if (scopeUser) url += `&user=${encodeURIComponent(scopeUser)}`;
+		if (scopeProject) url += `&project=${encodeURIComponent(scopeProject)}`;
+		return url;
+	}
 
 	const CAT_COLORS: Record<string, string> = {
 		friction: '#ef4444',
@@ -145,17 +160,22 @@
 		<div class="chart-box chart-wide">
 			<div class="pattern-header">
 				<h3>Detected Patterns</h3>
-				<div class="pattern-legend">
-					<span class="pattern-legend-item" style="color:#ef4444">▼ friction</span>
-					<span class="pattern-legend-item" style="color:#10b981">▲ win</span>
-					<span class="pattern-legend-item" style="color:#3b82f6">💡 recommendation</span>
+				<div class="pattern-meta">
+					<div class="pattern-legend">
+						<span class="pattern-legend-item" style="color:#ef4444">▼ friction</span>
+						<span class="pattern-legend-item" style="color:#10b981">▲ win</span>
+						<span class="pattern-legend-item" style="color:#3b82f6">💡 recommendation</span>
+					</div>
+					{#if analyzedCount && sessionCount}
+						<div class="pattern-coverage">Based on {analyzedCount} of {sessionCount} sessions</div>
+					{/if}
 				</div>
 			</div>
 			<div class="dot-wrap">
 				<div class="dot-labels">
 					{#if hasTrends}<div class="dot-date-corner"></div>{/if}
 					{#each visiblePatterns as [label, count]}
-						<a class="dot-label-row" href="/sessions?label={encodeURIComponent(label)}&cat={labelCategories?.[label] ?? ''}" title="View sessions with this pattern">
+						<a class="dot-label-row" href="{patternLink(label)}" title="View sessions with this pattern">
 							<span class="dot-cat-icon" style="color:{catColor(label)}" title="{labelCategories?.[label] ?? 'pattern'}">{catIcon(label)}</span>
 							<span class="dot-label" title="{label}">{label}</span>
 							<span class="dot-count" style="color:{catColor(label)}">{count}</span>
@@ -227,8 +247,10 @@
 	/* Pattern header + legend */
 	.pattern-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 	.pattern-header h3 { margin-bottom: 0; }
+	.pattern-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 	.pattern-legend { display: flex; gap: 12px; }
 	.pattern-legend-item { font-size: 11px; font-weight: 600; }
+	.pattern-coverage { font-size: 11px; color: #a1a1aa; }
 
 	/* Combined patterns + trends */
 	.dot-wrap { display: flex; gap: 0; overflow: hidden; }
