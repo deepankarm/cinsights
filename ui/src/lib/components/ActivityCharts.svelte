@@ -177,7 +177,7 @@
 					{#each visiblePatterns as [label, count]}
 						<a class="dot-label-row" href="{patternLink(label)}" title="View sessions with this pattern">
 							<span class="dot-cat-icon" style="color:{catColor(label)}" title="{labelCategories?.[label] ?? 'pattern'}">{catIcon(label)}</span>
-							<span class="dot-label" title="{label}">{label.charAt(0).toUpperCase() + label.slice(1)}</span>
+							<span class="dot-label" title="{label}">{(label.charAt(0).toUpperCase() + label.slice(1)).replace(/claude\.md/gi, 'CLAUDE.md')}</span>
 							<span class="dot-count" style="color:{catColor(label)}">{count}</span>
 						</a>
 					{/each}
