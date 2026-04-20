@@ -864,7 +864,7 @@ def _cluster_and_aggregate_labels(
     raw_labels: dict[str, int],
     cat_counts: dict[str, dict[str, int]],
     label_by_day: dict[str, dict[str, int]],
-    similarity_threshold: float = 0.7,
+    similarity_threshold: float = 0.6,
 ) -> tuple[dict[str, int], dict[str, str], list[dict] | None]:
     """Cluster raw labels using sentence embeddings and aggregate counts.
 
