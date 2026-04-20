@@ -359,7 +359,7 @@ class SessionAnalyzer(LLMAnalyzer):
 
         # Normalize labels: lowercase, collapse whitespace
         for insight in result.insights:
-            insight.label = " ".join(insight.label.lower().split())
+            insight.label = " ".join(insight.label.split())
 
         return result
 
