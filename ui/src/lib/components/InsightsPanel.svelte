@@ -10,7 +10,7 @@
 	let expandedCards: Record<string, boolean> = $state({});
 	let savedExpandState: Record<string, boolean> = {};
 	let showAllLabels = $state(false);
-	const labelLimit = 8;
+	const labelLimit = 6;
 
 	onMount(() => {
 		const handleExpand = () => {
@@ -40,6 +40,12 @@
 	}
 
 	let stats = $derived(digest.stats as DigestStatsData | null);
+	let patternsSorted = $derived(
+		Object.entries(stats?.insight_labels ?? {})
+			.sort((a, b) => b[1] - a[1])
+			.filter(([, c]) => c > 1)
+	);
+	let patternsMax = $derived(patternsSorted[0]?.[1] ?? 1);
 	let sessionIds = $derived(
 		(stats?.session_summaries ?? []).map((s: { session_id: string }) => s.session_id) as string[]
 	);
@@ -122,35 +128,30 @@
 			languageDistribution={stats.language_distribution}
 			timeOfDay={stats.time_of_day}
 			errorTypes={stats.error_types}
-		/>
-	</section>
-{/if}
-
-<!-- Insight Labels (pattern frequency) -->
-{#if stats?.insight_labels && Object.keys(stats.insight_labels).length > 0}
-	{@const sorted = Object.entries(stats.insight_labels).sort((a, b) => b[1] - a[1]).filter(([, c]) => c > 1)}
-	{@const maxCount = sorted[0]?.[1] ?? 1}
-	{#if sorted.length > 0}
-	<section class="sect">
-		<h2 class="sect-title">Detected Patterns <span class="count-badge">{sorted.length}</span></h2>
-		<div class="label-freq-grid">
-			{#each showAllLabels ? sorted : sorted.slice(0, labelLimit) as [label, count]}
-				<div class="label-freq-row">
-					<span class="label-freq-name">{label}</span>
-					<div class="label-freq-bar-bg">
-						<div class="label-freq-bar" style="width: {Math.max(8, (count / maxCount) * 100)}%"></div>
+		>
+			{#snippet extra()}
+				{#if patternsSorted.length > 0}
+					<div class="chart-box">
+						<h3>Detected Patterns</h3>
+						<div class="hbars">
+							{#each showAllLabels ? patternsSorted : patternsSorted.slice(0, labelLimit) as [label, count]}
+								<div class="hbar">
+									<span class="hbar-name" style="text-transform:capitalize">{label}</span>
+									<div class="hbar-track"><div class="hbar-fill hbar-c3" style="width:{Math.max(8, (count / patternsMax) * 100)}%"></div></div>
+									<span class="hbar-val">{count}</span>
+								</div>
+							{/each}
+						</div>
+						{#if patternsSorted.length > labelLimit}
+							<button class="show-more" onclick={() => showAllLabels = !showAllLabels}>
+								{showAllLabels ? 'Show fewer' : `Show all ${patternsSorted.length}`}
+							</button>
+						{/if}
 					</div>
-					<span class="label-freq-count">{count}</span>
-				</div>
-			{/each}
-		</div>
-		{#if sorted.length > labelLimit}
-			<button class="show-more" onclick={() => showAllLabels = !showAllLabels}>
-				{showAllLabels ? 'Show fewer' : `Show all ${sorted.length} patterns`}
-			</button>
-		{/if}
+				{/if}
+			{/snippet}
+		</ActivityCharts>
 	</section>
-	{/if}
 {/if}
 
 <!-- Work Areas + Persona -->
@@ -390,15 +391,6 @@
 	.gc-violet h3 { color: #6d28d9; }
 	.gc-violet ul { color: #4c1d95; }
 
-
-	/* Label frequency */
-	.label-freq-grid { display: flex; flex-direction: column; gap: 8px; background: white; border-radius: 14px; padding: 20px; }
-	.label-freq-row { display: flex; align-items: center; gap: 12px; }
-	.label-freq-name { font-size: 13px; font-weight: 600; color: #334155; width: 160px; flex-shrink: 0; text-transform: capitalize; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.label-freq-bar-bg { flex: 1; height: 22px; background: #f1f5f9; border-radius: 6px; overflow: hidden; }
-	.label-freq-bar { height: 100%; background: linear-gradient(90deg, #818cf8, #6366f1); border-radius: 6px; transition: width 0.3s ease; }
-	.label-freq-count { font-size: 13px; font-weight: 700; color: #6366f1; min-width: 28px; text-align: right; }
-	.show-more { display: block; margin: 12px auto 0; font-size: 13px; color: #6366f1; background: none; border: none; cursor: pointer; font-weight: 600; }
 
 	/* Duo grid */
 	.duo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }

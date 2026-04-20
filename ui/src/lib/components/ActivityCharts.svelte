@@ -123,6 +123,7 @@
 	.hbar-fill { height: 100%; border-radius: 5px; transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
 	.hbar-c1 { background: linear-gradient(90deg, #6366f1, #a5b4fc); }
 	.hbar-c2 { background: linear-gradient(90deg, #10b981, #6ee7b7); }
+	:global(.hbar-c3) { background: linear-gradient(90deg, #8b5cf6, #c4b5fd); }
 	.hbar-c4 { background: linear-gradient(90deg, #ef4444, #fca5a5); }
 	.hbar-val { width: 40px; font-size: 13px; font-weight: 600; color: #71717a; text-align: right; font-variant-numeric: tabular-nums; }
 
@@ -137,6 +138,8 @@
 	.error-tool { font-size: 13px; font-weight: 700; color: #991b1b; font-family: 'SF Mono', 'Fira Code', monospace; }
 	.error-count { font-size: 11px; font-weight: 600; color: #ef4444; background: #fee2e2; padding: 1px 6px; border-radius: 4px; }
 	.error-msg { font-size: 12px; color: #71717a; line-height: 1.5; white-space: pre-wrap; word-break: break-word; max-height: 60px; overflow: hidden; }
+
+	:global(.show-more) { display: block; margin: 12px auto 0; font-size: 13px; color: #6366f1; background: none; border: none; cursor: pointer; font-weight: 600; }
 
 	@media (max-width: 768px) {
 		.chart-bento { grid-template-columns: 1fr; }
