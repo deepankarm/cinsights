@@ -42,7 +42,7 @@ class InsightItem(BaseModel):
         description="The type of insight: summary, friction, win, recommendation, pattern, or skill_proposal"
     )
     label: str = Field(
-        description="Exactly 2 lowercase words summarizing the pattern, e.g. 'blind editing', 'permission fatigue', 'scope creep', 'token waste'. Never use hyphens — write 'pre approve' not 'pre-approve'."
+        description="3-4 word descriptive phrase summarizing the pattern in plain language. Self-explanatory to someone unfamiliar with the codebase. Examples: 'edits without reading first', 'permission prompts block flow', 'same file edited repeatedly'."
     )
     title: str = Field(description="Short descriptive title (5-15 words)")
     content: str = Field(description="Detailed markdown content with evidence from the timeline")
@@ -234,50 +234,7 @@ def _compute_metrics_from_spans(tool_spans: list[SpanData], total_tokens: int) -
     }
 
 
-def _extract_label_vocabulary(labels: list[str], min_freq: int = 2, max_terms: int = 15) -> str:
-    """Extract frequent 1-2 grams from existing labels as vocabulary hint.
-
-    Returns a comma-separated string for the prompt, or empty string if no
-    frequent terms exist.
-    """
-    import re
-    from collections import Counter
-
-    import nltk
-    from nltk.corpus import stopwords
-    from nltk.util import ngrams as nltk_ngrams
-
-    nltk.download("stopwords", quiet=True)
-    stop = set(stopwords.words("english"))
-
-    unigrams: Counter = Counter()
-    bigrams: Counter = Counter()
-
-    for label in labels:
-        words = [w for w in re.split(r"[\s/+&,\-]+", label.lower()) if w and w not in stop]
-        unigrams.update(words)
-        bigrams.update(" ".join(bg) for bg in nltk_ngrams(words, 2))
-
-    result: dict[str, int] = {}
-    for bg, count in bigrams.most_common():
-        if count >= min_freq:
-            result[bg] = count
-    for ug, count in unigrams.most_common():
-        if count >= min_freq and not any(ug in bg for bg in result):
-            result[ug] = count
-
-    terms = list(result.keys())[:max_terms]
-    return ", ".join(f'"{t}"' for t in terms) if terms else ""
-
-
-def normalize_label(label: str) -> str:
-    """Normalize a label: lowercase, hyphens to spaces, collapse whitespace."""
-    return " ".join(label.lower().replace("-", " ").split())
-
-
-def _build_prompts(
-    trace: TraceData, spans: list[SpanData], *, label_vocabulary: str = ""
-) -> tuple[str, str]:
+def _build_prompts(trace: TraceData, spans: list[SpanData]) -> tuple[str, str]:
     """Build system and user prompts from Jinja templates."""
     root = trace.root_span
     wall_duration_s = (trace.end_time - trace.start_time).total_seconds()
@@ -353,7 +310,7 @@ def _build_prompts(
     # Compute quality metrics from spans for the LLM to reference
     metrics = _compute_metrics_from_spans(tool_spans, total_tokens)
 
-    system_prompt = render(PromptTemplates.SESSION_SYSTEM, label_vocabulary=label_vocabulary)
+    system_prompt = render(PromptTemplates.SESSION_SYSTEM)
     user_prompt = render(
         PromptTemplates.SESSION_USER,
         model=root.model_name if root else "unknown",
@@ -376,15 +333,9 @@ def _build_prompts(
 class SessionAnalyzer(LLMAnalyzer):
     """Analyze coding agent sessions using pydantic-ai with structured output."""
 
-    async def analyze(
-        self,
-        trace: TraceData,
-        spans: list[SpanData],
-        *,
-        label_vocabulary: str = "",
-    ) -> AnalysisResult:
+    async def analyze(self, trace: TraceData, spans: list[SpanData]) -> AnalysisResult:
         """Analyze a session's spans and produce structured insights."""
-        system_prompt, user_prompt = _build_prompts(trace, spans, label_vocabulary=label_vocabulary)
+        system_prompt, user_prompt = _build_prompts(trace, spans)
 
         logger.info(
             "Analyzing trace %s (%d spans, prompt ~%d chars)",
@@ -406,9 +357,9 @@ class SessionAnalyzer(LLMAnalyzer):
         result.usage_prompt_tokens = prompt_tokens
         result.usage_completion_tokens = completion_tokens
 
-        # Normalize labels: lowercase, hyphens → spaces
+        # Normalize labels: lowercase, collapse whitespace
         for insight in result.insights:
-            insight.label = normalize_label(insight.label)
+            insight.label = " ".join(insight.label.lower().split())
 
         return result
 
@@ -416,15 +367,13 @@ class SessionAnalyzer(LLMAnalyzer):
         self,
         items: list[tuple[TraceData, list[SpanData]]],
         max_concurrency: int = 5,
-        *,
-        label_vocabulary: str = "",
     ) -> list[AnalysisResult]:
         """Analyze multiple sessions concurrently."""
         semaphore = asyncio.Semaphore(max_concurrency)
 
         async def _bounded(trace: TraceData, spans: list[SpanData]) -> AnalysisResult:
             async with semaphore:
-                return await self.analyze(trace, spans, label_vocabulary=label_vocabulary)
+                return await self.analyze(trace, spans)
 
         tasks = [_bounded(trace, spans) for trace, spans in items]
         return await asyncio.gather(*tasks)

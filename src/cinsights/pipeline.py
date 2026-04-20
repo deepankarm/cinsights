@@ -1249,37 +1249,6 @@ async def _analyze_async(
 
     analysis_input = [(trace, spans) for _, _, trace, spans in work_items]
 
-    # Build label vocabulary from existing insights (scoped to tenant) for convergence
-    label_vocabulary = ""
-    try:
-        import json as _json
-
-        from cinsights.analysis.session import _extract_label_vocabulary
-        from cinsights.db.models import Insight
-
-        async with sessionmaker() as _lv_db:
-            rows = (
-                await _lv_db.exec(
-                    select_fn(Insight.metadata_json).where(
-                        Insight.metadata_json.is_not(None),
-                        Insight.tenant_id == settings.tenant_id,
-                    )
-                )
-            ).all()
-            existing_labels = []
-            for meta_raw in rows:
-                meta = _json.loads(meta_raw) if isinstance(meta_raw, str) else meta_raw
-                if meta and "label" in meta:
-                    existing_labels.append(meta["label"])
-            if existing_labels:
-                label_vocabulary = _extract_label_vocabulary(existing_labels)
-                if label_vocabulary:
-                    console.print(
-                        f"  Label vocabulary: {len(existing_labels)} existing → {label_vocabulary[:80]}..."
-                    )
-    except Exception as exc:
-        logger.warning("Failed to build label vocabulary: %s", exc)
-
     # Project detection for phoenix source (others already have project names)
     if settings.source not in (SourceType.ENTIREIO, SourceType.LOCAL):
         detect_items_list: list[tuple[str, str | None, list[SpanData]]] = [
@@ -1287,9 +1256,7 @@ async def _analyze_async(
             for trace_id, _, _, spans in work_items
         ]
         analysis_results, project_guesses = await asyncio.gather(
-            analyzer.analyze_batch(
-                analysis_input, max_concurrency=concurrency, label_vocabulary=label_vocabulary
-            ),
+            analyzer.analyze_batch(analysis_input, max_concurrency=concurrency),
             project_detector.detect_batch(
                 detect_items_list, known_projects, max_concurrency=concurrency
             ),
@@ -1297,9 +1264,7 @@ async def _analyze_async(
     else:
         from cinsights.analysis.project_detection import ProjectGuess
 
-        analysis_results = await analyzer.analyze_batch(
-            analysis_input, max_concurrency=concurrency, label_vocabulary=label_vocabulary
-        )
+        analysis_results = await analyzer.analyze_batch(analysis_input, max_concurrency=concurrency)
         project_guesses = [
             ProjectGuess(
                 project_name=_get_project_name(settings, source, tid, previous_tags.get(tid))[0],
