@@ -142,7 +142,15 @@
 		{@const hasTrends = labelTrends && labelTrends.length > 1}
 		{@const maxDotVal = hasTrends ? Math.max(...labelTrends!.flatMap(d => Object.values(d.labels)), 1) : 1}
 		<div class="chart-box chart-wide">
-			<h3>Detected Patterns</h3>
+			<div class="pattern-header">
+				<h3>Detected Patterns</h3>
+				<div class="pattern-legend">
+					<span class="pattern-legend-item" style="color:#ef4444">▼ friction</span>
+					<span class="pattern-legend-item" style="color:#10b981">▲ win</span>
+					<span class="pattern-legend-item" style="color:#3b82f6">→ recommendation</span>
+					<span class="pattern-legend-item" style="color:#6b7280">· pattern</span>
+				</div>
+			</div>
 			<div class="dot-wrap">
 				<div class="dot-labels">
 					{#if hasTrends}<div class="dot-date-corner"></div>{/if}
@@ -215,6 +223,12 @@
 	.error-msg { font-size: 12px; color: #71717a; line-height: 1.5; white-space: pre-wrap; word-break: break-word; max-height: 60px; overflow: hidden; }
 
 	.show-more { display: block; margin: 12px auto 0; font-size: 13px; color: #6366f1; background: none; border: none; cursor: pointer; font-weight: 600; }
+
+	/* Pattern header + legend */
+	.pattern-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+	.pattern-header h3 { margin-bottom: 0; }
+	.pattern-legend { display: flex; gap: 12px; }
+	.pattern-legend-item { font-size: 11px; font-weight: 600; }
 
 	/* Combined patterns + trends */
 	.dot-wrap { display: flex; gap: 0; overflow: hidden; }
