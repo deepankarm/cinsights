@@ -8,7 +8,6 @@
 		count: number;
 	}
 
-	let showAllPatterns = $state(false);
 
 	let {
 		toolDistribution = {},
@@ -54,7 +53,7 @@
 			.sort((a, b) => b[1] - a[1])
 			.filter(([, c]) => c > 1)
 	);
-	const defaultPatternLimit = 12;
+	const defaultPatternLimit = 10;
 </script>
 
 <div class="chart-bento">
@@ -138,7 +137,7 @@
 
 	{#if patternsSorted.length > 0}
 		{@const allPatterns = patternsSorted}
-		{@const visiblePatterns = showAllPatterns ? allPatterns : allPatterns.slice(0, defaultPatternLimit)}
+		{@const visiblePatterns = allPatterns.slice(0, defaultPatternLimit)}
 		{@const visibleLabels = visiblePatterns.map(([l]) => l)}
 		{@const hasTrends = labelTrends && labelTrends.length > 1}
 		{@const maxDotVal = hasTrends ? Math.max(...labelTrends!.flatMap(d => Object.values(d.labels)), 1) : 1}
@@ -154,12 +153,7 @@
 							<span class="dot-count" style="color:{catColor(label)}">{count}</span>
 						</div>
 					{/each}
-					{#if allPatterns.length > defaultPatternLimit}
-						<button class="show-more" onclick={() => showAllPatterns = !showAllPatterns}>
-							{showAllPatterns ? 'Show fewer' : `+${allPatterns.length - defaultPatternLimit} more`}
-						</button>
-					{/if}
-				</div>
+					</div>
 				{#if hasTrends}
 					<div class="dot-scroll">
 						<div class="dot-grid" style="grid-template-columns: repeat({labelTrends!.length}, 36px)">
