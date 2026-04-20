@@ -195,6 +195,7 @@ class DigestStats(BaseModel):
     benchmarks: Benchmarks | None = None
     insight_labels: dict[str, int] | None = None  # label → count across sessions
     label_categories: dict[str, str] | None = None  # label → dominant category
+    label_members: dict[str, list[str]] | None = None  # canonical → [raw labels in cluster]
     label_trends: list[dict] | None = None  # [{date, labels: {label: count}}]
 
 
@@ -865,10 +866,10 @@ def _cluster_and_aggregate_labels(
     cat_counts: dict[str, dict[str, int]],
     label_by_day: dict[str, dict[str, int]],
     similarity_threshold: float = 0.6,
-) -> tuple[dict[str, int], dict[str, str], list[dict] | None]:
+) -> tuple[dict[str, int], dict[str, str], list[dict] | None, dict[str, list[str]]]:
     """Cluster raw labels using sentence embeddings and aggregate counts.
 
-    Returns (clustered_labels, label_categories, label_trends).
+    Returns (clustered_labels, label_categories, label_trends, label_members).
     Each cluster is named by the most central member (or most frequent if it
     dominates by >5x).
     """
@@ -877,7 +878,7 @@ def _cluster_and_aggregate_labels(
     _logger = logging.getLogger(__name__)
 
     if not raw_labels:
-        return {}, {}, None
+        return {}, {}, None, {}
 
     unique = list(raw_labels.keys())
 
@@ -886,7 +887,7 @@ def _cluster_and_aggregate_labels(
         categories = {}
         for lbl, cats in cat_counts.items():
             categories[lbl] = max(cats, key=cats.get)
-        return raw_labels, categories, None
+        return raw_labels, categories, None, {}
 
     try:
         import numpy as np
@@ -901,7 +902,7 @@ def _cluster_and_aggregate_labels(
         categories = {}
         for lbl, cats in cat_counts.items():
             categories[lbl] = max(cats, key=cats.get)
-        return raw_labels, categories, None
+        return raw_labels, categories, None, {}
 
     # Greedy clustering
     clusters: list[list[int]] = []
@@ -923,6 +924,7 @@ def _cluster_and_aggregate_labels(
     clustered_labels: dict[str, int] = {}
     label_categories: dict[str, str] = {}
     label_map: dict[str, str] = {}  # raw label → cluster name
+    label_members: dict[str, list[str]] = {}  # canonical → [raw labels]
 
     for indices in clusters:
         members = [unique[idx] for idx in indices]
@@ -943,6 +945,7 @@ def _cluster_and_aggregate_labels(
             canonical = most_central
 
         clustered_labels[canonical] = total
+        label_members[canonical] = members
         for m in members:
             label_map[m] = canonical
 
@@ -969,7 +972,7 @@ def _cluster_and_aggregate_labels(
                 trends.append({"date": day, "labels": merged})
         label_trends = trends or None
 
-    return clustered_labels, label_categories, label_trends
+    return clustered_labels, label_categories, label_trends, label_members
 
 
 async def compute_all(
@@ -1103,7 +1106,7 @@ async def compute_all(
                 pass
 
     # Cluster labels by embedding similarity, then aggregate
-    clustered_labels, label_categories, label_trends = _cluster_and_aggregate_labels(
+    clustered_labels, label_categories, label_trends, label_members = _cluster_and_aggregate_labels(
         insight_labels, label_cat_counts, label_by_day
     )
 
@@ -1140,5 +1143,6 @@ async def compute_all(
         benchmarks=await _compute_benchmarks(db, start, end, project_name, user_id),
         insight_labels=clustered_labels or None,
         label_categories=label_categories or None,
+        label_members=label_members or None,
         label_trends=label_trends,
     )
