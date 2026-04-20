@@ -56,7 +56,7 @@
 			.filter(([, c]) => c > 1);
 		if (sorted.length === 0) return [];
 		const total = sorted.reduce((s, [, c]) => s + c, 0);
-		const threshold = total * 0.8;
+		const threshold = total * 0.9;
 		let cumulative = 0;
 		const result: [string, number][] = [];
 		for (const entry of sorted) {
