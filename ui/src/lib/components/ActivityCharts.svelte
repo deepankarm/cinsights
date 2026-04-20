@@ -44,7 +44,7 @@
 			{#each Object.entries(toolDistribution).slice(0, 8) as [name, count]}
 				{@const pct = barPct(count, maxVal(toolDistribution))}
 				<div class="hbar">
-					<span class="hbar-name">{name}</span>
+					<span class="hbar-name" title="{name}">{name}</span>
 					<div class="hbar-track"><div class="hbar-fill hbar-c1" style="width:{pct}%"></div></div>
 					<span class="hbar-val">{count}</span>
 				</div>
@@ -60,7 +60,7 @@
 			{#each Object.entries(languageDistribution).slice(0, 6) as [lang, count]}
 				{@const pct = barPct(count, maxVal(languageDistribution))}
 				<div class="hbar">
-					<span class="hbar-name">{lang}</span>
+					<span class="hbar-name" title="{lang}">{lang}</span>
 					<div class="hbar-track"><div class="hbar-fill hbar-c2" style="width:{pct}%"></div></div>
 					<span class="hbar-val">{count}</span>
 				</div>
@@ -104,7 +104,7 @@
 				{#each Object.entries(errorTypes).slice(0, 5) as [type, count]}
 					{@const pct = barPct(count, maxVal(errorTypes))}
 					<div class="hbar">
-						<span class="hbar-name">{type}</span>
+						<span class="hbar-name" title="{type}">{type}</span>
 						<div class="hbar-track"><div class="hbar-fill hbar-c4" style="width:{pct}%"></div></div>
 						<span class="hbar-val">{count}</span>
 					</div>
