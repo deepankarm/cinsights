@@ -9,8 +9,6 @@
 
 	let expandedCards: Record<string, boolean> = $state({});
 	let savedExpandState: Record<string, boolean> = {};
-	let showAllLabels = $state(false);
-	const labelLimit = 6;
 
 	onMount(() => {
 		const handleExpand = () => {
@@ -40,12 +38,6 @@
 	}
 
 	let stats = $derived(digest.stats as DigestStatsData | null);
-	let patternsSorted = $derived(
-		Object.entries(stats?.insight_labels ?? {})
-			.sort((a, b) => b[1] - a[1])
-			.filter(([, c]) => c > 1)
-	);
-	let patternsMax = $derived(patternsSorted[0]?.[1] ?? 1);
 	let sessionIds = $derived(
 		(stats?.session_summaries ?? []).map((s: { session_id: string }) => s.session_id) as string[]
 	);
@@ -128,29 +120,8 @@
 			languageDistribution={stats.language_distribution}
 			timeOfDay={stats.time_of_day}
 			errorTypes={stats.error_types}
-		>
-			{#snippet extra()}
-				{#if patternsSorted.length > 0}
-					<div class="chart-box">
-						<h3>Detected Patterns</h3>
-						<div class="hbars">
-							{#each showAllLabels ? patternsSorted : patternsSorted.slice(0, labelLimit) as [label, count]}
-								<div class="hbar">
-									<span class="hbar-name" style="text-transform:capitalize">{label}</span>
-									<div class="hbar-track"><div class="hbar-fill hbar-c3" style="width:{Math.max(8, (count / patternsMax) * 100)}%"></div></div>
-									<span class="hbar-val">{count}</span>
-								</div>
-							{/each}
-						</div>
-						{#if patternsSorted.length > labelLimit}
-							<button class="show-more" onclick={() => showAllLabels = !showAllLabels}>
-								{showAllLabels ? 'Show fewer' : `Show all ${patternsSorted.length}`}
-							</button>
-						{/if}
-					</div>
-				{/if}
-			{/snippet}
-		</ActivityCharts>
+			insightLabels={stats.insight_labels}
+		/>
 	</section>
 {/if}
 

@@ -8,12 +8,16 @@
 		count: number;
 	}
 
+	let showAllPatterns = $state(false);
+	const patternLimit = 6;
+
 	let {
 		toolDistribution = {},
 		languageDistribution = {},
 		timeOfDay = {},
 		errorTypes = {},
 		errorDetails = undefined,
+		insightLabels = undefined,
 		extra = undefined,
 	}: {
 		toolDistribution?: Record<string, number>;
@@ -21,8 +25,16 @@
 		timeOfDay?: Record<string, number>;
 		errorTypes?: Record<string, number>;
 		errorDetails?: ErrorDetail[];
+		insightLabels?: Record<string, number> | null;
 		extra?: Snippet;
 	} = $props();
+
+	let patternsSorted = $derived(
+		Object.entries(insightLabels ?? {})
+			.sort((a, b) => b[1] - a[1])
+			.filter(([, c]) => c > 1)
+	);
+	let patternsMax = $derived(patternsSorted[0]?.[1] ?? 1);
 </script>
 
 <div class="chart-bento">
@@ -104,6 +116,26 @@
 		{/if}
 	</div>
 
+	{#if patternsSorted.length > 0}
+		<div class="chart-box">
+			<h3>Detected Patterns</h3>
+			<div class="hbars">
+				{#each showAllPatterns ? patternsSorted : patternsSorted.slice(0, patternLimit) as [label, count]}
+					<div class="hbar">
+						<span class="hbar-name" style="text-transform:capitalize">{label}</span>
+						<div class="hbar-track"><div class="hbar-fill hbar-c3" style="width:{Math.max(8, (count / patternsMax) * 100)}%"></div></div>
+						<span class="hbar-val">{count}</span>
+					</div>
+				{/each}
+			</div>
+			{#if patternsSorted.length > patternLimit}
+				<button class="show-more" onclick={() => showAllPatterns = !showAllPatterns}>
+					{showAllPatterns ? 'Show fewer' : `Show all ${patternsSorted.length}`}
+				</button>
+			{/if}
+		</div>
+	{/if}
+
 	{#if extra}
 		{@render extra()}
 	{/if}
@@ -123,7 +155,7 @@
 	.hbar-fill { height: 100%; border-radius: 5px; transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
 	.hbar-c1 { background: linear-gradient(90deg, #6366f1, #a5b4fc); }
 	.hbar-c2 { background: linear-gradient(90deg, #10b981, #6ee7b7); }
-	:global(.hbar-c3) { background: linear-gradient(90deg, #8b5cf6, #c4b5fd); }
+	.hbar-c3 { background: linear-gradient(90deg, #8b5cf6, #c4b5fd); }
 	.hbar-c4 { background: linear-gradient(90deg, #ef4444, #fca5a5); }
 	.hbar-val { width: 40px; font-size: 13px; font-weight: 600; color: #71717a; text-align: right; font-variant-numeric: tabular-nums; }
 
@@ -139,7 +171,7 @@
 	.error-count { font-size: 11px; font-weight: 600; color: #ef4444; background: #fee2e2; padding: 1px 6px; border-radius: 4px; }
 	.error-msg { font-size: 12px; color: #71717a; line-height: 1.5; white-space: pre-wrap; word-break: break-word; max-height: 60px; overflow: hidden; }
 
-	:global(.show-more) { display: block; margin: 12px auto 0; font-size: 13px; color: #6366f1; background: none; border: none; cursor: pointer; font-weight: 600; }
+	.show-more { display: block; margin: 12px auto 0; font-size: 13px; color: #6366f1; background: none; border: none; cursor: pointer; font-weight: 600; }
 
 	@media (max-width: 768px) {
 		.chart-bento { grid-template-columns: 1fr; }
