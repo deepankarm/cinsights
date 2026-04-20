@@ -929,7 +929,8 @@ def _cluster_and_aggregate_labels(
                 label_members[lbl] = [lbl]
             continue
 
-        # Greedy clustering within this category
+        # Single-linkage clustering within this category:
+        # a label joins a cluster if similar to ANY existing member
         cat_indices = [label_idx[lbl] for lbl in cat_labels]
         assigned: set[int] = set()
         clusters: list[list[int]] = []
@@ -939,12 +940,17 @@ def _cluster_and_aggregate_labels(
                 continue
             cluster = [ci]
             assigned.add(ci)
-            for cj in cat_indices:
-                if cj in assigned:
-                    continue
-                if sim[ci, cj] >= similarity_threshold:
-                    cluster.append(cj)
-                    assigned.add(cj)
+            # Grow cluster: keep scanning until no new members added
+            changed = True
+            while changed:
+                changed = False
+                for cj in cat_indices:
+                    if cj in assigned:
+                        continue
+                    if any(sim[cj, ck] >= similarity_threshold for ck in cluster):
+                        cluster.append(cj)
+                        assigned.add(cj)
+                        changed = True
             clusters.append(cluster)
 
         # Name each cluster
