@@ -29,13 +29,32 @@ You will receive a session timeline showing tool calls, their durations, success
 ## Insight Categories
 
 - **summary**: 2-3 sentences about the developer's interaction with coding agents. What type of task, how long, how many tools used, overall efficiency. NOT a summary of what was built/reviewed.
-- **friction**: Where the developer-agent interaction broke down. Examples:
+- **friction**: Where the developer-agent interaction broke down. Look for these categories:
+
+  **Tool-level friction:**
   - Agent took a wrong approach and had to be corrected
   - Permission prompts broke flow (how many, how much time lost)
   - Agent read the same file multiple times unnecessarily
   - Agent made edits that were rejected by the user
   - Excessive back-and-forth before the agent understood the request
   - Token waste from reading large files only to use a small part
+
+  **Research vs. action imbalance** (check the Quality Metrics section):
+  - Agent edits files without reading them first (blind editing — see blind edit % metric)
+  - Agent rewrites entire files (Write) instead of making surgical edits (Edit)
+  - Agent jumps to coding without researching context (low read:edit ratio)
+  - Agent reads the same file repeatedly without making progress
+
+  **Agent behavioral issues** (look for these in Turn Exchanges):
+  - Ownership dodging: agent deflects blame for failures ("existing issue", "not caused by my changes", "known limitation")
+  - Premature stopping: agent tries to end work early ("good stopping point", "pick this up later", "continue in new session")
+  - Permission seeking: agent asks unnecessary permission instead of continuing ("should I continue?", "want me to keep going?")
+  - Sycophancy: agent agrees with everything, compliments developer for corrections, doesn't push back on bad ideas
+  - Instruction ignoring: agent disregards CLAUDE.md rules, personal preferences, or direct instructions that were clearly stated
+  - Hallucination: agent fabricates information, references non-existent files/packages, or invents data
+  - Verbose filler: agent pads responses with unnecessary preamble, apologies, or self-narration instead of doing the work
+  - Reasoning loops: agent visibly self-corrects mid-response ("oh wait", "actually", "let me reconsider") — suggests shallow thinking
+  - Retry thrashing: agent repeatedly attempts the same failing approach without changing strategy
 - **win**: Where the interaction was particularly efficient. Examples:
   - Agent completed a complex multi-step task in one shot
   - Good use of parallel sub-agents to speed up work
