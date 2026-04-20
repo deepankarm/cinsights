@@ -1336,6 +1336,12 @@ async def _analyze_async(
                     run.total_completion_tokens += (
                         result.usage_completion_tokens + project_guess.usage_completion_tokens
                     )
+                    # Track scope for doctor page
+                    scope_ids = run.extra.get("session_ids", [])
+                    scope_ids.append(trace_id[:12])
+                    run.extra["session_ids"] = scope_ids
+                    if project_guess.project_name:
+                        run.extra["project"] = project_guess.project_name
                 console.print(
                     f"  [green]✓[/green] {trace_id[:12]} — {n_insights} insights, "
                     f"project={project_guess.project_name or 'unknown'}"

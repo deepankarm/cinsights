@@ -103,6 +103,10 @@
 		if (!m) return '';
 		if (m.project) return m.project as string;
 		if (m.user) return m.user as string;
+		if (Array.isArray(m.session_ids)) {
+			const ids = m.session_ids as string[];
+			return ids.length <= 2 ? ids.join(', ') : `${ids.slice(0, 2).join(', ')} +${ids.length - 2}`;
+		}
 		return '';
 	}
 
@@ -112,6 +116,7 @@
 		if (m.scope_type) return m.scope_type as string;
 		if (m.project) return 'project';
 		if (m.user) return 'user';
+		if (Array.isArray(m.session_ids)) return 'sessions';
 		return '';
 	}
 
