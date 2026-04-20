@@ -122,7 +122,7 @@
 			<div class="hbars">
 				{#each showAllPatterns ? patternsSorted : patternsSorted.slice(0, patternLimit) as [label, count]}
 					<div class="hbar">
-						<span class="hbar-name" style="text-transform:capitalize">{label}</span>
+						<span class="hbar-name" style="text-transform:capitalize" title="{label}">{label}</span>
 						<div class="hbar-track"><div class="hbar-fill hbar-c3" style="width:{Math.max(8, (count / patternsMax) * 100)}%"></div></div>
 						<span class="hbar-val">{count}</span>
 					</div>
