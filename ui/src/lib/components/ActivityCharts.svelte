@@ -43,15 +43,16 @@
 		const cat = labelCategories?.[label] ?? 'pattern';
 		return CAT_COLORS[cat] ?? '#8b5cf6';
 	}
+	const ACTIONABLE_CATS = new Set(['friction', 'win', 'recommendation']);
 	function catIcon(label: string): string {
 		const cat = labelCategories?.[label] ?? 'pattern';
-		return cat === 'friction' ? '▼' : cat === 'win' ? '▲' : cat === 'recommendation' ? '→' : '·';
+		return cat === 'friction' ? '▼' : cat === 'win' ? '▲' : cat === 'recommendation' ? '💡' : '·';
 	}
 
 	let patternsSorted = $derived(
 		Object.entries(insightLabels ?? {})
 			.sort((a, b) => b[1] - a[1])
-			.filter(([, c]) => c > 1)
+			.filter(([lbl, c]) => c > 1 && ACTIONABLE_CATS.has(labelCategories?.[lbl] ?? ''))
 	);
 	const defaultPatternLimit = 10;
 </script>
@@ -147,8 +148,7 @@
 				<div class="pattern-legend">
 					<span class="pattern-legend-item" style="color:#ef4444">▼ friction</span>
 					<span class="pattern-legend-item" style="color:#10b981">▲ win</span>
-					<span class="pattern-legend-item" style="color:#3b82f6">→ recommendation</span>
-					<span class="pattern-legend-item" style="color:#6b7280">· pattern</span>
+					<span class="pattern-legend-item" style="color:#3b82f6">💡 recommendation</span>
 				</div>
 			</div>
 			<div class="dot-wrap">
