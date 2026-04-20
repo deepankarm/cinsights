@@ -50,12 +50,23 @@
 		return cat === 'friction' ? '▼' : cat === 'win' ? '▲' : cat === 'recommendation' ? '→' : '·';
 	}
 
-	let patternsSorted = $derived(
-		Object.entries(insightLabels ?? {})
+	let patternsSorted = $derived(() => {
+		const sorted = Object.entries(insightLabels ?? {})
 			.sort((a, b) => b[1] - a[1])
-			.filter(([, c]) => c > 1)
-	);
-	let patternsMax = $derived(patternsSorted[0]?.[1] ?? 1);
+			.filter(([, c]) => c > 1);
+		if (sorted.length === 0) return [];
+		const total = sorted.reduce((s, [, c]) => s + c, 0);
+		const threshold = total * 0.8;
+		let cumulative = 0;
+		const result: [string, number][] = [];
+		for (const entry of sorted) {
+			result.push(entry);
+			cumulative += entry[1];
+			if (cumulative >= threshold && result.length >= 3) break;
+		}
+		return result;
+	});
+	let patternsMax = $derived(patternsSorted()[0]?.[1] ?? 1);
 </script>
 
 <div class="chart-bento">
@@ -137,8 +148,9 @@
 		{/if}
 	</div>
 
-	{#if patternsSorted.length > 0}
-		{@const visiblePatterns = showAllPatterns ? patternsSorted : patternsSorted.slice(0, patternLimit)}
+	{#if patternsSorted().length > 0}
+		{@const allPatterns = patternsSorted()}
+		{@const visiblePatterns = showAllPatterns ? allPatterns : allPatterns.slice(0, patternLimit)}
 		{@const visibleLabels = visiblePatterns.map(([l]) => l)}
 		{@const hasTrends = labelTrends && labelTrends.length > 1}
 		{@const maxDotVal = hasTrends ? Math.max(...labelTrends!.flatMap(d => Object.values(d.labels)), 1) : 1}
@@ -154,9 +166,9 @@
 							<span class="dot-count" style="color:{catColor(label)}">{count}</span>
 						</div>
 					{/each}
-					{#if patternsSorted.length > patternLimit}
+					{#if allPatterns.length > patternLimit}
 						<button class="show-more" onclick={() => showAllPatterns = !showAllPatterns}>
-							{showAllPatterns ? 'Show fewer' : `+${patternsSorted.length - patternLimit} more`}
+							{showAllPatterns ? 'Show fewer' : `+${allPatterns.length - patternLimit} more`}
 						</button>
 					{/if}
 				</div>
