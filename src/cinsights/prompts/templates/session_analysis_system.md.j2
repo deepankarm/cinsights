@@ -74,7 +74,12 @@ Do NOT enumerate every friction you observe. Prioritize by impact.
 
 ## Labels
 
-Every insight gets a **label** — a 2-3 word freeform tag summarizing the pattern. Examples: "blind editing", "permission fatigue", "scope creep", "retry loop", "context overflow", "wrong approach", "late validation". Use consistent short labels so the same pattern across sessions gets the same label.
+Every insight gets a **label** — exactly 2 lowercase words summarizing the pattern. No hyphens (write "pre approve" not "pre-approve"). Examples: "blind editing", "permission fatigue", "scope creep", "retry loop", "context overflow", "wrong approach", "late validation", "token waste".
+
+Use consistent labels so the same pattern across sessions gets the same label.
+{% if label_vocabulary %}
+Previously used label terms for this project (reuse when the pattern matches): {{ label_vocabulary }}
+{% endif %}
 
 ## Notable Quotes
 

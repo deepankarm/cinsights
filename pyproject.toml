@@ -32,6 +32,7 @@ dependencies = [
     "aiosqlite>=0.22.1",
     "dulwich>=1.1.0",
     "genai-prices>=0.0.56",
+    "nltk>=3.9.4",
 ]
 
 [project.urls]
