@@ -18,6 +18,7 @@
 		errorTypes = {},
 		errorDetails = undefined,
 		insightLabels = undefined,
+		labelCategories = undefined,
 		labelTrends = undefined,
 		extra = undefined,
 	}: {
@@ -27,25 +28,27 @@
 		errorTypes?: Record<string, number>;
 		errorDetails?: ErrorDetail[];
 		insightLabels?: Record<string, number> | null;
+		labelCategories?: Record<string, string> | null;
 		labelTrends?: Array<{ date: string; labels: Record<string, number> }> | null;
 		extra?: Snippet;
 	} = $props();
 
-	const LABEL_COLORS = ['#8b5cf6', '#6366f1', '#ec4899', '#f59e0b', '#10b981', '#3b82f6'];
-	let trendLabels = $derived(() => {
-		if (!labelTrends?.length) return [];
-		const counts: Record<string, number> = {};
-		for (const day of labelTrends) {
-			for (const [l, c] of Object.entries(day.labels)) {
-				counts[l] = (counts[l] ?? 0) + c;
-			}
-		}
-		return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([l]) => l).slice(0, 6);
-	});
-	let trendMax = $derived(() => {
-		if (!labelTrends?.length) return 1;
-		return Math.max(...labelTrends.map(d => Math.max(...Object.values(d.labels), 0)), 1);
-	});
+	const CAT_COLORS: Record<string, string> = {
+		friction: '#ef4444',
+		win: '#10b981',
+		recommendation: '#3b82f6',
+		pattern: '#8b5cf6',
+		skill_proposal: '#f59e0b',
+		summary: '#6b7280',
+	};
+	function catColor(label: string): string {
+		const cat = labelCategories?.[label] ?? 'pattern';
+		return CAT_COLORS[cat] ?? '#8b5cf6';
+	}
+	function catIcon(label: string): string {
+		const cat = labelCategories?.[label] ?? 'pattern';
+		return cat === 'friction' ? '▼' : cat === 'win' ? '▲' : cat === 'recommendation' ? '→' : '·';
+	}
 
 	let patternsSorted = $derived(
 		Object.entries(insightLabels ?? {})
@@ -135,55 +138,48 @@
 	</div>
 
 	{#if patternsSorted.length > 0}
-		<div class="chart-box">
-			<h3>Detected Patterns</h3>
-			<div class="hbars">
-				{#each showAllPatterns ? patternsSorted : patternsSorted.slice(0, patternLimit) as [label, count]}
-					<div class="hbar">
-						<span class="hbar-name hbar-name-wide" title="{label}">{label}</span>
-						<div class="hbar-track"><div class="hbar-fill hbar-c3" style="width:{Math.max(8, (count / patternsMax) * 100)}%"></div></div>
-						<span class="hbar-val">{count}</span>
-					</div>
-				{/each}
-			</div>
-			{#if patternsSorted.length > patternLimit}
-				<button class="show-more" onclick={() => showAllPatterns = !showAllPatterns}>
-					{showAllPatterns ? 'Show fewer' : `Show all ${patternsSorted.length}`}
-				</button>
-			{/if}
-		</div>
-	{/if}
-
-	{#if labelTrends && labelTrends.length > 1 && trendLabels().length > 0}
-		{@const labels = trendLabels()}
-		{@const maxDotVal = Math.max(...labelTrends.flatMap(d => Object.values(d.labels)), 1)}
+		{@const visiblePatterns = showAllPatterns ? patternsSorted : patternsSorted.slice(0, patternLimit)}
+		{@const visibleLabels = visiblePatterns.map(([l]) => l)}
+		{@const hasTrends = labelTrends && labelTrends.length > 1}
+		{@const maxDotVal = hasTrends ? Math.max(...labelTrends!.flatMap(d => Object.values(d.labels)), 1) : 1}
 		<div class="chart-box chart-wide">
-			<h3>Pattern Trends</h3>
+			<h3>Detected Patterns</h3>
 			<div class="dot-wrap">
 				<div class="dot-labels">
-					<div class="dot-date-corner"></div>
-					{#each labels as label}
-						<div class="dot-label" title="{label}">{label}</div>
+					{#if hasTrends}<div class="dot-date-corner"></div>{/if}
+					{#each visiblePatterns as [label, count]}
+						<div class="dot-label-row">
+							<span class="dot-cat-icon" style="color:{catColor(label)}" title="{labelCategories?.[label] ?? 'pattern'}">{catIcon(label)}</span>
+							<span class="dot-label" title="{label}">{label}</span>
+							<span class="dot-count" style="color:{catColor(label)}">{count}</span>
+						</div>
 					{/each}
+					{#if patternsSorted.length > patternLimit}
+						<button class="show-more" onclick={() => showAllPatterns = !showAllPatterns}>
+							{showAllPatterns ? 'Show fewer' : `+${patternsSorted.length - patternLimit} more`}
+						</button>
+					{/if}
 				</div>
-				<div class="dot-scroll">
-					<div class="dot-grid" style="grid-template-columns: repeat({labelTrends.length}, 36px)">
-						{#each labelTrends as day}
-							<div class="dot-date">{day.date.slice(5)}</div>
-						{/each}
-						{#each labels as label, li}
-							{#each labelTrends as day}
-								{@const val = day.labels[label] ?? 0}
-								<div class="dot-cell">
-									{#if val > 0}
-										{@const size = 8 + Math.min(val / maxDotVal, 1) * 16}
-										<div class="dot-circle" style="background:{LABEL_COLORS[li % LABEL_COLORS.length]}; width:{size}px; height:{size}px" title="{label}: {val} on {day.date}"></div>
-									{/if}
-								</div>
+				{#if hasTrends}
+					<div class="dot-scroll">
+						<div class="dot-grid" style="grid-template-columns: repeat({labelTrends!.length}, 36px)">
+							{#each labelTrends! as day}
+								<div class="dot-date">{day.date.slice(5)}</div>
 							{/each}
-						{/each}
+							{#each visibleLabels as label}
+								{#each labelTrends! as day}
+									{@const val = day.labels[label] ?? 0}
+									<div class="dot-cell">
+										{#if val > 0}
+											{@const size = 8 + Math.min(val / maxDotVal, 1) * 16}
+											<div class="dot-circle" style="background:{catColor(label)}; width:{size}px; height:{size}px" title="{label}: {val} on {day.date}"></div>
+										{/if}
+									</div>
+								{/each}
+							{/each}
+						</div>
 					</div>
-				</div>
+				{/if}
 			</div>
 		</div>
 	{/if}
@@ -226,16 +222,19 @@
 
 	.show-more { display: block; margin: 12px auto 0; font-size: 13px; color: #6366f1; background: none; border: none; cursor: pointer; font-weight: 600; }
 
-	/* Pattern trends — dot grid with fixed labels + scrollable dates */
+	/* Combined patterns + trends */
 	.dot-wrap { display: flex; gap: 0; overflow: hidden; }
-	.dot-labels { flex-shrink: 0; width: 130px; }
-	.dot-date-corner { height: 24px; }
+	.dot-labels { flex-shrink: 0; width: 200px; }
+	.dot-date-corner { height: 28px; }
+	.dot-label-row { display: flex; align-items: center; gap: 6px; height: 32px; padding-right: 12px; }
+	.dot-cat-icon { font-size: 10px; flex-shrink: 0; width: 12px; text-align: center; }
+	.dot-label { font-size: 12px; color: #52525b; text-transform: capitalize; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+	.dot-count { font-size: 12px; font-weight: 700; flex-shrink: 0; font-variant-numeric: tabular-nums; }
 	.dot-scroll { flex: 1; overflow-x: auto; overflow-y: hidden; }
 	.dot-grid { display: grid; gap: 0; align-items: center; }
-	.dot-date { font-size: 10px; color: #a1a1aa; text-align: center; height: 24px; line-height: 24px; transform: rotate(-45deg); transform-origin: center; }
-	.dot-label { font-size: 12px; color: #52525b; text-transform: capitalize; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; height: 32px; line-height: 32px; padding-right: 8px; }
+	.dot-date { font-size: 10px; color: #a1a1aa; text-align: center; height: 28px; line-height: 28px; transform: rotate(-45deg); transform-origin: center; }
 	.dot-cell { display: flex; align-items: center; justify-content: center; height: 32px; }
-	.dot-circle { border-radius: 50%; opacity: 0.8; transition: transform 0.15s; cursor: default; }
+	.dot-circle { border-radius: 50%; opacity: 0.75; transition: transform 0.15s; cursor: default; }
 	.dot-circle:hover { transform: scale(1.4); opacity: 1; }
 
 	@media (max-width: 768px) {
