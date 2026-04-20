@@ -860,6 +860,118 @@ async def _compute_benchmarks(
     )
 
 
+def _cluster_and_aggregate_labels(
+    raw_labels: dict[str, int],
+    cat_counts: dict[str, dict[str, int]],
+    label_by_day: dict[str, dict[str, int]],
+    similarity_threshold: float = 0.7,
+) -> tuple[dict[str, int], dict[str, str], list[dict] | None]:
+    """Cluster raw labels using sentence embeddings and aggregate counts.
+
+    Returns (clustered_labels, label_categories, label_trends).
+    Each cluster is named by the most central member (or most frequent if it
+    dominates by >5x).
+    """
+    import logging
+
+    _logger = logging.getLogger(__name__)
+
+    if not raw_labels:
+        return {}, {}, None
+
+    unique = list(raw_labels.keys())
+
+    # If too few labels, skip clustering
+    if len(unique) <= 3:
+        categories = {}
+        for lbl, cats in cat_counts.items():
+            categories[lbl] = max(cats, key=cats.get)
+        return raw_labels, categories, None
+
+    try:
+        import numpy as np
+        from sentence_transformers import SentenceTransformer
+        from sklearn.metrics.pairwise import cosine_similarity
+
+        model = SentenceTransformer("all-MiniLM-L6-v2")
+        embeddings = model.encode(unique)
+        sim = cosine_similarity(embeddings)
+    except Exception as exc:
+        _logger.warning("Embedding clustering unavailable, using raw labels: %s", exc)
+        categories = {}
+        for lbl, cats in cat_counts.items():
+            categories[lbl] = max(cats, key=cats.get)
+        return raw_labels, categories, None
+
+    # Greedy clustering
+    clusters: list[list[int]] = []
+    assigned: set[int] = set()
+    for i in range(len(unique)):
+        if i in assigned:
+            continue
+        cluster = [i]
+        assigned.add(i)
+        for j in range(len(unique)):
+            if j in assigned:
+                continue
+            if sim[i, j] >= similarity_threshold:
+                cluster.append(j)
+                assigned.add(j)
+        clusters.append(cluster)
+
+    # Name each cluster: most-central, unless most-frequent is >5x more common
+    clustered_labels: dict[str, int] = {}
+    label_categories: dict[str, str] = {}
+    label_map: dict[str, str] = {}  # raw label → cluster name
+
+    for indices in clusters:
+        members = [unique[idx] for idx in indices]
+        total = sum(raw_labels[m] for m in members)
+
+        most_freq = max(members, key=lambda lbl: raw_labels[lbl])
+
+        # Most central embedding
+        cluster_embs = embeddings[indices]
+        centroid = cluster_embs.mean(axis=0)
+        dists = cosine_similarity([centroid], cluster_embs)[0]
+        most_central = unique[indices[int(np.argmax(dists))]]
+
+        # Hybrid: use central unless freq label dominates
+        if raw_labels[most_freq] > raw_labels.get(most_central, 0) * 5:
+            canonical = most_freq
+        else:
+            canonical = most_central
+
+        clustered_labels[canonical] = total
+        for m in members:
+            label_map[m] = canonical
+
+        # Dominant category across all members
+        merged_cats: dict[str, int] = {}
+        for m in members:
+            for cat, cnt in cat_counts.get(m, {}).items():
+                merged_cats[cat] = merged_cats.get(cat, 0) + cnt
+        if merged_cats:
+            label_categories[canonical] = max(merged_cats, key=merged_cats.get)
+
+    # Build label_trends with clustered names
+    label_trends: list[dict] | None = None
+    frequent = {lbl for lbl, cnt in clustered_labels.items() if cnt > 1}
+    if label_by_day and frequent:
+        trends: list[dict] = []
+        for day, day_labels in sorted(label_by_day.items()):
+            merged: dict[str, int] = {}
+            for raw_lbl, cnt in day_labels.items():
+                canonical = label_map.get(raw_lbl, raw_lbl)
+                if canonical in frequent:
+                    merged[canonical] = merged.get(canonical, 0) + cnt
+            if merged:
+                trends.append({"date": day, "labels": merged})
+        label_trends = trends or None
+
+    return clustered_labels, label_categories, label_trends
+
+
 async def compute_all(
     db: AsyncSession,
     start: datetime,
@@ -990,23 +1102,10 @@ async def compute_all(
             except Exception:
                 pass
 
-    # Dominant category per label
-    label_categories: dict[str, str] = {}
-    for lbl, cats in label_cat_counts.items():
-        label_categories[lbl] = max(cats, key=cats.get)
-
-    # Build label_trends: only include labels that appear >1 time total
-    frequent_labels = {lbl for lbl, cnt in insight_labels.items() if cnt > 1}
-    label_trends: list[dict] | None = None
-    if label_by_day and frequent_labels:
-        label_trends = [
-            {
-                "date": day,
-                "labels": {lbl: cnt for lbl, cnt in labels.items() if lbl in frequent_labels},
-            }
-            for day, labels in sorted(label_by_day.items())
-            if any(lbl in frequent_labels for lbl in labels)
-        ]
+    # Cluster labels by embedding similarity, then aggregate
+    clustered_labels, label_categories, label_trends = _cluster_and_aggregate_labels(
+        insight_labels, label_cat_counts, label_by_day
+    )
 
     return DigestStats(
         period_start=start,
@@ -1039,7 +1138,7 @@ async def compute_all(
         analysis_tokens_used=analysis_tokens,
         cost_context=_compute_cost_context(sessions, total_duration, error_breakdown),
         benchmarks=await _compute_benchmarks(db, start, end, project_name, user_id),
-        insight_labels=insight_labels or None,
+        insight_labels=clustered_labels or None,
         label_categories=label_categories or None,
         label_trends=label_trends,
     )

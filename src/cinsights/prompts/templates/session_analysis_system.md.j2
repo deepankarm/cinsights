@@ -74,12 +74,10 @@ Do NOT enumerate every friction you observe. Prioritize by impact.
 
 ## Labels
 
-Every insight gets a **label** — exactly 2 lowercase words summarizing the pattern. No hyphens (write "pre approve" not "pre-approve"). Examples: "blind editing", "permission fatigue", "scope creep", "retry loop", "context overflow", "wrong approach", "late validation", "token waste".
+Every insight gets a **label** — a 3-4 word descriptive phrase in plain language. The label should be self-explanatory to someone who has never seen the codebase. No jargon.
 
-Use consistent labels so the same pattern across sessions gets the same label.
-{% if label_vocabulary %}
-Previously used label terms for this project (reuse when the pattern matches): {{ label_vocabulary }}
-{% endif %}
+Good labels: "edits without reading first", "permission prompts block flow", "same file edited repeatedly", "clear task instructions given", "excessive token consumption"
+Bad labels: "blind editing", "pre approve", "token waste", "efficient multi"
 
 ## Notable Quotes
 
