@@ -869,9 +869,11 @@ def _cluster_and_aggregate_labels(
 ) -> tuple[dict[str, int], dict[str, str], list[dict] | None, dict[str, list[str]]]:
     """Cluster raw labels using sentence embeddings and aggregate counts.
 
+    Clusters labels *within* each category separately so that a friction
+    label like "repeatedly fixing same bug" never merges with a win label
+    like "successfully fixed complex bug".
+
     Returns (clustered_labels, label_categories, label_trends, label_members).
-    Each cluster is named by the most central member (or most frequent if it
-    dominates by >5x).
     """
     import logging
 
@@ -880,14 +882,15 @@ def _cluster_and_aggregate_labels(
     if not raw_labels:
         return {}, {}, None, {}
 
+    # Determine dominant category per raw label
+    raw_cat: dict[str, str] = {}
+    for lbl, cats in cat_counts.items():
+        raw_cat[lbl] = max(cats, key=cats.get)
+
     unique = list(raw_labels.keys())
 
-    # If too few labels, skip clustering
     if len(unique) <= 3:
-        categories = {}
-        for lbl, cats in cat_counts.items():
-            categories[lbl] = max(cats, key=cats.get)
-        return raw_labels, categories, None, {}
+        return raw_labels, raw_cat, None, {}
 
     try:
         import numpy as np
@@ -899,63 +902,73 @@ def _cluster_and_aggregate_labels(
         sim = cosine_similarity(embeddings)
     except Exception as exc:
         _logger.warning("Embedding clustering unavailable, using raw labels: %s", exc)
-        categories = {}
-        for lbl, cats in cat_counts.items():
-            categories[lbl] = max(cats, key=cats.get)
-        return raw_labels, categories, None, {}
+        return raw_labels, raw_cat, None, {}
 
-    # Greedy clustering
-    clusters: list[list[int]] = []
-    assigned: set[int] = set()
-    for i in range(len(unique)):
-        if i in assigned:
-            continue
-        cluster = [i]
-        assigned.add(i)
-        for j in range(len(unique)):
-            if j in assigned:
-                continue
-            if sim[i, j] >= similarity_threshold:
-                cluster.append(j)
-                assigned.add(j)
-        clusters.append(cluster)
+    # Build label index → position mapping
+    label_idx = {lbl: i for i, lbl in enumerate(unique)}
 
-    # Name each cluster: most-central, unless most-frequent is >5x more common
+    # Group labels by dominant category, then cluster within each group
+    from collections import defaultdict as _defaultdict
+
+    by_cat: dict[str, list[str]] = _defaultdict(list)
+    for lbl in unique:
+        by_cat[raw_cat.get(lbl, "pattern")].append(lbl)
+
     clustered_labels: dict[str, int] = {}
     label_categories: dict[str, str] = {}
-    label_map: dict[str, str] = {}  # raw label → cluster name
-    label_members: dict[str, list[str]] = {}  # canonical → [raw labels]
+    label_map: dict[str, str] = {}
+    label_members: dict[str, list[str]] = {}
 
-    for indices in clusters:
-        members = [unique[idx] for idx in indices]
-        total = sum(raw_labels[m] for m in members)
+    for cat, cat_labels in by_cat.items():
+        if len(cat_labels) <= 1:
+            # Single label in category — no clustering needed
+            for lbl in cat_labels:
+                clustered_labels[lbl] = raw_labels[lbl]
+                label_categories[lbl] = cat
+                label_map[lbl] = lbl
+                label_members[lbl] = [lbl]
+            continue
 
-        most_freq = max(members, key=lambda lbl: raw_labels[lbl])
+        # Greedy clustering within this category
+        cat_indices = [label_idx[lbl] for lbl in cat_labels]
+        assigned: set[int] = set()
+        clusters: list[list[int]] = []
 
-        # Most central embedding
-        cluster_embs = embeddings[indices]
-        centroid = cluster_embs.mean(axis=0)
-        dists = cosine_similarity([centroid], cluster_embs)[0]
-        most_central = unique[indices[int(np.argmax(dists))]]
+        for ci in cat_indices:
+            if ci in assigned:
+                continue
+            cluster = [ci]
+            assigned.add(ci)
+            for cj in cat_indices:
+                if cj in assigned:
+                    continue
+                if sim[ci, cj] >= similarity_threshold:
+                    cluster.append(cj)
+                    assigned.add(cj)
+            clusters.append(cluster)
 
-        # Hybrid: use central unless freq label dominates
-        if raw_labels[most_freq] > raw_labels.get(most_central, 0) * 5:
-            canonical = most_freq
-        else:
-            canonical = most_central
+        # Name each cluster
+        for indices in clusters:
+            members = [unique[idx] for idx in indices]
+            total = sum(raw_labels[m] for m in members)
 
-        clustered_labels[canonical] = total
-        label_members[canonical] = members
-        for m in members:
-            label_map[m] = canonical
+            most_freq = max(members, key=lambda lbl: raw_labels[lbl])
 
-        # Dominant category across all members
-        merged_cats: dict[str, int] = {}
-        for m in members:
-            for cat, cnt in cat_counts.get(m, {}).items():
-                merged_cats[cat] = merged_cats.get(cat, 0) + cnt
-        if merged_cats:
-            label_categories[canonical] = max(merged_cats, key=merged_cats.get)
+            cluster_embs = embeddings[indices]
+            centroid = cluster_embs.mean(axis=0)
+            dists = cosine_similarity([centroid], cluster_embs)[0]
+            most_central = unique[indices[int(np.argmax(dists))]]
+
+            if raw_labels[most_freq] > raw_labels.get(most_central, 0) * 5:
+                canonical = most_freq
+            else:
+                canonical = most_central
+
+            clustered_labels[canonical] = total
+            label_categories[canonical] = cat
+            label_members[canonical] = members
+            for m in members:
+                label_map[m] = canonical
 
     # Build label_trends with clustered names
     label_trends: list[dict] | None = None
