@@ -194,6 +194,7 @@ class DigestStats(BaseModel):
     cost_context: CostContext = CostContext()
     benchmarks: Benchmarks | None = None
     insight_labels: dict[str, int] | None = None  # label → count across sessions
+    label_categories: dict[str, str] | None = None  # label → dominant category
     label_trends: list[dict] | None = None  # [{date, labels: {label: count}}]
 
 
@@ -966,26 +967,33 @@ async def compute_all(
 
     insight_labels: dict[str, int] = {}
     label_by_day: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    label_cat_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     session_ids = [s.id for s in sessions]
     session_dates = {s.id: s.start_time.strftime("%Y-%m-%d") for s in sessions}
     if session_ids:
         label_rows = (
             await db.exec(
-                select(Insight.metadata_json, Insight.session_id)
+                select(Insight.metadata_json, Insight.session_id, Insight.category)
                 .where(col(Insight.session_id).in_(session_ids))
                 .where(Insight.metadata_json != None)  # noqa: E711
             )
         ).all()
-        for meta_str, sid in label_rows:
+        for meta_str, sid, cat in label_rows:
             try:
                 lbl = _jmod.loads(meta_str).get("label")
                 if lbl:
                     insight_labels[lbl] = insight_labels.get(lbl, 0) + 1
+                    label_cat_counts[lbl][cat] += 1
                     day = session_dates.get(sid, "")
                     if day:
                         label_by_day[day][lbl] += 1
             except Exception:
                 pass
+
+    # Dominant category per label
+    label_categories: dict[str, str] = {}
+    for lbl, cats in label_cat_counts.items():
+        label_categories[lbl] = max(cats, key=cats.get)
 
     # Build label_trends: only include labels that appear >1 time total
     frequent_labels = {lbl for lbl, cnt in insight_labels.items() if cnt > 1}
@@ -1032,5 +1040,6 @@ async def compute_all(
         cost_context=_compute_cost_context(sessions, total_duration, error_breakdown),
         benchmarks=await _compute_benchmarks(db, start, end, project_name, user_id),
         insight_labels=insight_labels or None,
+        label_categories=label_categories or None,
         label_trends=label_trends,
     )
