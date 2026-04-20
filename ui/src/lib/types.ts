@@ -163,6 +163,7 @@ export interface DigestStatsData {
 	has_claude_md: boolean;
 	weekly_trends: WeeklyTrend[];
 	analysis_tokens_used: number;
+	insight_labels: Record<string, number> | null;
 	session_summaries: Array<{
 		session_id: string;
 		start_time: string;
