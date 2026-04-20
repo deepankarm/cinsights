@@ -109,6 +109,9 @@ class Insight(SQLModel, table=True):
     severity: InsightSeverity = InsightSeverity.INFO
     prompt_version: str | None = None  # set when written; lets us iterate prompts safely
     metadata_json: str | None = None
+    cluster_label: str | None = Field(
+        default=None, index=True
+    )  # canonical label set during digest clustering
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     session: CodingSession = Relationship(back_populates="insights")
