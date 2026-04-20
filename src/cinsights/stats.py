@@ -929,8 +929,9 @@ def _cluster_and_aggregate_labels(
                 label_members[lbl] = [lbl]
             continue
 
-        # Single-linkage clustering within this category:
-        # a label joins a cluster if similar to ANY existing member
+        # Average-linkage clustering within this category:
+        # a label joins a cluster if its AVERAGE similarity to all
+        # members is above threshold (prevents chaining)
         cat_indices = [label_idx[lbl] for lbl in cat_labels]
         assigned: set[int] = set()
         clusters: list[list[int]] = []
@@ -940,14 +941,14 @@ def _cluster_and_aggregate_labels(
                 continue
             cluster = [ci]
             assigned.add(ci)
-            # Grow cluster: keep scanning until no new members added
             changed = True
             while changed:
                 changed = False
                 for cj in cat_indices:
                     if cj in assigned:
                         continue
-                    if any(sim[cj, ck] >= similarity_threshold for ck in cluster):
+                    avg_sim = sum(sim[cj, ck] for ck in cluster) / len(cluster)
+                    if avg_sim >= similarity_threshold:
                         cluster.append(cj)
                         assigned.add(cj)
                         changed = True
