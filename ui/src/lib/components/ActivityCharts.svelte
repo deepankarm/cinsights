@@ -156,27 +156,34 @@
 
 	{#if labelTrends && labelTrends.length > 1 && trendLabels().length > 0}
 		{@const labels = trendLabels()}
-		{@const dates = labelTrends.map(d => d.date)}
+		{@const maxDotVal = Math.max(...labelTrends.flatMap(d => Object.values(d.labels)), 1)}
 		<div class="chart-box chart-wide">
 			<h3>Pattern Trends</h3>
-			<div class="dot-grid" style="grid-template-columns: 140px repeat({dates.length}, 1fr)">
-				<!-- Header row: dates -->
-				<div></div>
-				{#each dates as date}
-					<div class="dot-date">{date.slice(5)}</div>
-				{/each}
-				<!-- One row per label -->
-				{#each labels as label, li}
-					<div class="dot-label" title="{label}">{label}</div>
-					{#each labelTrends as day}
-						{@const val = day.labels[label] ?? 0}
-						<div class="dot-cell">
-							{#if val > 0}
-								<div class="dot-circle" style="background:{LABEL_COLORS[li % LABEL_COLORS.length]}; width:{12 + val * 6}px; height:{12 + val * 6}px" title="{label}: {val}"></div>
-							{/if}
-						</div>
+			<div class="dot-wrap">
+				<div class="dot-labels">
+					<div class="dot-date-corner"></div>
+					{#each labels as label}
+						<div class="dot-label" title="{label}">{label}</div>
 					{/each}
-				{/each}
+				</div>
+				<div class="dot-scroll">
+					<div class="dot-grid" style="grid-template-columns: repeat({labelTrends.length}, 36px)">
+						{#each labelTrends as day}
+							<div class="dot-date">{day.date.slice(5)}</div>
+						{/each}
+						{#each labels as label, li}
+							{#each labelTrends as day}
+								{@const val = day.labels[label] ?? 0}
+								<div class="dot-cell">
+									{#if val > 0}
+										{@const size = 8 + Math.min(val / maxDotVal, 1) * 16}
+										<div class="dot-circle" style="background:{LABEL_COLORS[li % LABEL_COLORS.length]}; width:{size}px; height:{size}px" title="{label}: {val} on {day.date}"></div>
+									{/if}
+								</div>
+							{/each}
+						{/each}
+					</div>
+				</div>
 			</div>
 		</div>
 	{/if}
@@ -219,13 +226,17 @@
 
 	.show-more { display: block; margin: 12px auto 0; font-size: 13px; color: #6366f1; background: none; border: none; cursor: pointer; font-weight: 600; }
 
-	/* Pattern trends — dot grid */
+	/* Pattern trends — dot grid with fixed labels + scrollable dates */
+	.dot-wrap { display: flex; gap: 0; overflow: hidden; }
+	.dot-labels { flex-shrink: 0; width: 130px; }
+	.dot-date-corner { height: 24px; }
+	.dot-scroll { flex: 1; overflow-x: auto; overflow-y: hidden; }
 	.dot-grid { display: grid; gap: 0; align-items: center; }
-	.dot-date { font-size: 11px; color: #a1a1aa; text-align: center; padding-bottom: 8px; font-weight: 600; }
-	.dot-label { font-size: 13px; color: #52525b; text-transform: capitalize; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px 8px 6px 0; }
-	.dot-cell { display: flex; align-items: center; justify-content: center; padding: 6px 0; }
-	.dot-circle { border-radius: 50%; opacity: 0.85; transition: transform 0.2s; }
-	.dot-circle:hover { transform: scale(1.3); opacity: 1; }
+	.dot-date { font-size: 10px; color: #a1a1aa; text-align: center; height: 24px; line-height: 24px; transform: rotate(-45deg); transform-origin: center; }
+	.dot-label { font-size: 12px; color: #52525b; text-transform: capitalize; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; height: 32px; line-height: 32px; padding-right: 8px; }
+	.dot-cell { display: flex; align-items: center; justify-content: center; height: 32px; }
+	.dot-circle { border-radius: 50%; opacity: 0.8; transition: transform 0.15s; cursor: default; }
+	.dot-circle:hover { transform: scale(1.4); opacity: 1; }
 
 	@media (max-width: 768px) {
 		.chart-bento { grid-template-columns: 1fr; }
