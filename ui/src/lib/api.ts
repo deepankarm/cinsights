@@ -11,12 +11,13 @@ async function fetchJSON<T>(url: string): Promise<T> {
 }
 
 export async function getSessions(
-	skip = 0, limit = 100, status?: string, userId?: string, projectName?: string
+	skip = 0, limit = 100, status?: string, userId?: string, projectName?: string, label?: string
 ): Promise<SessionRead[]> {
 	let url = `${BASE}/?skip=${skip}&limit=${limit}`;
 	if (status) url += `&status=${status}`;
 	if (userId) url += `&user_id=${encodeURIComponent(userId)}`;
 	if (projectName) url += `&project_name=${encodeURIComponent(projectName)}`;
+	if (label) url += `&label=${encodeURIComponent(label)}`;
 	return fetchJSON(url);
 }
 

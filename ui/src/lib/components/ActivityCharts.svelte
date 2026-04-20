@@ -155,11 +155,11 @@
 				<div class="dot-labels">
 					{#if hasTrends}<div class="dot-date-corner"></div>{/if}
 					{#each visiblePatterns as [label, count]}
-						<div class="dot-label-row">
+						<a class="dot-label-row" href="/sessions?label={encodeURIComponent(label)}" title="View sessions with this pattern">
 							<span class="dot-cat-icon" style="color:{catColor(label)}" title="{labelCategories?.[label] ?? 'pattern'}">{catIcon(label)}</span>
 							<span class="dot-label" title="{label}">{label}</span>
 							<span class="dot-count" style="color:{catColor(label)}">{count}</span>
-						</div>
+						</a>
 					{/each}
 					</div>
 				{#if hasTrends}
@@ -234,7 +234,8 @@
 	.dot-wrap { display: flex; gap: 0; overflow: hidden; }
 	.dot-labels { flex-shrink: 0; width: 200px; }
 	.dot-date-corner { height: 28px; }
-	.dot-label-row { display: flex; align-items: center; gap: 6px; height: 32px; padding-right: 12px; }
+	.dot-label-row { display: flex; align-items: center; gap: 6px; height: 32px; padding-right: 12px; text-decoration: none; border-radius: 6px; cursor: pointer; }
+	.dot-label-row:hover { background: #f8f8fa; }
 	.dot-cat-icon { font-size: 10px; flex-shrink: 0; width: 12px; text-align: center; }
 	.dot-label { font-size: 12px; color: #52525b; text-transform: capitalize; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 	.dot-count { font-size: 12px; font-weight: 700; flex-shrink: 0; font-variant-numeric: tabular-nums; }

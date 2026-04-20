@@ -101,6 +101,7 @@ async def list_sessions(
     status: SessionStatus | None = None,
     user_id: str | None = None,
     project_name: str | None = None,
+    label: str | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> list[SessionRead]:
     """List sessions with pagination and optional filters."""
@@ -121,6 +122,17 @@ async def list_sessions(
         query = query.where(CodingSession.user_id == user_id)
     if project_name:
         query = query.where(CodingSession.project_name == project_name)
+    if label:
+        # Find sessions that have an insight with this label (substring match)
+        from cinsights.db.models import Insight
+
+        label_sessions = (
+            select(Insight.session_id)
+            .where(Insight.metadata_json.contains(label))
+            .distinct()
+            .subquery()
+        )
+        query = query.where(col(CodingSession.id).in_(select(label_sessions.c.session_id)))
     query = query.offset(skip).limit(limit)
 
     result = await db.exec(query)

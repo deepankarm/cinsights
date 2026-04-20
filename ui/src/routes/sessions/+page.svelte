@@ -13,7 +13,9 @@
 
 	const filterUser = $derived(page.url.searchParams.get('user'));
 	const filterProject = $derived(page.url.searchParams.get('project'));
+	const filterInsightLabel = $derived(page.url.searchParams.get('label'));
 	const filterLabel = $derived(
+		filterInsightLabel ? `Pattern: ${filterInsightLabel}` :
 		filterUser ? `User: ${filterUser.split('@')[0]}` :
 		filterProject ? `Project: ${filterProject}` : null
 	);
@@ -21,7 +23,7 @@
 	onMount(async () => {
 		try {
 			[sessions, stats] = await Promise.all([
-				getSessions(0, 500, undefined, filterUser ?? undefined, filterProject ?? undefined),
+				getSessions(0, 500, undefined, filterUser ?? undefined, filterProject ?? undefined, filterInsightLabel ?? undefined),
 				getStats(),
 			]);
 		} catch (e) {
