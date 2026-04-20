@@ -122,7 +122,7 @@
 			<div class="hbars">
 				{#each showAllPatterns ? patternsSorted : patternsSorted.slice(0, patternLimit) as [label, count]}
 					<div class="hbar">
-						<span class="hbar-name" style="text-transform:capitalize" title="{label}">{label}</span>
+						<span class="hbar-name hbar-name-wide" title="{label}">{label}</span>
 						<div class="hbar-track"><div class="hbar-fill hbar-c3" style="width:{Math.max(8, (count / patternsMax) * 100)}%"></div></div>
 						<span class="hbar-val">{count}</span>
 					</div>
@@ -155,6 +155,7 @@
 	.hbar-fill { height: 100%; border-radius: 5px; transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
 	.hbar-c1 { background: linear-gradient(90deg, #6366f1, #a5b4fc); }
 	.hbar-c2 { background: linear-gradient(90deg, #10b981, #6ee7b7); }
+	.hbar-name-wide { width: 150px; text-transform: capitalize; }
 	.hbar-c3 { background: linear-gradient(90deg, #8b5cf6, #c4b5fd); }
 	.hbar-c4 { background: linear-gradient(90deg, #ef4444, #fca5a5); }
 	.hbar-val { width: 40px; font-size: 13px; font-weight: 600; color: #71717a; text-align: right; font-variant-numeric: tabular-nums; }
