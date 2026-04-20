@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlmodel import col
 from sqlmodel import select as select_fn
@@ -413,6 +414,19 @@ async def _run_one_digest(
 
     async with sessionmaker() as db:
         stats = await compute_all(db, start, end, project_name=scope_project, user_id=user_id)
+
+        # Write cluster_label back to Insight rows
+        if stats.label_members:
+            from cinsights.db.models import Insight
+
+            for canonical, members in stats.label_members.items():
+                for raw_label in members:
+                    await db.exec(
+                        update(Insight)
+                        .where(Insight.metadata_json.contains(f'"label": "{raw_label}"'))
+                        .values(cluster_label=canonical)
+                    )
+            await db.commit()
 
         if stats.session_count == 0:
             console.print(f"  [yellow]·[/yellow] {label} — no sessions, skipped")
