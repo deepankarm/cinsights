@@ -159,7 +159,7 @@
 		{@const maxDotVal = hasTrends ? Math.max(...labelTrends!.flatMap(d => Object.values(d.labels)), 1) : 1}
 		<div class="chart-box chart-wide">
 			<div class="pattern-header">
-				<h3>Detected Patterns</h3>
+				<h3>Behavioral Patterns</h3>
 				<div class="pattern-meta">
 					<div class="pattern-legend">
 						<span class="pattern-legend-item" style="color:#ef4444">▼ friction</span>
