@@ -14,8 +14,10 @@
 	const filterUser = $derived(page.url.searchParams.get('user'));
 	const filterProject = $derived(page.url.searchParams.get('project'));
 	const filterInsightLabel = $derived(page.url.searchParams.get('label'));
+	const filterLabelCat = $derived(page.url.searchParams.get('cat'));
+	const catIcons: Record<string, string> = { friction: '▼', win: '▲', recommendation: '💡' };
 	const filterLabel = $derived(
-		filterInsightLabel ? `Pattern: ${filterInsightLabel}` :
+		filterInsightLabel ? `${catIcons[filterLabelCat ?? ''] ?? '·'} Pattern: ${filterInsightLabel}` :
 		filterUser ? `User: ${filterUser.split('@')[0]}` :
 		filterProject ? `Project: ${filterProject}` : null
 	);

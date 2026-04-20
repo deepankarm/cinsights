@@ -155,7 +155,7 @@
 				<div class="dot-labels">
 					{#if hasTrends}<div class="dot-date-corner"></div>{/if}
 					{#each visiblePatterns as [label, count]}
-						<a class="dot-label-row" href="/sessions?label={encodeURIComponent(label)}" title="View sessions with this pattern">
+						<a class="dot-label-row" href="/sessions?label={encodeURIComponent(label)}&cat={labelCategories?.[label] ?? ''}" title="View sessions with this pattern">
 							<span class="dot-cat-icon" style="color:{catColor(label)}" title="{labelCategories?.[label] ?? 'pattern'}">{catIcon(label)}</span>
 							<span class="dot-label" title="{label}">{label}</span>
 							<span class="dot-count" style="color:{catColor(label)}">{count}</span>
