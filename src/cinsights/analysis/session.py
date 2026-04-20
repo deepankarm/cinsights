@@ -158,6 +158,82 @@ def _sample_timeline_spans(spans: list[SpanData]) -> tuple[list[SpanData], str |
     return sampled, notice
 
 
+def _compute_metrics_from_spans(tool_spans: list[SpanData], total_tokens: int) -> dict:
+    """Compute Tier-0 quality metrics directly from spans (no DB needed)."""
+    import json as _json
+
+    _READ = {"Read", "Glob", "Grep", "Search", "ListDir", "WebFetch", "WebSearch"}
+    _EDIT = {"Edit", "NotebookEdit"}
+    _WRITE = {"Write"}
+    _MUTATION = _EDIT | _WRITE
+    _SUBAGENT = {"Agent", "Task"}
+
+    reads = sum(1 for s in tool_spans if s.tool_name in _READ)
+    edits = sum(1 for s in tool_spans if s.tool_name in _EDIT)
+    writes = sum(1 for s in tool_spans if s.tool_name in _WRITE)
+    mutations = sum(1 for s in tool_spans if s.tool_name in _MUTATION)
+    errors = sum(1 for s in tool_spans if not s.is_success)
+    subagents = sum(1 for s in tool_spans if s.tool_name in _SUBAGENT)
+    total = len(tool_spans)
+
+    # Blind edits: edits to files not previously read
+    read_files: set[str] = set()
+    blind = 0
+    for s in tool_spans:
+        inp = s.input_value or ""
+        fp = None
+        if '"file_path"' in inp:
+            try:
+                d = _json.loads(inp)
+                fp = d.get("file_path") if isinstance(d, dict) else None
+            except (ValueError, TypeError):
+                pass
+        if not fp:
+            for part in inp.split()[:5]:
+                if "/" in part and not part.startswith("http"):
+                    fp = part.strip('"').strip("'")
+                    break
+        if fp:
+            if s.tool_name in _READ:
+                read_files.add(fp)
+            elif s.tool_name in _EDIT and fp not in read_files:
+                blind += 1
+
+    # Repeated edits to same file
+    repeated = 0
+    last_edit_file = None
+    for s in tool_spans:
+        if s.tool_name in _EDIT:
+            inp = s.input_value or ""
+            fp = None
+            if '"file_path"' in inp:
+                try:
+                    d = _json.loads(inp)
+                    fp = d.get("file_path") if isinstance(d, dict) else None
+                except (ValueError, TypeError):
+                    pass
+            if fp and fp == last_edit_file:
+                repeated += 1
+            last_edit_file = fp
+        else:
+            last_edit_file = None
+
+    useful_mutations = sum(1 for s in tool_spans if s.tool_name in _MUTATION and s.is_success)
+
+    return {
+        "read_edit_ratio": round(reads / edits, 1) if edits else None,
+        "research_mutation_ratio": round(reads / mutations, 1) if mutations else None,
+        "edits_without_read_pct": round(blind / edits * 100, 1) if edits else None,
+        "write_vs_edit_pct": round(writes / mutations * 100, 1) if mutations else None,
+        "error_rate": round(errors / total * 100, 1) if total else None,
+        "repeated_edits": repeated,
+        "subagent_pct": round(subagents / total * 100, 1) if total else None,
+        "tokens_per_useful_edit": (
+            round(total_tokens / useful_mutations) if useful_mutations else None
+        ),
+    }
+
+
 def _build_prompts(trace: TraceData, spans: list[SpanData]) -> tuple[str, str]:
     """Build system and user prompts from Jinja templates."""
     root = trace.root_span
@@ -231,6 +307,9 @@ def _build_prompts(trace: TraceData, spans: list[SpanData]) -> tuple[str, str]:
                 )
         user_queries.append(entry)
 
+    # Compute quality metrics from spans for the LLM to reference
+    metrics = _compute_metrics_from_spans(tool_spans, total_tokens)
+
     system_prompt = render(PromptTemplates.SESSION_SYSTEM)
     user_prompt = render(
         PromptTemplates.SESSION_USER,
@@ -246,6 +325,7 @@ def _build_prompts(trace: TraceData, spans: list[SpanData]) -> tuple[str, str]:
         spans=[_SpanView(s) for s in timeline_spans],
         truncation_notice=truncation_notice,
         user_queries=user_queries,
+        metrics=metrics,
     )
     return system_prompt, user_prompt
 
