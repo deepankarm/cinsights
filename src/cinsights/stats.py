@@ -194,6 +194,7 @@ class DigestStats(BaseModel):
     cost_context: CostContext = CostContext()
     benchmarks: Benchmarks | None = None
     insight_labels: dict[str, int] | None = None  # label → count across sessions
+    label_trends: list[dict] | None = None  # [{date, labels: {label: count}}]
 
 
 def _session_filter(
@@ -959,26 +960,45 @@ async def compute_all(
 
     hourly_quality, hourly_variance_ratio = _compute_hourly_quality(sessions)
 
-    # Aggregate insight labels
+    # Aggregate insight labels + per-day trends
     import json as _jmod
+    from collections import defaultdict
 
     insight_labels: dict[str, int] = {}
+    label_by_day: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     session_ids = [s.id for s in sessions]
+    session_dates = {s.id: s.start_time.strftime("%Y-%m-%d") for s in sessions}
     if session_ids:
         label_rows = (
             await db.exec(
-                select(Insight.metadata_json)
+                select(Insight.metadata_json, Insight.session_id)
                 .where(col(Insight.session_id).in_(session_ids))
                 .where(Insight.metadata_json != None)  # noqa: E711
             )
         ).all()
-        for meta_str in label_rows:
+        for meta_str, sid in label_rows:
             try:
                 lbl = _jmod.loads(meta_str).get("label")
                 if lbl:
                     insight_labels[lbl] = insight_labels.get(lbl, 0) + 1
+                    day = session_dates.get(sid, "")
+                    if day:
+                        label_by_day[day][lbl] += 1
             except Exception:
                 pass
+
+    # Build label_trends: only include labels that appear >1 time total
+    frequent_labels = {lbl for lbl, cnt in insight_labels.items() if cnt > 1}
+    label_trends: list[dict] | None = None
+    if label_by_day and frequent_labels:
+        label_trends = [
+            {
+                "date": day,
+                "labels": {lbl: cnt for lbl, cnt in labels.items() if lbl in frequent_labels},
+            }
+            for day, labels in sorted(label_by_day.items())
+            if any(lbl in frequent_labels for lbl in labels)
+        ]
 
     return DigestStats(
         period_start=start,
@@ -1012,4 +1032,5 @@ async def compute_all(
         cost_context=_compute_cost_context(sessions, total_duration, error_breakdown),
         benchmarks=await _compute_benchmarks(db, start, end, project_name, user_id),
         insight_labels=insight_labels or None,
+        label_trends=label_trends,
     )

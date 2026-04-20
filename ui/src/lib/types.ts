@@ -164,6 +164,7 @@ export interface DigestStatsData {
 	weekly_trends: WeeklyTrend[];
 	analysis_tokens_used: number;
 	insight_labels: Record<string, number> | null;
+	label_trends: Array<{ date: string; labels: Record<string, number> }> | null;
 	session_summaries: Array<{
 		session_id: string;
 		start_time: string;

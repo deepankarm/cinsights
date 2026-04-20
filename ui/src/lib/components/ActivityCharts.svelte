@@ -18,6 +18,7 @@
 		errorTypes = {},
 		errorDetails = undefined,
 		insightLabels = undefined,
+		labelTrends = undefined,
 		extra = undefined,
 	}: {
 		toolDistribution?: Record<string, number>;
@@ -26,8 +27,25 @@
 		errorTypes?: Record<string, number>;
 		errorDetails?: ErrorDetail[];
 		insightLabels?: Record<string, number> | null;
+		labelTrends?: Array<{ date: string; labels: Record<string, number> }> | null;
 		extra?: Snippet;
 	} = $props();
+
+	const LABEL_COLORS = ['#8b5cf6', '#6366f1', '#ec4899', '#f59e0b', '#10b981', '#3b82f6'];
+	let trendLabels = $derived(() => {
+		if (!labelTrends?.length) return [];
+		const counts: Record<string, number> = {};
+		for (const day of labelTrends) {
+			for (const [l, c] of Object.entries(day.labels)) {
+				counts[l] = (counts[l] ?? 0) + c;
+			}
+		}
+		return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([l]) => l).slice(0, 6);
+	});
+	let trendMax = $derived(() => {
+		if (!labelTrends?.length) return 1;
+		return Math.max(...labelTrends.map(d => Math.max(...Object.values(d.labels), 0)), 1);
+	});
 
 	let patternsSorted = $derived(
 		Object.entries(insightLabels ?? {})
@@ -136,6 +154,35 @@
 		</div>
 	{/if}
 
+	{#if labelTrends && labelTrends.length > 1 && trendLabels().length > 0}
+		<div class="chart-box chart-wide">
+			<h3>Pattern Trends</h3>
+			<div class="trend-legend">
+				{#each trendLabels() as label, i}
+					<span class="trend-legend-item">
+						<span class="trend-dot" style="background:{LABEL_COLORS[i % LABEL_COLORS.length]}"></span>
+						<span style="text-transform:capitalize">{label}</span>
+					</span>
+				{/each}
+			</div>
+			<div class="trend-grid" style="grid-template-columns: repeat({labelTrends.length}, 1fr)">
+				{#each labelTrends as day}
+					<div class="trend-col" title="{day.date}">
+						<div class="trend-bars">
+							{#each trendLabels() as label, i}
+								{@const val = day.labels[label] ?? 0}
+								{#if val > 0}
+									<div class="trend-bar" style="height:{(val / trendMax()) * 80}px; background:{LABEL_COLORS[i % LABEL_COLORS.length]}" title="{label}: {val}"></div>
+								{/if}
+							{/each}
+						</div>
+						<span class="trend-date">{day.date.slice(5)}</span>
+					</div>
+				{/each}
+			</div>
+		</div>
+	{/if}
+
 	{#if extra}
 		{@render extra()}
 	{/if}
@@ -173,6 +220,16 @@
 	.error-msg { font-size: 12px; color: #71717a; line-height: 1.5; white-space: pre-wrap; word-break: break-word; max-height: 60px; overflow: hidden; }
 
 	.show-more { display: block; margin: 12px auto 0; font-size: 13px; color: #6366f1; background: none; border: none; cursor: pointer; font-weight: 600; }
+
+	/* Pattern trends */
+	.trend-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+	.trend-legend-item { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #52525b; }
+	.trend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+	.trend-grid { display: grid; gap: 4px; align-items: end; height: 100px; }
+	.trend-col { display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; }
+	.trend-bars { display: flex; gap: 2px; align-items: flex-end; flex: 1; }
+	.trend-bar { width: 100%; min-width: 4px; border-radius: 3px 3px 0 0; transition: height 0.3s; }
+	.trend-date { font-size: 10px; color: #a1a1aa; margin-top: 4px; white-space: nowrap; }
 
 	@media (max-width: 768px) {
 		.chart-bento { grid-template-columns: 1fr; }
