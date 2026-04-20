@@ -124,8 +124,6 @@ async def list_sessions(
         query = query.where(CodingSession.project_name == project_name)
     if label:
         # Find sessions that have an insight with this label (substring match)
-        from cinsights.db.models import Insight
-
         label_sessions = (
             select(Insight.session_id)
             .where(Insight.metadata_json.contains(label))
