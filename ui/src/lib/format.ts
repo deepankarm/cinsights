@@ -89,7 +89,7 @@ export function fmtBytes(n: number): string {
 
 export function fmtCost(usd: number | null): string {
 	if (usd == null) return '-';
-	if (usd < 0.01) return '<$0.01';
+	if (usd < 0.01) return `$${usd.toFixed(4)}`;
 	return `$${usd.toFixed(2)}`;
 }
 
