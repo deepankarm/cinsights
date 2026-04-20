@@ -1,16 +1,21 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import {
-		getDoctorHealth, getDoctorRuns, getDoctorCost, getDoctorCoverage,
+		getDoctorHealth, getDoctorRuns, getDoctorCost, getDoctorCostByKind,
+		getDoctorCapabilities, getDoctorCoverage,
 		type SystemHealthResponse, type RefreshRunRead,
-		type CostSummaryResponse, type CoverageResponse,
+		type CostSummaryResponse, type CallKindCostResponse,
+		type CapabilitiesResponse, type CoverageResponse,
 	} from '$lib/api';
 	import { fmtTokens, fmtBytes, fmtCost, fmtAgo, fmtDate, fmtSecs, fmtNum } from '$lib/format';
 
 	let health: SystemHealthResponse | null = $state(null);
 	let runs: RefreshRunRead[] = $state([]);
 	let cost: CostSummaryResponse | null = $state(null);
+	let costByKind: CallKindCostResponse | null = $state(null);
+	let capabilities: CapabilitiesResponse | null = $state(null);
 	let coverage: CoverageResponse | null = $state(null);
+	let expandedSources: Set<string> = $state(new Set());
 	let loading = $state(true);
 	let error: string | null = $state(null);
 
@@ -30,15 +35,19 @@
 
 	onMount(async () => {
 		try {
-			const [h, r, c, cov] = await Promise.all([
+			const [h, r, c, ck, caps, cov] = await Promise.all([
 				getDoctorHealth(),
 				getDoctorRuns(undefined, undefined, 0, 200),
 				getDoctorCost(),
+				getDoctorCostByKind(),
+				getDoctorCapabilities(),
 				getDoctorCoverage(),
 			]);
 			health = h;
 			runs = r;
 			cost = c;
+			costByKind = ck;
+			capabilities = caps;
 			coverage = cov;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load doctor data';
@@ -51,6 +60,12 @@
 		const next = new Set(expandedErrors);
 		if (next.has(id)) next.delete(id); else next.add(id);
 		expandedErrors = next;
+	}
+
+	function toggleSource(name: string) {
+		const next = new Set(expandedSources);
+		if (next.has(name)) next.delete(name); else next.add(name);
+		expandedSources = next;
 	}
 
 	function statusColor(s: string): string {
@@ -88,6 +103,10 @@
 		if (!m) return '';
 		if (m.project) return m.project as string;
 		if (m.user) return m.user as string;
+		if (Array.isArray(m.session_ids)) {
+			const ids = m.session_ids as string[];
+			return ids.length <= 2 ? ids.join(', ') : `${ids.slice(0, 2).join(', ')} +${ids.length - 2}`;
+		}
 		return '';
 	}
 
@@ -97,6 +116,7 @@
 		if (m.scope_type) return m.scope_type as string;
 		if (m.project) return 'project';
 		if (m.user) return 'user';
+		if (Array.isArray(m.session_ids)) return 'sessions';
 		return '';
 	}
 
@@ -338,6 +358,50 @@
 		</div>
 	</div>
 
+	{#if costByKind && costByKind.by_kind.length > 0}
+		<div class="cost-table-wrap" style="margin-top: 1.25rem;">
+			<h3>LLM Calls by Kind</h3>
+			<table class="cost-table">
+				<thead>
+					<tr>
+						<th>Kind</th><th>Model</th><th>Calls</th><th>OK / Fail</th>
+						<th>Input</th><th>Output</th><th>Avg Dur</th><th>Est. Cost</th>
+					</tr>
+				</thead>
+				<tbody>
+					{#each costByKind.by_kind as k}
+						<tr>
+							<td><code class="kind-badge">{k.call_kind}</code></td>
+							<td class="proj-name">{k.model}</td>
+							<td>{k.call_count}</td>
+							<td>
+								<span style="color: #16a34a">{k.success_count}</span>
+								{#if k.failure_count > 0}
+									/ <span style="color: #dc2626">{k.failure_count}</span>
+								{:else}
+									/ 0
+								{/if}
+							</td>
+							<td>{fmtTokens(k.prompt_tokens)}</td>
+							<td>{fmtTokens(k.completion_tokens)}</td>
+							<td>{k.avg_duration_ms.toFixed(0)}ms</td>
+							<td>{fmtCost(k.estimated_cost_usd)}</td>
+						</tr>
+					{/each}
+					<tr class="totals-row">
+						<td colspan="2"><strong>Total</strong></td>
+						<td><strong>{costByKind.total_calls}</strong></td>
+						<td></td>
+						<td><strong>{fmtTokens(costByKind.total_prompt_tokens)}</strong></td>
+						<td><strong>{fmtTokens(costByKind.total_completion_tokens)}</strong></td>
+						<td></td>
+						<td><strong>{fmtCost(costByKind.total_cost_usd)}</strong></td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+	{/if}
+
 	{#if cost.daily_trend.length > 1}
 		<div class="daily-chart">
 			<h3>Daily Token Usage</h3>
@@ -359,6 +423,109 @@
 				<span class="legend-item"><span class="legend-dot" style="background: #a78bfa"></span> Output</span>
 			</div>
 		</div>
+	{/if}
+</div>
+{/if}
+
+{#if capabilities}
+<div class="section">
+	<h2>Source Capabilities</h2>
+	<p class="section-desc">
+		What each trace source emits. Metrics requiring capabilities a source
+		doesn't provide are skipped rather than shown as zero.
+	</p>
+
+	<table class="cap-table">
+		<thead>
+			<tr>
+				<th>Source</th>
+				<th>Sessions</th>
+				<th>Supported</th>
+				<th>Missing</th>
+				<th>Metrics available</th>
+				<th></th>
+			</tr>
+		</thead>
+		<tbody>
+			{#each capabilities.sources as s}
+				{@const metricsAvailable = capabilities.metrics.filter(m => m.available_on.includes(s.name)).length}
+				{@const metricsTotal = capabilities.metrics.length}
+				<tr>
+					<td><code class="src-badge">{s.name}</code></td>
+					<td>{s.session_count}</td>
+					<td><span style="color: #16a34a">{s.capabilities.length}</span></td>
+					<td>
+						{#if s.missing.length === 0}
+							<span style="color: #a1a1aa">—</span>
+						{:else}
+							<span style="color: #dc2626">{s.missing.length}</span>
+						{/if}
+					</td>
+					<td>
+						{#if metricsTotal === 0}
+							<span style="color: #a1a1aa">no metrics registered yet</span>
+						{:else}
+							<span style="color: {metricsAvailable === metricsTotal ? '#16a34a' : '#f59e0b'}">
+								{metricsAvailable} / {metricsTotal}
+							</span>
+						{/if}
+					</td>
+					<td>
+						{#if s.missing.length > 0}
+							<button class="cap-toggle" onclick={() => toggleSource(s.name)}>
+								{expandedSources.has(s.name) ? 'hide' : 'show gaps'}
+							</button>
+						{/if}
+					</td>
+				</tr>
+				{#if expandedSources.has(s.name)}
+					<tr class="cap-detail-row">
+						<td colspan="6">
+							<div class="cap-chips">
+								{#each s.missing as m}
+									<code class="cap-chip missing" title="not emitted by {s.name}">{m}</code>
+								{/each}
+							</div>
+						</td>
+					</tr>
+				{/if}
+			{/each}
+		</tbody>
+	</table>
+
+	{#if capabilities.metrics.length > 0}
+		<h3 style="margin-top: 1.25rem;">Registered metric requirements</h3>
+		<table class="cap-table">
+			<thead>
+				<tr><th>Metric</th><th>Requires</th><th>Available on</th><th>Missing on</th></tr>
+			</thead>
+			<tbody>
+				{#each capabilities.metrics as m}
+					<tr>
+						<td><code>{m.id}</code></td>
+						<td>
+							{#each m.requires as r}
+								<code class="cap-chip">{r}</code>
+							{/each}
+						</td>
+						<td>
+							{#each m.available_on as src}
+								<code class="src-badge">{src}</code>
+							{/each}
+						</td>
+						<td>
+							{#if m.missing_on.length === 0}
+								<span style="color: #a1a1aa">—</span>
+							{:else}
+								{#each m.missing_on as src}
+									<code class="src-badge missing">{src}</code>
+								{/each}
+							{/if}
+						</td>
+					</tr>
+				{/each}
+			</tbody>
+		</table>
 	{/if}
 </div>
 {/if}
@@ -484,6 +651,22 @@
 	.cost-table td { padding: 6px 8px; color: #475569; }
 	.cost-table tr:hover td { background: #f8fafc; }
 	.cmd-badge { font-weight: 700; font-size: 11px; }
+	.kind-badge { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; padding: 2px 6px; background: #f1f5f9; color: #334155; border-radius: 4px; }
+	.cost-table-wrap h3 .hint { font-size: 11px; font-weight: 400; color: #94a3b8; margin-left: 6px; }
+	.cost-table tr.totals-row td { border-top: 1px solid #e2e8f0; color: #1e293b; }
+	.section-desc { color: #64748b; font-size: 13px; margin: -8px 0 16px; }
+	.cap-table { width: 100%; border-collapse: collapse; font-size: 12px; background: white; border: 1px solid #e8e5e0; border-radius: 12px; overflow: hidden; }
+	.cap-table th { text-align: left; font-size: 10px; font-weight: 600; color: #a1a1aa; text-transform: uppercase; letter-spacing: 0.04em; padding: 8px 12px; border-bottom: 1px solid #f1f5f9; background: #fafaf9; }
+	.cap-table td { padding: 8px 12px; color: #475569; }
+	.cap-table tr:not(.cap-detail-row):hover td { background: #f8fafc; }
+	.cap-table tr.cap-detail-row td { background: #fafaf9; padding: 10px 12px; border-top: 1px dashed #e2e8f0; }
+	.cap-toggle { background: transparent; border: 1px solid #e2e8f0; border-radius: 4px; color: #475569; font-size: 11px; padding: 2px 8px; cursor: pointer; }
+	.cap-toggle:hover { background: #f1f5f9; }
+	.cap-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+	.cap-chip { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; padding: 2px 6px; background: #f1f5f9; color: #334155; border-radius: 4px; }
+	.cap-chip.missing { background: #fef2f2; color: #991b1b; }
+	.src-badge { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; padding: 2px 6px; background: #eef2ff; color: #3730a3; border-radius: 4px; margin-right: 4px; }
+	.src-badge.missing { background: #fef2f2; color: #991b1b; }
 	.proj-name { font-family: monospace; font-weight: 600; color: #232326; }
 
 	.daily-chart { background: white; border: 1px solid #e8e5e0; border-radius: 12px; padding: 16px; }

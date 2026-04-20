@@ -55,6 +55,20 @@ def parse_full_jsonl(
         session_start = parse_dt(fallback_ts)
         session_end = session_start
 
+    # Extract version + thinking metadata from first available line
+    agent_version = ""
+    effort_level = ""
+    adaptive_thinking_disabled = False
+    for line in lines:
+        if not agent_version and line.get("version"):
+            agent_version = line["version"]
+        thinking_meta = line.get("thinkingMetadata")
+        if thinking_meta and not effort_level:
+            effort_level = thinking_meta.get("level", "")
+            adaptive_thinking_disabled = bool(thinking_meta.get("disabled", False))
+        if agent_version and effort_level:
+            break
+
     # Build turn and tool spans
     for turn_num, turn in enumerate(turns, 1):
         turn_id = f"{trace_id}:turn:{turn_num}"
@@ -106,10 +120,18 @@ def parse_full_jsonl(
         total_prompt = sum(p for p, _ in msg_tokens.values())
         total_completion = sum(c for _, c in msg_tokens.values())
 
-        # User query
         user_query = ""
         if user_line:
             user_query = extract_user_content(user_line.get("message", {}))
+
+        # Collect assistant text blocks (non-tool-use content)
+        assistant_text_parts = []
+        for aline in assistant_lines:
+            msg = aline.get("message", {})
+            for block in msg.get("content", []):
+                if isinstance(block, dict) and block.get("type") == "text":
+                    assistant_text_parts.append(block.get("text", ""))
+        assistant_text = "\n".join(assistant_text_parts)
 
         turn_span = SpanData(
             span_id=turn_id,
@@ -122,6 +144,7 @@ def parse_full_jsonl(
             end_time=turn_end,
             attributes={
                 "input.value": user_query[:2000] if user_query else "",
+                "output.value": assistant_text[:2000] if assistant_text else "",
                 "llm.token_count.prompt": total_prompt,
                 "llm.token_count.completion": total_completion,
                 "llm.model_name": model_name,
@@ -198,6 +221,9 @@ def parse_full_jsonl(
             "user.id": user_id or "",
             "llm.model_name": metadata.model or "",
             "session.id": metadata.session_id,
+            "harness.agent_version": agent_version,
+            "harness.effort_level": effort_level,
+            "harness.adaptive_thinking_disabled": adaptive_thinking_disabled,
         },
     )
     all_spans.insert(0, root_span)

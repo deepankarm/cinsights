@@ -6,6 +6,7 @@
 	import { fmtTokens, gradeColor, gradeBg } from '$lib/format';
 	import type { SessionDetail } from '$lib/types';
 	import ActivityCharts, { type ErrorDetail } from '$lib/components/ActivityCharts.svelte';
+	import InsightLabel from '$lib/components/BehavioralTag.svelte';
 
 	let session: SessionDetail | null = $state(null);
 	let loading = $state(true);
@@ -123,12 +124,23 @@
 
 	const languageDistribution = $derived.by(() => {
 		if (!session) return {};
+		const extToLang: Record<string, string> = {
+			py: 'Python', go: 'Go', js: 'JavaScript', ts: 'TypeScript', tsx: 'TypeScript',
+			jsx: 'JavaScript', rs: 'Rust', java: 'Java', rb: 'Ruby', php: 'PHP',
+			c: 'C', cpp: 'C++', h: 'C/C++', cs: 'C#', swift: 'Swift', kt: 'Kotlin',
+			scala: 'Scala', json: 'JSON', yaml: 'YAML', yml: 'YAML', toml: 'TOML',
+			xml: 'XML', html: 'HTML', css: 'CSS', scss: 'CSS', md: 'Markdown',
+			sql: 'SQL', sh: 'Shell', bash: 'Shell', zsh: 'Shell', dockerfile: 'Docker',
+			tf: 'Terraform', svelte: 'Svelte', vue: 'Vue', j2: 'Jinja2', txt: 'Text',
+		};
 		const counts: Record<string, number> = {};
 		const langTools = ['Read', 'Edit', 'Write', 'Glob', 'Grep'];
 		for (const tc of session.tool_calls) {
 			if (!langTools.includes(tc.tool_name) || !tc.input_value) continue;
 			const ext = tc.input_value.match(/\.(\w{1,6})(?:['")\s,]|$)/)?.[1];
-			if (ext) counts[ext] = (counts[ext] ?? 0) + 1;
+			if (!ext) continue;
+			const lang = extToLang[ext.toLowerCase()];
+			if (lang) counts[lang] = (counts[lang] ?? 0) + 1;
 		}
 		return Object.fromEntries(Object.entries(counts).sort((a, b) => b[1] - a[1]));
 	});
@@ -224,6 +236,12 @@
 				<a href="/projects/{session.project_name}" class="tag-link project">{session.project_name}</a>
 			{/if}
 			<span class="tag-static">{fmtDate(session.start_time)}</span>
+			{#if session.agent_version}
+				<span class="tag-static mono">v{session.agent_version}</span>
+			{/if}
+			{#if session.effort_level}
+				<span class="tag-static effort-{session.effort_level}">{session.effort_level}</span>
+			{/if}
 		</div>
 	</div>
 
@@ -275,6 +293,7 @@
 					{@const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, n).toFixed(1)} ${yOf(p.prompt_tokens).toFixed(1)}`).join(' ')}
 					{@const areaPath = `${linePath} L ${xOf(n-1, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
 					{@const compactionIdxs = pts.map((p, i) => (i > 0 && p.prompt_tokens < pts[i-1].prompt_tokens * 0.85 ? i : -1)).filter(i => i >= 0)}
+					{@const interruptIdxs = pts.map((p, i) => (p.interrupted ? i : -1)).filter(i => i >= 0)}
 					{@const hover = hoverIdx !== null ? pts[hoverIdx] : null}
 					<!-- Context Growth -->
 					<div class="chart-card">
@@ -286,6 +305,9 @@
 								{/if}
 								{#if compactionIdxs.length > 0}
 									<span class="trend-badge down">{compactionIdxs.length} compaction{compactionIdxs.length > 1 ? 's' : ''}</span>
+								{/if}
+								{#if interruptIdxs.length > 0}
+									<span class="trend-badge interrupt">{interruptIdxs.length} interrupt{interruptIdxs.length > 1 ? 's' : ''}</span>
 								{/if}
 							</div>
 						</div>
@@ -308,6 +330,10 @@
 							<path d={linePath} fill="none" stroke="#6366f1" stroke-width="1.5" stroke-linejoin="round" />
 							{#each compactionIdxs as i}
 								<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#f59e0b" stroke="white" stroke-width="1" />
+							{/each}
+							{#each interruptIdxs as i}
+								<line x1={xOf(i, n)} x2={xOf(i, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#ef4444" stroke-width="1" stroke-opacity="0.4" />
+								<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#ef4444" stroke="white" stroke-width="1" />
 							{/each}
 							{#if hoverIdx !== null}
 								<line x1={xOf(hoverIdx, n)} x2={xOf(hoverIdx, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
@@ -376,6 +402,29 @@
 		</ActivityCharts>
 	</div>
 
+	<!-- Notable Quotes -->
+	{#if session.notable_quotes && session.notable_quotes.length > 0}
+		{@const vibeEmoji = (v: string) => {
+			const map: Record<string, string> = {
+				frustration: '😤', humor: '😄', impatience: '⏳', delight: '✨',
+				sarcasm: '😏', curiosity: '🤔', rage: '🔥', relief: '😮‍💨',
+				gratitude: '🙏', confusion: '😵', determination: '💪', surprise: '😲',
+				disappointment: '😞', excitement: '🎉', apology: '🙇',
+			};
+			return map[v.toLowerCase()] || '💬';
+		}}
+		<details class="quotes-card">
+			<summary class="quotes-toggle">
+				{session.notable_quotes.map(q => vibeEmoji(q.vibe)).join(' ')} Things you said
+			</summary>
+			<div class="quotes-list">
+				{#each session.notable_quotes as q}
+					<p class="quote-line">{vibeEmoji(q.vibe)} <em>"{q.quote}"</em></p>
+				{/each}
+			</div>
+		</details>
+	{/if}
+
 	<!-- Insights -->
 	{#if session.insights.length > 0}
 		<div class="section">
@@ -385,6 +434,9 @@
 					<div class="insight-card" style="background: {categoryBg(insight.category)}; border-color: {categoryBorder(insight.category)};">
 						<div class="insight-header">
 							<span class="insight-category" style="color: {categoryColor(insight.category)}">{categoryLabel(insight.category)}</span>
+							{#if insight.label}
+								<InsightLabel label={insight.label} />
+							{/if}
 							{#if severityIcon(insight.severity)}
 								<span class="severity-badge severity-{insight.severity}">{severityIcon(insight.severity)}</span>
 							{/if}
@@ -476,6 +528,10 @@
 	.chart-total { font-size: 11px; font-weight: 600; color: #10b981; }
 	.trend-badge { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 5px; }
 	.trend-badge.down { background: #fef3c7; color: #92400e; }
+	.trend-badge.interrupt { background: #fef2f2; color: #dc2626; }
+	.effort-high, .effort-max { color: #16a34a; font-weight: 600; }
+	.effort-medium { color: #d97706; font-weight: 600; }
+	.effort-low { color: #94a3b8; }
 	.trend-svg { width: 100%; height: auto; cursor: crosshair; }
 	.ax { font-size: 10px; fill: #94a3b8; font-family: inherit; }
 
@@ -491,6 +547,12 @@
 	.h2-count { font-size: 13px; font-weight: 500; color: #94a3b8; }
 
 	.insights-grid { display: flex; flex-direction: column; gap: 14px; }
+	.quotes-card { background: #fefce8; border: 1px solid #fde68a; border-radius: 10px; padding: 0; margin-bottom: 20px; font-size: 13px; }
+	.quotes-toggle { padding: 10px 14px; cursor: pointer; color: #92400e; font-weight: 500; list-style: none; }
+	.quotes-toggle::-webkit-details-marker { display: none; }
+	.quotes-toggle::marker { display: none; content: ''; }
+	.quotes-list { padding: 0 14px 12px; }
+	.quote-line { margin: 6px 0; color: #334155; line-height: 1.5; }
 	.insight-card { border: 1px solid; border-radius: 12px; padding: 20px; }
 	.insight-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 	.insight-category { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlmodel import col
 from sqlmodel import select as select_fn
@@ -82,6 +83,7 @@ async def _store_indexed(
     total_completion = sum(s.completion_tokens for s in turn_spans)
     total_tokens = total_prompt + total_completion
 
+    _INTERRUPT_MARKER = "[Request interrupted by user]"
     context_growth = json_mod.dumps(
         [
             {
@@ -89,6 +91,7 @@ async def _store_indexed(
                 "prompt_tokens": s.prompt_tokens,
                 "completion_tokens": s.completion_tokens,
                 "duration_ms": s.duration_ms,
+                "interrupted": _INTERRUPT_MARKER in (s.attributes.get("input.value") or ""),
             }
             for s in turn_spans
         ]
@@ -201,7 +204,24 @@ async def _store_indexed(
         if value is not None:
             setattr(coding_session, key, value)
 
-    # Estimate analysis cost from actual span data
+    # Harness attribution from root span (local/entireio only; Phoenix stays None)
+    if root:
+        v = root.attributes.get("harness.agent_version")
+        if v:
+            coding_session.agent_version = str(v)
+        eff = root.attributes.get("harness.effort_level")
+        if eff:
+            coding_session.effort_level = str(eff)
+        atd = root.attributes.get("harness.adaptive_thinking_disabled")
+        if atd is not None:
+            coding_session.adaptive_thinking_disabled = bool(atd)
+
+    # User-interrupt count (structural, no LLM)
+    _INTERRUPT_MARKER = "[Request interrupted by user]"
+    coding_session.interrupt_count = sum(
+        1 for s in spans if _INTERRUPT_MARKER in (s.attributes.get("input.value") or "")
+    )
+
     from cinsights.costs import estimate_session_analysis_tokens
 
     coding_session.estimated_analysis_tokens = estimate_session_analysis_tokens(spans)
@@ -218,6 +238,8 @@ async def _store_insights(
 
     Updates status to ANALYZED. Returns the number of insights persisted.
     """
+    import json as json_mod
+
     from cinsights.db.models import (
         Insight,
         InsightCategory,
@@ -226,6 +248,11 @@ async def _store_insights(
     )
 
     settings = get_settings()
+
+    # Clear old insights on re-analysis
+    old_insights = await db.exec(select_fn(Insight).where(Insight.session_id == coding_session.id))
+    for old in old_insights.all():
+        await db.delete(old)
 
     for item in result.insights:
         try:
@@ -237,6 +264,7 @@ async def _store_insights(
         except ValueError:
             sev = InsightSeverity.INFO
 
+        meta = json_mod.dumps({"label": item.label}) if item.label else None
         insight = Insight(
             tenant_id=coding_session.tenant_id,
             session_id=coding_session.id,
@@ -245,8 +273,20 @@ async def _store_insights(
             content=item.content,
             severity=sev,
             prompt_version=settings.prompt_version_session,
+            metadata_json=meta,
         )
         db.add(insight)
+
+    # Store notable quotes on session metadata
+    if result.notable_quotes:
+        import contextlib
+
+        existing_meta = {}
+        if coding_session.metadata_json:
+            with contextlib.suppress(Exception):
+                existing_meta = json_mod.loads(coding_session.metadata_json)
+        existing_meta["notable_quotes"] = [q.model_dump() for q in result.notable_quotes]
+        coding_session.metadata_json = json_mod.dumps(existing_meta)
 
     coding_session.status = SessionStatus.ANALYZED
     coding_session.analysis_prompt_tokens = result.usage_prompt_tokens
@@ -375,6 +415,19 @@ async def _run_one_digest(
     async with sessionmaker() as db:
         stats = await compute_all(db, start, end, project_name=scope_project, user_id=user_id)
 
+        # Write cluster_label back to Insight rows
+        if stats.label_members:
+            from cinsights.db.models import Insight
+
+            for canonical, members in stats.label_members.items():
+                for raw_label in members:
+                    await db.exec(
+                        update(Insight)
+                        .where(Insight.metadata_json.contains(f'"label": "{raw_label}"'))
+                        .values(cluster_label=canonical)
+                    )
+            await db.commit()
+
         if stats.session_count == 0:
             console.print(f"  [yellow]·[/yellow] {label} — no sessions, skipped")
             return ("empty", 0, 0)
@@ -482,7 +535,7 @@ async def _run_one_digest(
 
         try:
             assert analyzer is not None  # not stats_only path
-            result = await analyzer.analyze(stats)
+            result = await analyzer.analyze(stats, digest_id=digest_record.id)
             await _store_digest_sections(db, digest_record, result, json_mod)
             console.print(
                 f"  [green]✓[/green] {label} — {stats.session_count} sessions, "
@@ -532,7 +585,7 @@ async def _discover_work_items(
                         spans=spans,
                     )
                     work_items.append((tid, tid, trace, spans))
-                else:
+                elif hasattr(source, "get_spans"):
                     spans = await asyncio.to_thread(source.get_spans, tid)
                     if spans:
                         trace = TraceData(
@@ -1212,8 +1265,8 @@ async def _analyze_async(
 
     # Project detection for phoenix source (others already have project names)
     if settings.source not in (SourceType.ENTIREIO, SourceType.LOCAL):
-        detect_items_list: list[tuple[str | None, list[SpanData]]] = [
-            (previous_tags[trace_id], _filter_tool_spans(spans))
+        detect_items_list: list[tuple[str, str | None, list[SpanData]]] = [
+            (trace_id, previous_tags[trace_id], _filter_tool_spans(spans))
             for trace_id, _, _, spans in work_items
         ]
         analysis_results, project_guesses = await asyncio.gather(
@@ -1262,6 +1315,12 @@ async def _analyze_async(
                     run.total_completion_tokens += (
                         result.usage_completion_tokens + project_guess.usage_completion_tokens
                     )
+                    # Track scope for doctor page
+                    scope_ids = run.extra.get("session_ids", [])
+                    scope_ids.append(trace_id[:12])
+                    run.extra["session_ids"] = scope_ids
+                    if project_guess.project_name:
+                        run.extra["project"] = project_guess.project_name
                 console.print(
                     f"  [green]✓[/green] {trace_id[:12]} — {n_insights} insights, "
                     f"project={project_guess.project_name or 'unknown'}"

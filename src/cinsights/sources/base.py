@@ -116,6 +116,10 @@ class TraceData:
 class TraceSource(Protocol):
     """Protocol for trace data sources."""
 
+    source_name: str
+
+    def capabilities(self) -> frozenset[str]: ...
+
     def get_sessions(
         self,
         start_time: datetime | None = None,

@@ -112,6 +112,8 @@ def _project_from_codex_head(head: bytes) -> str | None:
 class LocalSource:
     """Read JSONL session files directly from the local filesystem."""
 
+    source_name = "local"
+
     def __init__(
         self,
         claude_code_homes: list[Path],
@@ -121,6 +123,11 @@ class LocalSource:
         self.codex_homes = codex_homes
         self._file_index: dict[str, _FileRef] | None = None
         self._slug_cache: dict[str, str | None] = {}
+
+    def capabilities(self) -> frozenset[str]:
+        from cinsights.capabilities import capabilities_for_source
+
+        return frozenset(c.value for c in capabilities_for_source(self.source_name))
 
     def _build_index(self) -> dict[str, _FileRef]:
         if self._file_index is not None:

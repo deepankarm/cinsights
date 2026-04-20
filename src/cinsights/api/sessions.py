@@ -34,6 +34,7 @@ class ToolCallRead(BaseModel):
 class InsightRead(BaseModel):
     id: str
     category: InsightCategory
+    label: str | None = None
     title: str
     content: str
     severity: InsightSeverity
@@ -56,6 +57,9 @@ class SessionRead(BaseModel):
     error_count: int
     insight_count: int
     active_duration_ms: float | None = None
+    interrupt_count: int | None = None
+    agent_version: str | None = None
+    effort_level: str | None = None
 
 
 class SessionDetail(BaseModel):
@@ -73,6 +77,11 @@ class SessionDetail(BaseModel):
     status: SessionStatus
     tool_calls: list[ToolCallRead]
     insights: list[InsightRead]
+    notable_quotes: list[dict] | None = None
+    interrupt_count: int | None = None
+    agent_version: str | None = None
+    effort_level: str | None = None
+    adaptive_thinking_disabled: bool | None = None
 
 
 class StatsResponse(BaseModel):
@@ -92,6 +101,7 @@ async def list_sessions(
     status: SessionStatus | None = None,
     user_id: str | None = None,
     project_name: str | None = None,
+    label: str | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> list[SessionRead]:
     """List sessions with pagination and optional filters."""
@@ -112,6 +122,11 @@ async def list_sessions(
         query = query.where(CodingSession.user_id == user_id)
     if project_name:
         query = query.where(CodingSession.project_name == project_name)
+    if label:
+        label_sessions = (
+            select(Insight.session_id).where(Insight.cluster_label == label).distinct().subquery()
+        )
+        query = query.where(col(CodingSession.id).in_(select(label_sessions.c.session_id)))
     query = query.offset(skip).limit(limit)
 
     result = await db.exec(query)
@@ -172,6 +187,9 @@ async def list_sessions(
             error_count=error_counts.get(s.id, 0),
             insight_count=insight_counts.get(s.id, 0),
             active_duration_ms=_active_ms(s),
+            interrupt_count=s.interrupt_count,
+            agent_version=s.agent_version,
+            effort_level=s.effort_level,
         )
         for s in sessions
     ]
@@ -223,6 +241,15 @@ async def get_stats(db: AsyncSession = Depends(get_db)) -> StatsResponse:
     )
 
 
+def _parse_metadata(ins, key: str):
+    if not ins.metadata_json:
+        return None
+    try:
+        return json.loads(ins.metadata_json).get(key)
+    except Exception:
+        return None
+
+
 @router.get("/{session_id}", response_model=SessionDetail)
 async def get_session_detail(session_id: str, db: AsyncSession = Depends(get_db)) -> SessionDetail:
     """Get session detail with tool calls and insights."""
@@ -271,6 +298,7 @@ async def get_session_detail(session_id: str, db: AsyncSession = Depends(get_db)
             InsightRead(
                 id=ins.id,
                 category=ins.category,
+                label=_parse_metadata(ins, "label"),
                 title=ins.title,
                 content=ins.content,
                 severity=ins.severity,
@@ -278,7 +306,22 @@ async def get_session_detail(session_id: str, db: AsyncSession = Depends(get_db)
             )
             for ins in insights
         ],
+        notable_quotes=_parse_notable_quotes(session),
+        interrupt_count=session.interrupt_count,
+        agent_version=session.agent_version,
+        effort_level=session.effort_level,
+        adaptive_thinking_disabled=session.adaptive_thinking_disabled,
     )
+
+
+def _parse_notable_quotes(session) -> list[dict] | None:
+    if not session.metadata_json:
+        return None
+    try:
+        meta = json.loads(session.metadata_json)
+        return meta.get("notable_quotes")
+    except Exception:
+        return None
 
 
 class SessionUpdate(BaseModel):

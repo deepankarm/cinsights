@@ -14,6 +14,9 @@ export interface SessionRead {
 	error_count: number;
 	insight_count: number;
 	active_duration_ms: number | null;
+	interrupt_count: number | null;
+	agent_version: string | null;
+	effort_level: string | null;
 }
 
 export interface ToolCallRead {
@@ -29,11 +32,13 @@ export interface ToolCallRead {
 export interface InsightRead {
 	id: string;
 	category: 'summary' | 'friction' | 'win' | 'recommendation' | 'pattern' | 'skill_proposal';
+	label: string | null;
 	title: string;
 	content: string;
 	severity: 'info' | 'warning' | 'critical';
 	created_at: string;
 }
+
 
 export interface SessionDetail {
 	id: string;
@@ -46,10 +51,15 @@ export interface SessionDetail {
 	total_tokens: number;
 	prompt_tokens: number;
 	completion_tokens: number;
-	context_growth: Array<{ turn: number; prompt_tokens: number; completion_tokens: number; duration_ms?: number }> | null;
+	context_growth: Array<{ turn: number; prompt_tokens: number; completion_tokens: number; duration_ms?: number; interrupted?: boolean }> | null;
 	status: string;
 	tool_calls: ToolCallRead[];
 	insights: InsightRead[];
+	notable_quotes: Array<{ quote: string; vibe: string }> | null;
+	interrupt_count: number | null;
+	agent_version: string | null;
+	effort_level: string | null;
+	adaptive_thinking_disabled: boolean | null;
 }
 
 export interface StatsResponse {
@@ -153,6 +163,9 @@ export interface DigestStatsData {
 	has_claude_md: boolean;
 	weekly_trends: WeeklyTrend[];
 	analysis_tokens_used: number;
+	insight_labels: Record<string, number> | null;
+	label_categories: Record<string, string> | null;
+	label_trends: Array<{ date: string; labels: Record<string, number> }> | null;
 	session_summaries: Array<{
 		session_id: string;
 		start_time: string;

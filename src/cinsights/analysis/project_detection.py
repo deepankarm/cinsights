@@ -147,7 +147,11 @@ class ProjectDetector(LLMAnalyzer):
         tool_spans: list[SpanData],
         known_projects: list[str],
         previous_guess: str | None = None,
+        *,
+        scope_id: str | None = None,
     ) -> ProjectGuess:
+        from cinsights.db.models import LLMCallKind, LLMCallScopeType
+
         system_prompt, user_prompt = _build_prompts(tool_spans, known_projects, previous_guess)
 
         logger.info(
@@ -161,6 +165,9 @@ class ProjectDetector(LLMAnalyzer):
             system_prompt,
             user_prompt,
             max_tokens=512,
+            call_kind=LLMCallKind.PROJECT_DETECTION,
+            scope_type=LLMCallScopeType.SESSION if scope_id else LLMCallScopeType.UNKNOWN,
+            scope_id=scope_id,
         )
         result.usage_prompt_tokens = prompt_tokens
         result.usage_completion_tokens = completion_tokens
@@ -168,15 +175,23 @@ class ProjectDetector(LLMAnalyzer):
 
     async def detect_batch(
         self,
-        items: list[tuple[str, list[SpanData]]],
+        items: list[tuple[str, str | None, list[SpanData]]],
         known_projects: list[str],
         max_concurrency: int = 5,
     ) -> list[ProjectGuess]:
+        """Detect projects for a batch of sessions.
+
+        ``items`` is a list of ``(session_id, previous_tag, spans)``. The
+        ``session_id`` is threaded through as the ``scope_id`` on the
+        ``LLMCallLog`` row so per-session cost attribution works.
+        """
         semaphore = asyncio.Semaphore(max_concurrency)
 
-        async def _bounded(previous: str | None, spans: list[SpanData]) -> ProjectGuess:
+        async def _bounded(
+            session_id: str, previous: str | None, spans: list[SpanData]
+        ) -> ProjectGuess:
             async with semaphore:
-                return await self.detect(spans, known_projects, previous)
+                return await self.detect(spans, known_projects, previous, scope_id=session_id)
 
-        tasks = [_bounded(prev, spans) for prev, spans in items]
+        tasks = [_bounded(sid, prev, spans) for sid, prev, spans in items]
         return await asyncio.gather(*tasks)
