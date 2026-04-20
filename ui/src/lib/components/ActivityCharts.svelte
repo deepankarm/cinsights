@@ -177,7 +177,7 @@
 					{#each visiblePatterns as [label, count]}
 						<a class="dot-label-row" href="{patternLink(label)}" title="View sessions with this pattern">
 							<span class="dot-cat-icon" style="color:{catColor(label)}" title="{labelCategories?.[label] ?? 'pattern'}">{catIcon(label)}</span>
-							<span class="dot-label" title="{label}">{label}</span>
+							<span class="dot-label" title="{label}">{label.charAt(0).toUpperCase() + label.slice(1)}</span>
 							<span class="dot-count" style="color:{catColor(label)}">{count}</span>
 						</a>
 					{/each}
@@ -259,7 +259,7 @@
 	.dot-label-row { display: flex; align-items: center; gap: 6px; height: 32px; padding-right: 12px; text-decoration: none; border-radius: 6px; cursor: pointer; }
 	.dot-label-row:hover { background: #f8f8fa; }
 	.dot-cat-icon { font-size: 10px; flex-shrink: 0; width: 12px; text-align: center; }
-	.dot-label { font-size: 12px; color: #52525b; text-transform: capitalize; white-space: nowrap; }
+	.dot-label { font-size: 12px; color: #52525b; white-space: nowrap; }
 	.dot-count { font-size: 12px; font-weight: 700; flex-shrink: 0; font-variant-numeric: tabular-nums; }
 	.dot-scroll { flex: 1; overflow-x: auto; overflow-y: hidden; }
 	.dot-grid { display: grid; gap: 0; align-items: center; }
