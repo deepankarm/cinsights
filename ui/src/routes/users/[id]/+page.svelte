@@ -7,6 +7,7 @@
 	import DashboardView from '$lib/components/DashboardView.svelte';
 	import InsightsPanel from '$lib/components/InsightsPanel.svelte';
 	import ActivityCharts from '$lib/components/ActivityCharts.svelte';
+	import MoodQuotes from '$lib/components/MoodQuotes.svelte';
 	import ExportHTML from '$lib/components/ExportHTML.svelte';
 	import SessionTable from '$lib/components/SessionTable.svelte';
 
@@ -143,6 +144,7 @@
 							sessionCount={stats.session_count ?? 0}
 							scopeUser={userId}
 						/>
+						<MoodQuotes moodGroups={moodData?.mood_groups ?? []} />
 					</div>
 				{/if}
 				<div class="section">
