@@ -5,9 +5,12 @@
 	import { onMount } from 'svelte';
 	import ActivityCharts from './ActivityCharts.svelte';
 
-	let { digest }: { digest: DigestDetail } = $props();
+	import type { MoodGroup } from '$lib/api';
+
+	let { digest, moodGroups = [] }: { digest: DigestDetail; moodGroups?: MoodGroup[] } = $props();
 
 	let expandedCards: Record<string, boolean> = $state({});
+	let hoveredMood: string | null = $state(null);
 	let savedExpandState: Record<string, boolean> = {};
 
 	onMount(() => {
@@ -128,6 +131,38 @@
 			scopeUser={digest.user_id ?? undefined}
 			scopeProject={digest.project_name ?? undefined}
 		/>
+
+		{#if moodGroups.length > 0}
+			{@const MOOD_META: Record<string, { icon: string; color: string; bg: string; label: string }> = {
+				frustrated: { icon: '😤', color: '#dc2626', bg: '#fef2f2', label: 'Frustrated' },
+				curious:    { icon: '🤔', color: '#2563eb', bg: '#eff6ff', label: 'Curious' },
+				amused:     { icon: '😄', color: '#ca8a04', bg: '#fefce8', label: 'Amused' },
+				relieved:   { icon: '😮‍💨', color: '#16a34a', bg: '#f0fdf4', label: 'Relieved' },
+				assertive:  { icon: '✋', color: '#7c3aed', bg: '#f5f3ff', label: 'Assertive' },
+			}}
+			<div class="mood-section"
+				onmouseenter={() => hoveredMood = 'all'}
+				onmouseleave={() => hoveredMood = null}>
+				<h3>Things you've said</h3>
+				{#each moodGroups as group}
+					{@const meta = MOOD_META[group.mood] ?? { icon: '💬', color: '#64748b', bg: '#f8fafc', label: group.mood }}
+					{@const isHovered = hoveredMood === 'all'}
+					{@const visible = isHovered ? group.quotes : group.quotes.slice(0, 3)}
+					<div class="mood-row">
+						<div class="mood-tag" style="color: {meta.color}">
+							<span class="mb-icon">{meta.icon}</span>
+							<strong>{meta.label}</strong>
+							<span class="mood-cnt" style="background: {meta.bg}">{group.quotes.length}</span>
+						</div>
+						<div class="mood-quotes-list">
+							{#each visible as q}
+								<div class="mq">{#if isHovered}&ldquo;{q.quote}&rdquo;{:else}&ldquo;{q.quote.length > 100 ? q.quote.slice(0, 100) + '...' : q.quote}&rdquo;{/if}</div>
+							{/each}
+						</div>
+					</div>
+				{/each}
+			</div>
+		{/if}
 	</section>
 {/if}
 
@@ -433,6 +468,18 @@
 	.accent-card :global(a), .persona :global(a), .glance-card :global(a), .content-card :global(a) { color: #6366f1; text-decoration: none; }
 	.accent-card :global(a:hover), .persona :global(a:hover), .glance-card :global(a:hover), .content-card :global(a:hover) { text-decoration: underline; }
 	.accent-card :global(code), .persona :global(code), .content-card :global(code) { background: #f4f4f5; padding: 1px 6px; border-radius: 4px; font-size: 0.9em; }
+
+	/* Mood quotes */
+	.mood-section { background: white; border: 1px solid #e8e5e0; border-radius: 12px; padding: 16px; margin-top: 12px; }
+	.mood-section h3 { font-size: 13px; font-weight: 700; color: #232326; margin-bottom: 10px; }
+	.mood-row { display: flex; gap: 12px; padding: 8px 4px; border-bottom: 1px solid #f4f4f5; align-items: baseline; border-radius: 6px; cursor: default; transition: background 0.1s; }
+	.mood-row:last-child { border-bottom: none; }
+	.mood-row:hover { background: #fafaf9; }
+	.mood-tag { display: flex; align-items: center; gap: 5px; flex-shrink: 0; min-width: 110px; font-size: 12px; }
+	.mb-icon { font-size: 16px; }
+	.mood-cnt { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px; }
+	.mood-quotes-list { display: flex; flex-direction: column; gap: 4px; }
+	.mq { font-size: 13px; color: #475569; font-style: italic; line-height: 1.4; }
 
 	@media (max-width: 768px) {
 		.glance-grid { grid-template-columns: 1fr; }

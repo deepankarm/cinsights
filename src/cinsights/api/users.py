@@ -120,6 +120,25 @@ def _avg(values) -> float | None:
     return round(sum(nums) / len(nums), 2)
 
 
+@router.get("/{user_id}/stats")
+async def get_user_stats(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    from cinsights.db.models import ScopeStats
+
+    q = (
+        select(ScopeStats)
+        .where(ScopeStats.scope_type == "user", ScopeStats.scope_value == user_id)
+        .order_by(col(ScopeStats.computed_at).desc())
+        .limit(1)
+    )
+    row = (await db.exec(q)).first()
+    if not row or not row.stats_json:
+        return {}
+    return json.loads(row.stats_json)
+
+
 class MoodQuote(BaseModel):
     quote: str
     mood: str

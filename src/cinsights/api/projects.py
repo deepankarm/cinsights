@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlmodel import func, select
+from sqlmodel import col, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from cinsights.db.engine import get_db
@@ -93,3 +94,22 @@ async def list_projects(db: AsyncSession = Depends(get_db)) -> list[ProjectRead]
         )
 
     return results
+
+
+@router.get("/{project_name}/stats")
+async def get_project_stats(
+    project_name: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    from cinsights.db.models import ScopeStats
+
+    q = (
+        select(ScopeStats)
+        .where(ScopeStats.scope_type == "project", ScopeStats.scope_value == project_name)
+        .order_by(col(ScopeStats.computed_at).desc())
+        .limit(1)
+    )
+    row = (await db.exec(q)).first()
+    if not row or not row.stats_json:
+        return {}
+    return json.loads(row.stats_json)

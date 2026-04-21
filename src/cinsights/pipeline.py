@@ -1337,6 +1337,81 @@ async def _analyze_async(
     table.add_row("Failed", str(failed))
     console.print(table)
 
+    # Auto-compute stats for affected scopes (free — no LLM calls)
+    if analyzed > 0:
+        await _refresh_scope_stats(sessionmaker, work_items)
+
+
+async def _refresh_scope_stats(sessionmaker, work_items: list) -> None:
+    """Recompute stats for users/projects affected by this analysis run."""
+    import json as json_mod
+
+    from cinsights.db.models import CodingSession, ScopeStats
+    from cinsights.stats import compute_all
+
+    # Collect affected users and projects
+    affected_users: set[str] = set()
+    affected_projects: set[str] = set()
+    async with sessionmaker() as db:
+        for trace_id, _, _, _ in work_items:
+            cs = await db.get(CodingSession, trace_id)
+            if cs:
+                if cs.user_id:
+                    affected_users.add(cs.user_id)
+                if cs.project_name:
+                    affected_projects.add(cs.project_name)
+
+    scopes: list[tuple[str, str]] = [
+        *[("user", u) for u in affected_users],
+        *[("project", p) for p in affected_projects],
+    ]
+
+    if not scopes:
+        return
+
+    console.print(f"\n[dim]Updating stats for {len(scopes)} scope(s)...[/dim]")
+
+    end = datetime.now(UTC)
+    start = end - timedelta(days=90)
+
+    for scope_type, scope_value in scopes:
+        try:
+            async with sessionmaker() as db:
+                stats = await compute_all(
+                    db,
+                    start,
+                    end,
+                    project_name=scope_value if scope_type == "project" else None,
+                    user_id=scope_value if scope_type == "user" else None,
+                )
+
+                # Upsert scope_stats row
+                existing_q = select_fn(ScopeStats).where(
+                    ScopeStats.scope_type == scope_type,
+                    ScopeStats.scope_value == scope_value,
+                )
+                existing = (await db.exec(existing_q)).first()
+                stats_dict = stats.model_dump(mode="json")
+
+                if existing:
+                    existing.stats_json = json_mod.dumps(stats_dict)
+                    existing.session_count = stats.session_count
+                    existing.computed_at = datetime.now(UTC)
+                else:
+                    row = ScopeStats(
+                        scope_type=scope_type,
+                        scope_value=scope_value,
+                        stats_json=json_mod.dumps(stats_dict),
+                        session_count=stats.session_count,
+                        computed_at=datetime.now(UTC),
+                    )
+                    db.add(row)
+
+                await db.commit()
+                console.print(f"  [dim]✓ {scope_type}:{scope_value}[/dim]")
+        except Exception as e:
+            console.print(f"  [dim]✗ {scope_type}:{scope_value} — {e}[/dim]")
+
 
 async def _digest_async(
     scope_type: str,

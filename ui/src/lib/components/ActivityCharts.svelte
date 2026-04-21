@@ -73,7 +73,7 @@
 </script>
 
 <div class="chart-bento">
-	<div class="chart-box chart-wide">
+	<div class="chart-box">
 		<h3>Tools</h3>
 		<div class="hbars">
 			{#each Object.entries(toolDistribution).slice(0, 8) as [name, count]}
