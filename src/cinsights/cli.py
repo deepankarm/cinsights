@@ -284,9 +284,30 @@ def setup(
     app_config.save()
     console.print(f"\n  Configuration written to [bold]{Paths.config_file}[/bold]")
 
+    # Download embedding model for label clustering
+    console.print("\n  Downloading embedding model...")
+    _download_embedding_model()
+
     # Offer to test
     if typer.confirm("Test connection?", default=True):
         _test_connection(app_config.llm)
+
+
+def _download_embedding_model() -> None:
+    """Pre-download the sentence-transformers model so it's cached locally."""
+    from cinsights.runtime import console
+
+    try:
+        import os
+
+        os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
+        from sentence_transformers import SentenceTransformer
+
+        SentenceTransformer("all-MiniLM-L6-v2")
+        console.print("  [green]✓[/green] Embedding model ready (all-MiniLM-L6-v2)")
+    except Exception as e:
+        console.print(f"  [yellow]⚠[/yellow] Could not download embedding model: {e}")
+        console.print("    Label clustering will fall back to raw labels.")
 
 
 def _test_connection(llm: LLMConfig) -> None:

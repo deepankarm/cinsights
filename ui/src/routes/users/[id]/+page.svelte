@@ -125,7 +125,7 @@
 							<span class="generated-at">{new Date(digest.created_at).toLocaleDateString()}</span>
 						</span>
 					</div>
-					<InsightsPanel {digest} moodGroups={moodData?.mood_groups ?? []} />
+					<InsightsPanel {digest} moodGroups={moodData?.mood_groups ?? []} scopeStats={scopeStats ?? undefined} />
 				</div>
 			{:else}
 				{@const stats = scopeStats}
