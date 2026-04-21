@@ -18,14 +18,21 @@ Cluster the sessions into 3-6 work areas based on what the developer USES Claude
 Each area needs: name, approximate session count, and a 2-sentence description of how Claude was used for that area.
 
 ## developer_persona
-A 2-3 paragraph narrative analyzing the developer's interaction style with coding agents. Cover:
+A 2-3 paragraph narrative analyzing the developer's interaction style with coding agents. Do NOT include a heading or title — the UI provides one. Start directly with the content. Cover:
 - Their prompting style (terse directives? detailed specs? exploratory?)
 - How they handle friction (correct immediately? let Claude retry? override with own code?)
 - Tool preferences and patterns (heavy Bash user? prefers Read over Grep?)
 - Session structure (focused single-task? multi-task? iterative refinement?)
 Quote specific quantified patterns from the stats (e.g., "With 134 Bash calls across 5 sessions, you treat Claude primarily as a command executor").
 
-Guidelines:
+## Formatting
+Use rich markdown throughout:
+- **Bold** key metrics, numbers, and important terms (e.g., "Your **Read:Edit ratio of 5.3** shows...")
+- *Italics* for emphasis and qualitative observations
+- Use paragraph breaks for readability — no walls of text
+- In developer_persona, use sub-sections or topic sentences to structure the narrative
+
+## Guidelines
 - Write in second person ("You...")
 - Be specific, cite numbers from the stats
 - Focus on INTERACTION patterns, not code content
