@@ -67,7 +67,7 @@
 	let patternsSorted = $derived(
 		Object.entries(insightLabels ?? {})
 			.sort((a, b) => b[1] - a[1])
-			.filter(([lbl, c]) => c > 1 && ACTIONABLE_CATS.has(labelCategories?.[lbl] ?? ''))
+			.filter(([lbl, c]) => c >= ((analyzedCount ?? 0) <= 5 ? 1 : 2) && ACTIONABLE_CATS.has(labelCategories?.[lbl] ?? ''))
 	);
 	const defaultPatternLimit = 10;
 </script>
