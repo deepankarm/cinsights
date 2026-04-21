@@ -1178,6 +1178,7 @@ async def _analyze_async(
             select_fn(CodingSession)
             .where(CodingSession.status == SessionStatus.INDEXED)
             .where(CodingSession.interestingness_score.isnot(None))
+            .where(CodingSession.source == str(settings.source))
             .order_by(col(CodingSession.interestingness_score).desc())
         )
 

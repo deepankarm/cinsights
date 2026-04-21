@@ -17,16 +17,16 @@
 	<div class="mood-section"
 		onmouseenter={() => hoveredMood = 'all'}
 		onmouseleave={() => hoveredMood = null}>
-		<h3>Things you've said</h3>
+		<h3>Things you've said when you were</h3>
 		{#each moodGroups as group}
 			{@const meta = MOOD_META[group.mood] ?? { icon: '💬', color: '#64748b', bg: '#f8fafc', label: group.mood }}
 			{@const isHovered = hoveredMood === 'all'}
 			{@const visible = isHovered ? group.quotes : group.quotes.slice(0, 3)}
 			<div class="mood-row">
-				<div class="mood-tag" style="color: {meta.color}">
+				<div class="mood-tag">
 					<span class="mood-icon">{meta.icon}</span>
 					<strong>{meta.label}</strong>
-					<span class="mood-cnt" style="background: {meta.bg}">{group.quotes.length}</span>
+					<span class="mood-cnt">{group.quotes.length}</span>
 				</div>
 				<div class="mood-quotes-list">
 					{#each visible as q}
@@ -44,9 +44,9 @@
 	.mood-row { display: flex; gap: 12px; padding: 8px 4px; border-bottom: 1px solid #f4f4f5; align-items: baseline; border-radius: 6px; cursor: default; transition: background 0.1s; }
 	.mood-row:last-child { border-bottom: none; }
 	.mood-row:hover { background: #fafaf9; }
-	.mood-tag { display: flex; align-items: center; gap: 5px; flex-shrink: 0; min-width: 110px; font-size: 12px; }
+	.mood-tag { display: flex; align-items: center; gap: 5px; flex-shrink: 0; min-width: 120px; font-size: 13px; color: #232326; }
 	.mood-icon { font-size: 16px; }
-	.mood-cnt { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px; }
+	.mood-cnt { font-size: 10px; font-weight: 600; color: #a1a1aa; }
 	.mood-quotes-list { display: flex; flex-direction: column; gap: 4px; }
 	.mq { font-size: 13px; color: #475569; font-style: italic; line-height: 1.4; }
 </style>

@@ -893,12 +893,21 @@ def _cluster_and_aggregate_labels(
         return raw_labels, raw_cat, None, {}
 
     try:
+        import os
+
         import numpy as np
         from sentence_transformers import SentenceTransformer
         from sklearn.metrics.pairwise import cosine_similarity
 
-        model = SentenceTransformer("all-MiniLM-L6-v2")
-        embeddings = model.encode(unique)
+        os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+        # Use local cache only — download via `cinsights setup`
+        try:
+            model = SentenceTransformer("all-MiniLM-L6-v2", local_files_only=True)
+        except Exception:
+            # Model not cached yet — download it once
+            _logger.info("Downloading embedding model (one-time)...")
+            model = SentenceTransformer("all-MiniLM-L6-v2")
+        embeddings = model.encode(unique, show_progress_bar=False)
         sim = cosine_similarity(embeddings)
     except Exception as exc:
         _logger.warning("Embedding clustering unavailable, using raw labels: %s", exc)
