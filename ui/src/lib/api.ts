@@ -305,3 +305,19 @@ export async function getUsers(start?: string, end?: string, project?: string): 
 	if (params.length) url += `?${params.join('&')}`;
 	return fetchJSON(url);
 }
+
+export async function getUserStats(userId: string): Promise<Record<string, unknown>> {
+	return fetchJSON(`/api/users/${encodeURIComponent(userId)}/stats`);
+}
+
+export async function getProjectStats(projectName: string): Promise<Record<string, unknown>> {
+	return fetchJSON(`/api/projects/${encodeURIComponent(projectName)}/stats`);
+}
+
+export interface MoodQuote { quote: string; mood: string; project: string | null; session_id: string | null; }
+export interface MoodGroup { mood: string; quotes: MoodQuote[]; }
+export interface UserMoodResponse { user_id: string; total_sessions: number; sessions_with_quotes: number; mood_groups: MoodGroup[]; }
+
+export async function getUserMoodQuotes(userId: string): Promise<UserMoodResponse> {
+	return fetchJSON(`/api/users/${encodeURIComponent(userId)}/mood-quotes`);
+}

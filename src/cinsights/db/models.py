@@ -231,6 +231,20 @@ class DigestSection(SQLModel, table=True):
     digest: Digest = Relationship(back_populates="sections")
 
 
+class ScopeStats(SQLModel, table=True):
+    """Pre-computed stats per user or project scope. Updated after analyze."""
+
+    __tablename__ = "scope_stats"
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    tenant_id: str = Field(default="default", index=True)
+    scope_type: str = Field(index=True)  # "user" or "project"
+    scope_value: str = Field(index=True)  # user_id or project_name
+    stats_json: str | None = None
+    session_count: int = 0
+    computed_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class RefreshRunStatus(StrEnum):
     RUNNING = "running"
     SUCCESS = "success"

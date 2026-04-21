@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from collections import defaultdict
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
@@ -116,3 +118,95 @@ def _avg(values) -> float | None:
     if not nums:
         return None
     return round(sum(nums) / len(nums), 2)
+
+
+@router.get("/{user_id}/stats")
+async def get_user_stats(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    from cinsights.db.models import ScopeStats
+
+    q = (
+        select(ScopeStats)
+        .where(ScopeStats.scope_type == "user", ScopeStats.scope_value == user_id)
+        .order_by(col(ScopeStats.computed_at).desc())
+        .limit(1)
+    )
+    row = (await db.exec(q)).first()
+    if not row or not row.stats_json:
+        return {}
+    return json.loads(row.stats_json)
+
+
+class MoodQuote(BaseModel):
+    quote: str
+    mood: str
+    project: str | None = None
+    session_id: str | None = None
+
+
+class MoodGroup(BaseModel):
+    mood: str
+    quotes: list[MoodQuote]
+
+
+class UserMoodResponse(BaseModel):
+    user_id: str
+    total_sessions: int
+    sessions_with_quotes: int
+    mood_groups: list[MoodGroup]
+
+
+@router.get("/{user_id}/mood-quotes", response_model=UserMoodResponse)
+async def get_user_mood_quotes(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> UserMoodResponse:
+    query = select(
+        CodingSession.id,
+        CodingSession.project_name,
+        CodingSession.metadata_json,
+    ).where(
+        CodingSession.user_id == user_id,
+        col(CodingSession.status).in_([SessionStatus.ANALYZED, "ANALYZED"]),
+    )
+    result = await db.exec(query)
+    rows = result.all()
+
+    by_mood: dict[str, list[MoodQuote]] = defaultdict(list)
+    sessions_with = 0
+
+    for session_id, project_name, meta_json in rows:
+        if not meta_json:
+            continue
+        meta = json.loads(meta_json)
+        quotes = meta.get("notable_quotes", [])
+        if not quotes:
+            continue
+        sessions_with += 1
+        for q in quotes:
+            mood = q.get("mood")
+            if not mood:
+                continue
+            by_mood[mood].append(
+                MoodQuote(
+                    quote=q.get("quote", ""),
+                    mood=mood,
+                    project=project_name,
+                    session_id=session_id,
+                )
+            )
+
+    # Order moods by count descending
+    mood_groups = [
+        MoodGroup(mood=mood, quotes=quotes)
+        for mood, quotes in sorted(by_mood.items(), key=lambda x: -len(x[1]))
+    ]
+
+    return UserMoodResponse(
+        user_id=user_id,
+        total_sessions=len(rows),
+        sessions_with_quotes=sessions_with,
+        mood_groups=mood_groups,
+    )
