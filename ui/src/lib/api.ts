@@ -201,7 +201,7 @@ export interface SystemHealthResponse {
 
 export interface CommandCost { command: string; prompt_tokens: number; completion_tokens: number; estimated_cost_usd: number | null; run_count: number; }
 export interface ProjectCost { project_name: string; prompt_tokens: number; completion_tokens: number; estimated_cost_usd: number | null; session_count: number; }
-export interface DailyCost { date: string; prompt_tokens: number; completion_tokens: number; }
+export interface DailyCost { date: string; prompt_tokens: number; completion_tokens: number; estimated_cost_usd: number | null; }
 
 export interface CostSummaryResponse {
 	total_prompt_tokens: number;

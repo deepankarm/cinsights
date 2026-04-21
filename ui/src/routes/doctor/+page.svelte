@@ -24,6 +24,7 @@
 	let expandedErrors: Set<string> = $state(new Set());
 	let showAllRuns = $state(false);
 	const runsLimit = 15;
+	let hoveredBar: number | null = $state(null);
 
 	const filteredRuns = $derived(runs.filter(r => {
 		if (commandFilter && r.command !== commandFilter) return false;
@@ -91,6 +92,15 @@
 
 	function maxDailyTokens(trend: { prompt_tokens: number; completion_tokens: number }[]): number {
 		return Math.max(...trend.map(d => d.prompt_tokens + d.completion_tokens), 1);
+	}
+
+	function maxDailyCost(trend: { estimated_cost_usd: number | null }[]): number {
+		return Math.max(...trend.map(d => d.estimated_cost_usd ?? 0), 0.01);
+	}
+
+	function yAxisTicks(max: number, count: number = 4): number[] {
+		const step = max / count;
+		return Array.from({ length: count + 1 }, (_, i) => step * i);
 	}
 
 	function maxScoreCount(dist: { count: number }[]): number {
@@ -403,24 +413,62 @@
 	{/if}
 
 	{#if cost.daily_trend.length > 1}
+		{@const maxTokens = maxDailyTokens(cost.daily_trend)}
+		{@const maxCost = maxDailyCost(cost.daily_trend)}
+		{@const hasCost = cost.daily_trend.some(d => d.estimated_cost_usd != null)}
 		<div class="daily-chart">
-			<h3>Daily Token Usage</h3>
-			<div class="bar-chart">
-				{#each cost.daily_trend as d}
-					{@const total = d.prompt_tokens + d.completion_tokens}
-					{@const pct = (total / maxDailyTokens(cost.daily_trend)) * 100}
-					<div class="bar-col" title="{d.date}: {fmtTokens(total)}">
-						<div class="bar" style="height: {Math.max(pct, 2)}%">
-							<div class="bar-input" style="height: {total > 0 ? (d.prompt_tokens / total) * 100 : 0}%"></div>
-							<div class="bar-output" style="height: {total > 0 ? (d.completion_tokens / total) * 100 : 0}%"></div>
-						</div>
-						<span class="bar-label">{d.date.slice(5)}</span>
+			<h3>Daily Token Usage & Cost</h3>
+			<div class="chart-container">
+				<div class="y-axis">
+					{#each yAxisTicks(maxTokens).reverse() as tick}
+						<span class="y-tick">{fmtTokens(tick)}</span>
+					{/each}
+				</div>
+				<div class="chart-body">
+					<div class="grid-lines">
+						{#each yAxisTicks(maxTokens) as tick}
+							<div class="grid-line" style="bottom: {(tick / maxTokens) * 100}%"></div>
+						{/each}
 					</div>
-				{/each}
+					<div class="bar-chart">
+						{#each cost.daily_trend as d, i}
+							{@const total = d.prompt_tokens + d.completion_tokens}
+							{@const pct = (total / maxTokens) * 100}
+							<div class="bar-col"
+								onmouseenter={() => hoveredBar = i}
+								onmouseleave={() => hoveredBar = null}>
+								{#if hoveredBar === i}
+									<div class="bar-tooltip">
+										<strong>{d.date}</strong><br>
+										In: {fmtTokens(d.prompt_tokens)} · Out: {fmtTokens(d.completion_tokens)}{#if d.estimated_cost_usd != null}<br>Cost: {fmtCost(d.estimated_cost_usd)}{/if}
+									</div>
+								{/if}
+								<div class="bar" style="height: {Math.max(pct, 2)}%">
+									<div class="bar-input" style="height: {total > 0 ? (d.prompt_tokens / total) * 100 : 0}%"></div>
+									<div class="bar-output" style="height: {total > 0 ? (d.completion_tokens / total) * 100 : 0}%"></div>
+								</div>
+								{#if hasCost && d.estimated_cost_usd != null}
+									<div class="cost-dot" style="bottom: {(d.estimated_cost_usd / maxCost) * 100}%"></div>
+								{/if}
+								<span class="bar-label">{d.date.slice(5)}</span>
+							</div>
+						{/each}
+					</div>
+				</div>
+				{#if hasCost}
+					<div class="y-axis y-axis-right">
+						{#each yAxisTicks(maxCost).reverse() as tick}
+							<span class="y-tick">{fmtCost(tick)}</span>
+						{/each}
+					</div>
+				{/if}
 			</div>
 			<div class="bar-legend">
 				<span class="legend-item"><span class="legend-dot" style="background: #6366f1"></span> Input</span>
 				<span class="legend-item"><span class="legend-dot" style="background: #a78bfa"></span> Output</span>
+				{#if hasCost}
+					<span class="legend-item"><span class="legend-dot cost-legend-dot"></span> Cost</span>
+				{/if}
 			</div>
 		</div>
 	{/if}
@@ -670,15 +718,26 @@
 	.proj-name { font-family: monospace; font-weight: 600; color: #232326; }
 
 	.daily-chart { background: white; border: 1px solid #e8e5e0; border-radius: 12px; padding: 16px; }
-	.bar-chart { display: flex; align-items: flex-end; gap: 3px; height: 100px; padding-bottom: 20px; position: relative; }
+	.chart-container { display: flex; align-items: stretch; }
+	.y-axis { display: flex; flex-direction: column; justify-content: space-between; padding-bottom: 20px; width: 44px; flex-shrink: 0; }
+	.y-axis-right { text-align: right; }
+	.y-tick { font-size: 9px; color: #a1a1aa; font-family: monospace; line-height: 1; }
+	.chart-body { flex: 1; position: relative; min-width: 0; }
+	.grid-lines { position: absolute; inset: 0; bottom: 20px; pointer-events: none; }
+	.grid-line { position: absolute; left: 0; right: 0; border-top: 1px solid #f1f5f9; }
+	.bar-chart { display: flex; align-items: flex-end; gap: 3px; height: 120px; padding-bottom: 20px; position: relative; }
 	.bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; position: relative; }
 	.bar { width: 100%; max-width: 24px; border-radius: 3px 3px 0 0; display: flex; flex-direction: column; justify-content: flex-end; position: absolute; bottom: 0; overflow: hidden; }
 	.bar-input { background: #6366f1; }
 	.bar-output { background: #a78bfa; }
 	.bar-label { position: absolute; bottom: -18px; font-size: 9px; color: #a1a1aa; white-space: nowrap; }
+	.cost-dot { position: absolute; left: 50%; transform: translateX(-50%); width: 7px; height: 7px; border-radius: 50%; background: #f59e0b; border: 1.5px solid white; box-shadow: 0 0 0 1px #f59e0b; z-index: 2; }
+	.bar-tooltip { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: #1e293b; color: #f8fafc; font-size: 11px; padding: 6px 10px; border-radius: 6px; white-space: nowrap; z-index: 10; pointer-events: none; margin-bottom: 4px; line-height: 1.5; }
+	.bar-tooltip::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 4px solid transparent; border-top-color: #1e293b; }
 	.bar-legend { display: flex; gap: 12px; margin-top: 8px; justify-content: center; }
 	.legend-item { font-size: 10px; color: #a1a1aa; display: flex; align-items: center; gap: 4px; }
 	.legend-dot { width: 8px; height: 8px; border-radius: 2px; }
+	.cost-legend-dot { border-radius: 50%; background: #f59e0b; }
 
 	/* Coverage */
 	.cov-table { width: 100%; border-collapse: collapse; font-size: 12px; background: white; border: 1px solid #e8e5e0; border-radius: 12px; overflow: hidden; }

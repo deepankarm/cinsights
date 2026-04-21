@@ -18,7 +18,9 @@ export function fmtNum(v: number | null, suffix = ''): string {
 }
 
 export function fmtDate(iso: string): string {
-	const d = new Date(iso);
+	// Server stores UTC timestamps without Z suffix — treat as UTC
+	const ts = iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z';
+	const d = new Date(ts);
 	const day = d.getDate().toString().padStart(2, '0');
 	const mon = d.toLocaleString('en', { month: 'short' });
 	const h = d.getHours().toString().padStart(2, '0');
@@ -94,7 +96,9 @@ export function fmtCost(usd: number | null): string {
 }
 
 export function fmtAgo(iso: string): string {
-	const ms = Date.now() - new Date(iso).getTime();
+	// Server stores UTC timestamps without Z suffix — treat as UTC
+	const ts = iso.endsWith('Z') || iso.includes('+') ? iso : iso + 'Z';
+	const ms = Date.now() - new Date(ts).getTime();
 	const mins = Math.floor(ms / 60000);
 	if (mins < 1) return 'just now';
 	if (mins < 60) return `${mins}m ago`;

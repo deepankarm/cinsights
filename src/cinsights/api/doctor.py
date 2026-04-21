@@ -98,6 +98,7 @@ class DailyCost(BaseModel):
     date: str
     prompt_tokens: int
     completion_tokens: int
+    estimated_cost_usd: float | None = None
 
 
 class CostSummaryResponse(BaseModel):
@@ -208,13 +209,13 @@ def _run_to_read(run: RefreshRun, digest_context: str | None = None) -> RefreshR
 
 
 async def _latest_run(db: AsyncSession, command: str) -> RefreshRunRead | None:
-    from cinsights.db.models import RefreshRunCommand, RefreshRunStatus
+    from cinsights.db.models import RefreshRunStatus
 
     q = (
         select(RefreshRun)
         .where(
-            RefreshRun.command == RefreshRunCommand(command),
-            RefreshRun.status == RefreshRunStatus.SUCCESS,
+            func.upper(RefreshRun.command) == command.upper(),
+            func.upper(RefreshRun.status) == RefreshRunStatus.SUCCESS.upper(),
         )
         .order_by(col(RefreshRun.started_at).desc())
         .limit(1)
@@ -232,7 +233,10 @@ async def _enrich_with_digest_context(
     from cinsights.db.models import RefreshRunCommand
 
     digest_runs = [
-        r for r in runs if r.command in (RefreshRunCommand.DIGEST, RefreshRunCommand.REFRESH)
+        r
+        for r in runs
+        if str(r.command).upper()
+        in (RefreshRunCommand.DIGEST.upper(), RefreshRunCommand.REFRESH.upper())
     ]
     if not digest_runs:
         return {}
@@ -403,7 +407,7 @@ async def get_cost(db: AsyncSession = Depends(get_db)) -> CostSummaryResponse:
         )
     by_project.sort(key=lambda x: (x.prompt_tokens + x.completion_tokens), reverse=True)
 
-    # Daily trend
+    # Daily trend (tokens from RefreshRun, cost from LLMCallLog)
     daily_q = (
         select(
             func.date(RefreshRun.started_at),
@@ -415,15 +419,41 @@ async def get_cost(db: AsyncSession = Depends(get_db)) -> CostSummaryResponse:
     )
     daily_rows = (await db.exec(daily_q)).all()
 
+    # Daily cost from LLMCallLog (actual recorded costs)
+    daily_cost_q = (
+        select(
+            func.date(LLMCallLog.created_at),
+            func.sum(LLMCallLog.dollar_cost),
+        )
+        .group_by(func.date(LLMCallLog.created_at))
+        .order_by(func.date(LLMCallLog.created_at))
+    )
+    daily_cost_rows = (await db.exec(daily_cost_q)).all()
+    daily_costs = {str(d): float(c) for d, c in daily_cost_rows if c is not None}
+
     daily_trend = [
-        DailyCost(date=str(d), prompt_tokens=p or 0, completion_tokens=c or 0)
+        DailyCost(
+            date=str(d),
+            prompt_tokens=p or 0,
+            completion_tokens=c or 0,
+            estimated_cost_usd=daily_costs.get(str(d)),
+        )
         for d, p, c in daily_rows
     ]
+
+    # Use actual dollar costs from LLMCallLog for accuracy
+    actual_cost_q = select(func.sum(LLMCallLog.dollar_cost))
+    actual_cost = (await db.exec(actual_cost_q)).one()
+    total_cost = (
+        float(actual_cost)
+        if actual_cost is not None
+        else estimate_cost(total_prompt, total_completion)
+    )
 
     return CostSummaryResponse(
         total_prompt_tokens=total_prompt,
         total_completion_tokens=total_completion,
-        estimated_cost_usd=estimate_cost(total_prompt, total_completion),
+        estimated_cost_usd=total_cost,
         by_command=by_command,
         by_project=by_project,
         daily_trend=daily_trend,
