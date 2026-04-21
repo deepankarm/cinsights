@@ -122,26 +122,40 @@ export function avatarColor(name: string): string {
 	return avatarColors[Math.abs(h) % avatarColors.length];
 }
 
-export type QualityMetric = { label: string; value: string };
+export type QualityMetric = { label: string; value: string; teamAvg?: string; deltaColor?: string; deltaAbove?: boolean };
 
-type MetricField = { key: string; label: string; suffix: string; fmt?: (v: number) => string };
+type MetricField = { key: string; label: string; suffix: string; higherIs?: 'better' | 'worse'; fmt?: (v: number) => string };
 const METRIC_FIELDS: MetricField[] = [
-	{ key: 'avg_read_edit_ratio', label: 'Read:Edit', suffix: '' },
-	{ key: 'avg_edits_without_read_pct', label: 'Blind edits', suffix: '%' },
-	{ key: 'avg_research_mutation_ratio', label: 'Research:Mut', suffix: '' },
-	{ key: 'avg_error_rate', label: 'Error rate', suffix: '%' },
-	{ key: 'avg_write_vs_edit_pct', label: 'Write vs Edit', suffix: '%' },
-	{ key: 'avg_repeated_edits', label: 'Thrashing', suffix: '' },
+	{ key: 'avg_read_edit_ratio', label: 'Read:Edit', suffix: '', higherIs: 'better' },
+	{ key: 'avg_edits_without_read_pct', label: 'Blind edits', suffix: '%', higherIs: 'worse' },
+	{ key: 'avg_research_mutation_ratio', label: 'Research:Mut', suffix: '' , higherIs: 'better' },
+	{ key: 'avg_error_rate', label: 'Error rate', suffix: '%', higherIs: 'worse' },
+	{ key: 'avg_write_vs_edit_pct', label: 'Write vs Edit', suffix: '%', higherIs: 'worse' },
+	{ key: 'avg_repeated_edits', label: 'Thrashing', suffix: '', higherIs: 'worse' },
 	{ key: 'avg_subagent_spawn_rate', label: 'Subagents', suffix: '%' },
-	{ key: 'avg_context_pressure', label: 'Ctx pressure', suffix: '' },
+	{ key: 'avg_context_pressure', label: 'Ctx pressure', suffix: '', higherIs: 'worse' },
 	{ key: 'avg_tool_calls_per_turn', label: 'Tools/turn', suffix: '' },
 	{ key: 'avg_duration_ms', label: 'Avg duration', suffix: '', fmt: (v: number) => fmtDur(v) },
 ];
 
-export function userQualityMetrics(user: Record<string, unknown>): QualityMetric[] {
+export function userQualityMetrics(user: Record<string, unknown>, teamAvgs?: Record<string, number | null>): QualityMetric[] {
 	return METRIC_FIELDS.map(f => {
 		const v = user[f.key] as number | null;
-		return { label: f.label, value: f.fmt ? f.fmt(v ?? 0) : fmtNum(v, f.suffix) };
+		const result: QualityMetric = { label: f.label, value: f.fmt ? f.fmt(v ?? 0) : fmtNum(v, f.suffix) };
+		if (teamAvgs && v != null) {
+			const avg = teamAvgs[f.key];
+			if (avg != null && avg !== 0) {
+				result.teamAvg = f.fmt ? f.fmt(avg) : fmtNum(avg, f.suffix);
+				const pct = Math.abs((v - avg) / avg) * 100;
+				if (pct > 15 && f.higherIs) {
+					const above = v > avg;
+					const isGood = f.higherIs === 'better' ? above : !above;
+					result.deltaColor = isGood ? '#16a34a' : '#dc2626';
+					result.deltaAbove = above;
+				}
+			}
+		}
+		return result;
 	});
 }
 

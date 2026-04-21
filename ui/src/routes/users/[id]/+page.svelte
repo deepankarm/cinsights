@@ -97,6 +97,7 @@
 	<DashboardView scope="user" {userId}>
 		{#snippet extra({ sessions })}
 			{@const sessionsByProject = groupByProject(sessions)}
+
 			{#if sessionsByProject.length > 0}
 				<div class="section">
 					<h2>Sessions <span class="dim">({sessions.length} total)</span></h2>
