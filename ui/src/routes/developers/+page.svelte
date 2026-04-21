@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getUsers, type UserSummary } from '$lib/api';
+	import { getUsers, getDigests, type UserSummary } from '$lib/api';
+	import type { DigestRead } from '$lib/types';
 	import { fmtTokens, fmtDur, fmtNum, avatarColor } from '$lib/format';
 
 	let users: UserSummary[] = $state([]);
@@ -8,10 +9,20 @@
 	let error: string | null = $state(null);
 	let hoveredUser: UserSummary | null = $state(null);
 	let hoverPos = $state({ x: 0, y: 0 });
+	let usersWithDigest: Set<string> = $state(new Set());
 
 	onMount(async () => {
 		try {
-			users = await getUsers();
+			const [u, digests] = await Promise.all([
+				getUsers(),
+				getDigests().catch(() => [] as DigestRead[]),
+			]);
+			users = u;
+			usersWithDigest = new Set(
+				digests
+					.filter(d => d.status === 'complete' && d.user_id)
+					.map(d => d.user_id!)
+			);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load developers';
 		} finally {
@@ -49,15 +60,16 @@
 						<div class="card-name">{u.display_name}</div>
 						<div class="card-meta">{u.session_count} sessions · {u.projects.length} {u.projects.length === 1 ? 'project' : 'projects'}</div>
 					</div>
+					{#if usersWithDigest.has(u.user_id)}<span class="tag digest">report</span>{/if}
 				</div>
 				<div class="card-metrics">
-					<div class="cm"><span class="cm-val">{fmtNum(u.avg_read_edit_ratio)}</span><span class="cm-label">R:E</span></div>
-					<div class="cm"><span class="cm-val">{fmtNum(u.avg_error_rate, '%')}</span><span class="cm-label">Errors</span></div>
 					<div class="cm"><span class="cm-val">{fmtNum(u.avg_turn_count)}</span><span class="cm-label">Turns/s</span></div>
 					<div class="cm"><span class="cm-val">{fmtDur(u.avg_duration_ms)}</span><span class="cm-label">Avg dur</span></div>
+					<div class="cm"><span class="cm-val">{fmtTokens(Math.round(u.total_tokens / Math.max(u.session_count, 1)))}</span><span class="cm-label">Tok/s</span></div>
 				</div>
 				<div class="card-tags">
-					{#each u.agents as a}<span class="tag agent">{a}</span>{/each}
+					{#each u.agents.slice(0, 2) as a}<span class="tag agent">{a}</span>{/each}
+					{#if u.agents.length > 2}<span class="tag agent">+{u.agents.length - 2}</span>{/if}
 					{#if u.analyzed_count > 0}<span class="tag analyzed">{u.analyzed_count} analyzed</span>{/if}
 				</div>
 			</a>
@@ -124,20 +136,22 @@
 		transform: translateY(-1px);
 	}
 
-	.card-header { display: flex; align-items: center; gap: 10px; }
+	.card-header { display: flex; align-items: center; gap: 10px; position: relative; }
 	.avatar { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-weight: 800; font-size: 15px; flex-shrink: 0; }
 	.card-name { font-size: 14px; font-weight: 600; color: #232326; }
 	.card-meta { font-size: 11px; color: #a1a1aa; }
 
-	.card-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+	.card-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
 	.cm { text-align: center; }
 	.cm-val { display: block; font-size: 15px; font-weight: 700; color: #232326; }
 	.cm-label { display: block; font-size: 9px; color: #a1a1aa; text-transform: uppercase; letter-spacing: 0.04em; }
 
-	.card-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+	.card-tags { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+	.tag.analyzed { margin-left: auto; }
 	.tag { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 4px; }
 	.tag.agent { background: #fef3c7; color: #92400e; }
 	.tag.analyzed { background: #eef2ff; color: #6366f1; }
+	.tag.digest { background: #f0fdf4; color: #16a34a; margin-left: auto; }
 
 	.hover-panel {
 		position: fixed; width: 380px; background: white; border: 1px solid #d4d4d8;

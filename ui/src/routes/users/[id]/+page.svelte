@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
-	import { getUsers, getDigests, getDigest, type UserSummary } from '$lib/api';
+	import { getUsers, getDigests, getDigest, getUserMoodQuotes, type UserSummary, type UserMoodResponse } from '$lib/api';
 	import type { SessionRead, DigestDetail } from '$lib/types';
 	import { fmtTokens, avatarColor } from '$lib/format';
 	import DashboardView from '$lib/components/DashboardView.svelte';
@@ -13,19 +13,37 @@
 
 	let user: UserSummary | null = $state(null);
 	let digest: DigestDetail | null = $state(null);
+	let moodData: UserMoodResponse | null = $state(null);
 	let loading = $state(true);
 	let error: string | null = $state(null);
 	let expandedProjects: Set<string> = $state(new Set());
+	let expandedMoods: Set<string> = $state(new Set());
 	let reportEl: HTMLElement = $state(null!);
+
+	const MOOD_META: Record<string, { icon: string; color: string; bg: string; label: string }> = {
+		frustrated: { icon: '😤', color: '#dc2626', bg: '#fef2f2', label: 'Frustrated' },
+		curious:    { icon: '🤔', color: '#2563eb', bg: '#eff6ff', label: 'Curious' },
+		amused:     { icon: '😄', color: '#ca8a04', bg: '#fefce8', label: 'Amused' },
+		relieved:   { icon: '😮‍💨', color: '#16a34a', bg: '#f0fdf4', label: 'Relieved' },
+		assertive:  { icon: '✋', color: '#7c3aed', bg: '#f5f3ff', label: 'Assertive' },
+	};
+
+	function toggleMood(mood: string) {
+		const next = new Set(expandedMoods);
+		if (next.has(mood)) next.delete(mood); else next.add(mood);
+		expandedMoods = next;
+	}
 
 	onMount(async () => {
 		try {
-			const [users, digests] = await Promise.all([
+			const [users, digests, mood] = await Promise.all([
 				getUsers(),
 				getDigests(undefined, userId).catch(() => []),
+				getUserMoodQuotes(userId).catch(() => null),
 			]);
 			user = users.find(u => u.user_id === userId) ?? null;
 			if (!user) error = `User not found: ${userId}`;
+			moodData = mood;
 
 			const completed = digests.find(d => d.status === 'complete');
 			if (completed) {
@@ -123,6 +141,38 @@
 					</div>
 				</div>
 			{/if}
+
+			{#if moodData && moodData.mood_groups.length > 0}
+				<div class="section">
+					<h2>Things you've said <span class="dim">across {moodData.sessions_with_quotes} sessions</span></h2>
+					<div class="mood-feed">
+						{#each moodData.mood_groups as group}
+							{@const meta = MOOD_META[group.mood] ?? { icon: '💬', color: '#64748b', bg: '#f8fafc', label: group.mood }}
+							{@const isOpen = expandedMoods.has(group.mood)}
+							{@const visible = isOpen ? group.quotes : group.quotes.slice(0, 3)}
+							{@const hidden = group.quotes.length - 3}
+							<div class="mood-row">
+								<div class="mood-tag" style="color: {meta.color}">
+									<span class="mood-icon">{meta.icon}</span>
+									<span class="mood-name">{meta.label}</span>
+									<span class="mood-cnt" style="background: {meta.bg}">{group.quotes.length}</span>
+								</div>
+								<div class="mood-quotes-list">
+									{#each visible as q}
+										<div class="mq">&ldquo;{q.quote.length > 100 ? q.quote.slice(0, 100) + '...' : q.quote}&rdquo;</div>
+									{/each}
+									{#if !isOpen && hidden > 0}
+										<button class="mq-more" onclick={() => toggleMood(group.mood)}>+{hidden} more</button>
+									{/if}
+									{#if isOpen && group.quotes.length > 3}
+										<button class="mq-more" onclick={() => toggleMood(group.mood)}>show less</button>
+									{/if}
+								</div>
+							</div>
+						{/each}
+					</div>
+				</div>
+			{/if}
 		{/snippet}
 	</DashboardView>
 	</div>
@@ -168,4 +218,17 @@
 
 	.empty-insights { text-align: center; padding: 40px; color: #94a3b8; font-size: 14px; background: white; border-radius: 12px; }
 	.empty-insights code { background: #f4f4f5; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+
+	/* Mood quotes */
+	.mood-feed { background: white; border: 1px solid #e8e5e0; border-radius: 12px; padding: 4px 0; }
+	.mood-row { display: flex; gap: 12px; padding: 10px 16px; border-bottom: 1px solid #f4f4f5; align-items: baseline; }
+	.mood-row:last-child { border-bottom: none; }
+	.mood-tag { display: flex; align-items: center; gap: 5px; flex-shrink: 0; min-width: 110px; }
+	.mood-icon { font-size: 16px; }
+	.mood-name { font-size: 12px; font-weight: 700; }
+	.mood-cnt { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px; }
+	.mood-quotes-list { display: flex; flex-direction: column; gap: 4px; }
+	.mq { font-size: 13px; color: #475569; font-style: italic; line-height: 1.4; }
+	.mq-more { background: none; border: none; font-size: 12px; color: #6366f1; cursor: pointer; font-weight: 600; margin-left: 4px; }
+	.mq-more:hover { text-decoration: underline; }
 </style>
