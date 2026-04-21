@@ -1,11 +1,13 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
-	import { getUsers, getDigests, getDigest, type UserSummary } from '$lib/api';
-	import type { SessionRead, DigestDetail } from '$lib/types';
+	import { getUsers, getDigests, getDigest, getUserMoodQuotes, getUserStats, type UserSummary, type UserMoodResponse } from '$lib/api';
+	import type { SessionRead, DigestDetail, DigestStatsData } from '$lib/types';
 	import { fmtTokens, avatarColor } from '$lib/format';
 	import DashboardView from '$lib/components/DashboardView.svelte';
 	import InsightsPanel from '$lib/components/InsightsPanel.svelte';
+	import ActivityCharts from '$lib/components/ActivityCharts.svelte';
+	import MoodQuotes from '$lib/components/MoodQuotes.svelte';
 	import ExportHTML from '$lib/components/ExportHTML.svelte';
 	import SessionTable from '$lib/components/SessionTable.svelte';
 
@@ -13,6 +15,8 @@
 
 	let user: UserSummary | null = $state(null);
 	let digest: DigestDetail | null = $state(null);
+	let moodData: UserMoodResponse | null = $state(null);
+	let scopeStats: DigestStatsData | null = $state(null);
 	let loading = $state(true);
 	let error: string | null = $state(null);
 	let expandedProjects: Set<string> = $state(new Set());
@@ -20,12 +24,18 @@
 
 	onMount(async () => {
 		try {
-			const [users, digests] = await Promise.all([
+			const [users, digests, mood, stats] = await Promise.all([
 				getUsers(),
 				getDigests(undefined, userId).catch(() => []),
+				getUserMoodQuotes(userId).catch(() => null),
+				getUserStats(userId).catch(() => null),
 			]);
 			user = users.find(u => u.user_id === userId) ?? null;
 			if (!user) error = `User not found: ${userId}`;
+			moodData = mood;
+			if (stats && Object.keys(stats).length > 0) {
+				scopeStats = stats as unknown as DigestStatsData;
+			}
 
 			const completed = digests.find(d => d.status === 'complete');
 			if (completed) {
@@ -79,6 +89,7 @@
 	<DashboardView scope="user" {userId}>
 		{#snippet extra({ sessions })}
 			{@const sessionsByProject = groupByProject(sessions)}
+
 			{#if sessionsByProject.length > 0}
 				<div class="section">
 					<h2>Sessions <span class="dim">({sessions.length} total)</span></h2>
@@ -114,15 +125,35 @@
 							<span class="generated-at">{new Date(digest.created_at).toLocaleDateString()}</span>
 						</span>
 					</div>
-					<InsightsPanel {digest} />
+					<InsightsPanel {digest} moodGroups={moodData?.mood_groups ?? []} scopeStats={scopeStats ?? undefined} />
 				</div>
 			{:else}
+				{@const stats = scopeStats}
+				{#if stats}
+					<div class="section">
+						<h2>Activity</h2>
+						<ActivityCharts
+							toolDistribution={stats.tool_distribution ?? {}}
+							languageDistribution={stats.language_distribution ?? {}}
+							timeOfDay={stats.time_of_day ?? {}}
+							errorTypes={stats.error_types ?? {}}
+							insightLabels={stats.insight_labels ?? {}}
+							labelCategories={stats.label_categories ?? {}}
+							labelTrends={stats.label_trends ?? []}
+							analyzedCount={stats.analyzed_count ?? 0}
+							sessionCount={stats.session_count ?? 0}
+							scopeUser={userId}
+						/>
+						<MoodQuotes moodGroups={moodData?.mood_groups ?? []} />
+					</div>
+				{/if}
 				<div class="section">
 					<div class="empty-insights">
-						No insights yet. Run <code>cinsights digest user {userId} --days 30</code> to generate.
+						No report yet. Run <code>cinsights digest user {userId} --days 30</code> to generate.
 					</div>
 				</div>
 			{/if}
+
 		{/snippet}
 	</DashboardView>
 	</div>
@@ -168,4 +199,5 @@
 
 	.empty-insights { text-align: center; padding: 40px; color: #94a3b8; font-size: 14px; background: white; border-radius: 12px; }
 	.empty-insights code { background: #f4f4f5; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+
 </style>

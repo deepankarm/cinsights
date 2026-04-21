@@ -25,6 +25,9 @@
 			onmouseleave={() => hoveredMetric = null}>
 			<span class="qb-val">{m.value}</span>
 			<span class="qb-label">{m.label}</span>
+			{#if m.teamAvg}
+				<span class="qb-avg" style={m.deltaColor ? `color: ${m.deltaColor}` : ''}>{m.deltaColor ? (m.deltaAbove ? '▲' : '▼') : ''} avg {m.teamAvg}</span>
+			{/if}
 		</div>
 	{/each}
 </div>
@@ -44,6 +47,7 @@
 	.qb-item:hover { background: #f0f4ff; }
 	.qb-val { display: block; font-size: 16px; font-weight: 700; color: #232326; }
 	.qb-label { display: block; font-size: 9px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px; }
+	.qb-avg { display: block; font-size: 9px; color: #c4c4cc; margin-top: 1px; }
 
 	.metric-tooltip {
 		background: #1e293b; color: #e2e8f0; font-size: 12px; padding: 8px 12px; border-radius: 6px;

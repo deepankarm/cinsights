@@ -67,13 +67,13 @@
 	let patternsSorted = $derived(
 		Object.entries(insightLabels ?? {})
 			.sort((a, b) => b[1] - a[1])
-			.filter(([lbl, c]) => c > 1 && ACTIONABLE_CATS.has(labelCategories?.[lbl] ?? ''))
+			.filter(([lbl, c]) => c >= ((analyzedCount ?? 0) <= 5 ? 1 : 2) && ACTIONABLE_CATS.has(labelCategories?.[lbl] ?? ''))
 	);
 	const defaultPatternLimit = 10;
 </script>
 
 <div class="chart-bento">
-	<div class="chart-box chart-wide">
+	<div class="chart-box">
 		<h3>Tools</h3>
 		<div class="hbars">
 			{#each Object.entries(toolDistribution).slice(0, 8) as [name, count]}

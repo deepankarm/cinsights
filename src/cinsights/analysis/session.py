@@ -13,6 +13,15 @@ from cinsights.sources.base import SpanData, TraceData
 
 logger = logging.getLogger(__name__)
 
+# Prefixes of system-injected messages that appear as user turns but are not
+# actual developer input. Add new patterns here as they're discovered.
+SYSTEM_INJECTED_PREFIXES = (
+    "This session is being continued from a previous conversation",
+    "The user doesn't want to proceed with this tool use",
+    "Implement the following plan",
+    "Caveat: The messages below were generated",
+)
+
 MAX_IO_CHARS = 500  # Truncate tool I/O to keep prompt manageable
 
 
@@ -56,11 +65,17 @@ class InsightItem(BaseModel):
     )
 
 
+class MoodEnum(StrEnum):
+    FRUSTRATED = "frustrated"  # anger, annoyance, disappointment, impatience
+    CURIOUS = "curious"  # exploring, questioning, "what if..."
+    AMUSED = "amused"  # humor, sarcasm, playful jabs
+    RELIEVED = "relieved"  # celebration, satisfaction, "it works!"
+    ASSERTIVE = "assertive"  # firm boundaries, taking control, "Bad bot!"
+
+
 class NotableQuote(BaseModel):
     quote: str = Field(description="Exact words the developer used, verbatim")
-    vibe: str = Field(
-        description="One-word mood: frustration, humor, impatience, delight, sarcasm, curiosity, etc."
-    )
+    mood: MoodEnum = Field(description="The developer's mood when they said this")
 
 
 class AnalysisResult(BaseModel):
@@ -69,7 +84,7 @@ class AnalysisResult(BaseModel):
     )
     notable_quotes: list[NotableQuote] = Field(
         default_factory=list,
-        description="0-2 interesting things the developer said that reveal how they work with agents.",
+        description="One quote per mood that appeared in this session. Skip moods the developer didn't express.",
     )
     # Populated after LLM call (not part of structured output)
     usage_prompt_tokens: int = 0
@@ -288,6 +303,8 @@ def _build_prompts(trace: TraceData, spans: list[SpanData]) -> tuple[str, str]:
     for i, ts in enumerate(turn_spans):
         query = ts.input_value
         if not query or not query.strip():
+            continue
+        if query.strip().startswith(SYSTEM_INJECTED_PREFIXES):
             continue
         turn_num = ts.name.replace("Turn ", "")
         entry: dict = {

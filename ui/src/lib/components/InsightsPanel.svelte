@@ -3,9 +3,11 @@
 	import { renderLinkedMarkdown } from '$lib/markdown';
 	import { copyText } from '$lib/format';
 	import { onMount } from 'svelte';
+	import type { MoodGroup } from '$lib/api';
 	import ActivityCharts from './ActivityCharts.svelte';
+	import MoodQuotes from './MoodQuotes.svelte';
 
-	let { digest }: { digest: DigestDetail } = $props();
+	let { digest, moodGroups = [], scopeStats = undefined }: { digest: DigestDetail; moodGroups?: MoodGroup[]; scopeStats?: DigestStatsData } = $props();
 
 	let expandedCards: Record<string, boolean> = $state({});
 	let savedExpandState: Record<string, boolean> = {};
@@ -38,6 +40,7 @@
 	}
 
 	let stats = $derived(digest.stats as DigestStatsData | null);
+	let activityStats = $derived(scopeStats ?? stats);
 	let sessionIds = $derived(
 		(stats?.session_summaries ?? []).map((s: { session_id: string }) => s.session_id) as string[]
 	);
@@ -112,22 +115,24 @@
 {/if}
 
 <!-- Charts — bento style -->
-{#if stats}
+{#if activityStats}
 	<section class="sect">
 		<h2 class="sect-title">Activity</h2>
 		<ActivityCharts
-			toolDistribution={stats.tool_distribution}
-			languageDistribution={stats.language_distribution}
-			timeOfDay={stats.time_of_day}
-			errorTypes={stats.error_types}
-			insightLabels={stats.insight_labels}
-			labelCategories={stats.label_categories}
-			labelTrends={stats.label_trends}
-			analyzedCount={stats.analyzed_count}
-			sessionCount={stats.session_count}
+			toolDistribution={activityStats.tool_distribution}
+			languageDistribution={activityStats.language_distribution}
+			timeOfDay={activityStats.time_of_day}
+			errorTypes={activityStats.error_types}
+			insightLabels={activityStats.insight_labels}
+			labelCategories={activityStats.label_categories}
+			labelTrends={activityStats.label_trends}
+			analyzedCount={activityStats.analyzed_count}
+			sessionCount={activityStats.session_count}
 			scopeUser={digest.user_id ?? undefined}
 			scopeProject={digest.project_name ?? undefined}
 		/>
+
+		<MoodQuotes {moodGroups} />
 	</section>
 {/if}
 
@@ -152,10 +157,11 @@
 				</div>
 			{/if}
 			{#if persona}
+				{@const personaContent = persona.content.replace(/^#+\s*.+\n+/, '')}
 				<div>
 					<h2 class="sect-title">How you use coding agents</h2>
 					<div class="persona markdown-body">
-						{@html rlm(persona.content)}
+						{@html rlm(personaContent)}
 					</div>
 				</div>
 			{/if}
