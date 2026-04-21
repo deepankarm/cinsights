@@ -277,16 +277,15 @@ async def _store_insights(
         )
         db.add(insight)
 
-    # Store notable quotes on session metadata
-    if result.notable_quotes:
-        import contextlib
+    # Store notable quotes on session metadata (always overwrite, even if empty)
+    import contextlib
 
-        existing_meta = {}
-        if coding_session.metadata_json:
-            with contextlib.suppress(Exception):
-                existing_meta = json_mod.loads(coding_session.metadata_json)
-        existing_meta["notable_quotes"] = [q.model_dump() for q in result.notable_quotes]
-        coding_session.metadata_json = json_mod.dumps(existing_meta)
+    existing_meta = {}
+    if coding_session.metadata_json:
+        with contextlib.suppress(Exception):
+            existing_meta = json_mod.loads(coding_session.metadata_json)
+    existing_meta["notable_quotes"] = [q.model_dump() for q in result.notable_quotes]
+    coding_session.metadata_json = json_mod.dumps(existing_meta)
 
     coding_session.status = SessionStatus.ANALYZED
     coding_session.analysis_prompt_tokens = result.usage_prompt_tokens
