@@ -68,9 +68,20 @@
 
 	const matchedUser = $derived(scope === 'user' ? users.find(u => u.user_id === userId) ?? null : null);
 
+	const teamAvgs = $derived.by<Record<string, number | null>>(() => {
+		if (scope !== 'user' || users.length < 2) return {};
+		const keys = ['avg_read_edit_ratio', 'avg_edits_without_read_pct', 'avg_research_mutation_ratio', 'avg_error_rate', 'avg_write_vs_edit_pct', 'avg_repeated_edits', 'avg_subagent_spawn_rate', 'avg_context_pressure', 'avg_tool_calls_per_turn', 'avg_duration_ms'];
+		const result: Record<string, number | null> = {};
+		for (const k of keys) {
+			const vals = users.map(u => (u as unknown as Record<string, unknown>)[k] as number | null).filter((v): v is number => v != null);
+			result[k] = vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+		}
+		return result;
+	});
+
 	const qualityMetrics = $derived<QualityMetric[]>(
 		scope === 'user' && matchedUser
-			? userQualityMetrics(matchedUser as unknown as Record<string, unknown>)
+			? userQualityMetrics(matchedUser as unknown as Record<string, unknown>, Object.keys(teamAvgs).length > 0 ? teamAvgs : undefined)
 			: aggregateQualityMetrics(users as unknown as Record<string, unknown>[])
 	);
 
