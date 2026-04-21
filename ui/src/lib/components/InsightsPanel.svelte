@@ -157,10 +157,11 @@
 				</div>
 			{/if}
 			{#if persona}
+				{@const personaContent = persona.content.replace(/^#+\s*.+\n+/, '')}
 				<div>
 					<h2 class="sect-title">How you use coding agents</h2>
 					<div class="persona markdown-body">
-						{@html rlm(persona.content)}
+						{@html rlm(personaContent)}
 					</div>
 				</div>
 			{/if}
