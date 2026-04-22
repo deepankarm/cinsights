@@ -1357,7 +1357,7 @@ async def _analyze_async(
             prompt_t = sum(s.estimated_analysis_tokens or 0 for s in sessions)
             resp_t = ESTIMATED_RESPONSE_TOKENS * len(sessions)
             cost = estimate_cost(input_tokens=prompt_t, output_tokens=resp_t)
-            return f"~${cost:.2f}" if cost else "?"
+            return f"~${cost:.4f}" if cost else "?"
 
         buckets = [
             (
@@ -1387,7 +1387,7 @@ async def _analyze_async(
             input_tokens=total_est_prompt,
             output_tokens=ESTIMATED_RESPONSE_TOKENS * len(candidates),
         )
-        total_cost_str = f"~${total_cost:.2f}" if total_cost else "unknown"
+        total_cost_str = f"~${total_cost:.4f}" if total_cost else "unknown"
         table.add_row(
             f"Total (≥{min_score})",
             str(len(candidates)),
