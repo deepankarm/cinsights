@@ -586,10 +586,11 @@ async def _run_one_digest(
             return (True, result.total_prompt_tokens, result.total_completion_tokens)
         except Exception as e:
             digest_record.status = DigestStatus.FAILED
-            digest_record.error_message = str(e)
+            digest_record.error_message = str(e)[:500]
             await db.commit()
-            console.print(f"  [red]✗[/red] {label} — {e}")
-            raise
+            err_msg = str(e).split("\n")[0][:120]
+            console.print(f"  [red]✗[/red] {label} — {err_msg}")
+            return ("failed", 0, 0)
 
 
 async def _discover_work_items(
