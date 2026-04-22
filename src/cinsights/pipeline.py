@@ -1348,9 +1348,15 @@ async def _analyze_async(
         # Select INDEXED sessions using scoring + coverage fills
         from cinsights.scoring import select_for_analysis
 
+        if force:
+            status_filter = col(CodingSession.status).in_(
+                [SessionStatus.INDEXED, SessionStatus.ANALYZED]
+            )
+        else:
+            status_filter = CodingSession.status == SessionStatus.INDEXED
         query = (
             select_fn(CodingSession)
-            .where(CodingSession.status == SessionStatus.INDEXED)
+            .where(status_filter)
             .where(CodingSession.interestingness_score.isnot(None))
             .where(CodingSession.source == str(settings.source))
             .order_by(col(CodingSession.interestingness_score).desc())
