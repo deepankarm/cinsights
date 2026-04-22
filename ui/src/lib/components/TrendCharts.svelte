@@ -3,7 +3,7 @@
 	import type { SessionRead } from '$lib/types';
 	import { fmtTokens } from '$lib/format';
 
-	let { trends, tokenDist = null, sessions = [], sessionCount = 0 }: { trends: TrendPoint[]; tokenDist?: TokenDistribution | null; sessions?: SessionRead[]; sessionCount?: number } = $props();
+	let { trends, tokenDist = null, sessions = [], sessionCount = 0, projectAgents = undefined }: { trends: TrendPoint[]; tokenDist?: TokenDistribution | null; sessions?: SessionRead[]; sessionCount?: number; projectAgents?: Record<string, number> } = $props();
 
 	const bp = $derived.by(() => {
 		if (!tokenDist) return null;
@@ -124,10 +124,12 @@
 		{ id: 'c6', key: 'total_tokens', title: 'Token Usage', desc: 'Tokens consumed per day.', color: '#06b6d4', suffix: '', invertTrend: false, type: 'bar' },
 	];
 
-	// Agent distribution — prefer sessions (accurate), fall back to trend data (pre-aggregated)
+	// Agent distribution — prefer API data (full count), then sessions, then trends
 	const agentDist = $derived.by(() => {
 		const counts: Record<string, number> = {};
-		if (sessions.length > 0) {
+		if (projectAgents && Object.keys(projectAgents).length > 0) {
+			Object.assign(counts, projectAgents);
+		} else if (sessions.length > 0) {
 			for (const s of sessions) {
 				const agent = s.agent_type || 'unknown';
 				counts[agent] = (counts[agent] ?? 0) + 1;

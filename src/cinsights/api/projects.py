@@ -26,6 +26,7 @@ class ProjectRead(BaseModel):
     languages: list[str]
     latest_session: datetime
     has_digest: bool
+    agents: dict[str, int] = {}
 
 
 @router.get("/", response_model=list[ProjectRead])
@@ -68,6 +69,15 @@ async def list_projects(db: AsyncSession = Depends(get_db)) -> list[ProjectRead]
         )
         tool_rows = tool_result.all()
 
+        # Agent distribution for this project
+        agent_result = await db.exec(
+            select(CodingSession.agent_type, func.count())
+            .where(CodingSession.project_name == project_name)
+            .where(CodingSession.agent_type.isnot(None))
+            .group_by(CodingSession.agent_type)
+        )
+        agents = {name: count for name, count in agent_result.all()}
+
         # Check if a digest exists for this project
         digest_count_result = await db.exec(
             select(func.count())
@@ -90,6 +100,7 @@ async def list_projects(db: AsyncSession = Depends(get_db)) -> list[ProjectRead]
                 languages=[],
                 latest_session=latest,
                 has_digest=has_digest,
+                agents=agents,
             )
         )
 

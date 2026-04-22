@@ -62,6 +62,7 @@ export interface ProjectRead {
 	languages: string[];
 	latest_session: string;
 	has_digest: boolean;
+	agents: Record<string, number>;
 }
 
 export async function getProjects(): Promise<ProjectRead[]> {
