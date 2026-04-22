@@ -34,8 +34,6 @@ Computed during indexing from tool call sequences alone. No LLM needed.
 
 Quality metrics are the smoke detectors. They tell you something is off before you spend tokens figuring out what.
 
-![Quality metrics with trend charts](../.github/images/project-stats.png)
-
 ## Scoring and budget modes
 
 Not every session is worth analyzing with an LLM. cinsights scores sessions on "interestingness" - how much they deviate from the developer's baseline.
@@ -103,12 +101,55 @@ The digest is the product. Individual session insights are evidence. If you only
 
 ![Work areas and developer persona](../.github/images/project-insights-workareas.png)
 
+## Developer mood quotes
+
+![Things you've said when you were...](../.github/images/mood-quotes.png)
+
+During analysis, cinsights extracts notable things developers say to their coding agents, categorized by mood:
+
+| Mood | What it captures |
+|------|-----------------|
+| **Frustrated** | Anger, annoyance, disappointment, impatience |
+| **Curious** | Exploring, questioning, "what if..." |
+| **Amused** | Humor, sarcasm, playful jabs at the agent |
+| **Relieved** | Celebration, satisfaction, "it works!" |
+| **Assertive** | Firm boundaries, taking control, "Bad bot!" |
+
+These are exact verbatim quotes from developer input — not summaries or paraphrases. Up to one quote per mood per session. The web UI groups them by mood across sessions under "Things you've said when you were..."
+
+The five mood categories are derived from Plutchik's emotion wheel, filtered to emotions that commonly surface in developer-agent interactions.
+
+## Behavioral patterns
+
+![Behavioral patterns dot timeline](../.github/images/behavioral-patterns.png)
+
+Computed from tool call sequences during analysis. These surface recurring interaction habits:
+
+- **Tool preferences** — which tools the developer reaches for (heavy Bash user? prefers Read over Grep?)
+- **Session structure** — focused single-task sessions vs. multi-task exploratory sessions
+- **Interaction style** — terse directives vs. detailed specs vs. exploratory prompting
+- **Friction patterns** — repeated edits to the same file, high error rates, permission prompt interruptions
+
+Behavioral patterns appear in the Activity section of developer profiles and require analyzed sessions to populate.
+
+## Quality comparison
+
+![Quality metrics with team comparison](../.github/images/quality-metrics-trends.png)
+
+The web UI computes team averages for each quality metric and shows how individual developers compare. When a developer's metric deviates more than 15% from the team average, a directional indicator shows whether they're above or below. This helps identify developers who might benefit from specific CLAUDE.md rules or workflow changes.
+
+## Scope stats
+
+Quality metrics and activity data are pre-computed per user and per project after every `analyze` run. This means the web UI shows fresh metrics immediately — even before a digest is generated. Digests are still valuable for narrative insights, but you don't need one to see basic activity charts and behavioral patterns.
+
+Stats are stored in the `scope_stats` table and refreshed automatically. You can also compute them without running the LLM using `cinsights digest <scope> --stats-only`.
+
 ---
 
 **[← Previous: Getting Started](./getting-started.md)**
 
 <div align="right">
 
-**[Next: Configuration →](./configuration.md)**
+**[Next: How It Works →](./how-it-works.md)**
 
 </div>

@@ -14,6 +14,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 os.environ["CINSIGHTS_DATABASE_URL"] = "sqlite+aiosqlite://"
 os.environ["CINSIGHTS_PHOENIX_ENDPOINT"] = "http://localhost:6006"
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
+os.environ.setdefault("GOOGLE_API_KEY", "test-key")
 
 
 @pytest_asyncio.fixture

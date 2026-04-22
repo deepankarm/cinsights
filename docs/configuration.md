@@ -8,7 +8,7 @@ Start with defaults. The only thing you need to set on day one is your API key.
 |----------|---------|-------------|
 | `ANTHROPIC_API_KEY` | - | Anthropic API key (required for default LLM config; not needed with Ollama) |
 | `CINSIGHTS_SOURCE` | `phoenix` | Data source: `phoenix`, `local`, or `entireio` |
-| `CINSIGHTS_DATABASE_URL` | `sqlite:///cinsights.db` | Database connection string |
+| `CINSIGHTS_DATABASE_URL` | `sqlite:///~/.cinsights/cinsights.db` | Database connection string |
 | `CINSIGHTS_BUDGET_MODE` | `balanced` | Scoring budget: `frugal`, `balanced`, `thorough`, `all` |
 | `CINSIGHTS_COLD_START_SESSIONS` | `10` | Always analyze first N sessions per (user, project) |
 | `CINSIGHTS_MIN_SESSION_TOOL_COUNT` | `10` | Minimum tool calls to include session in digest evidence |
@@ -30,7 +30,7 @@ You can also set these in a `.env` file in the project root.
 {
   "llm": {
     "provider": "anthropic",
-    "model": "claude-haiku-4-5-20251001",
+    "model": "gemini-2.5-flash-lite",
     "base_url": null,
     "extra_headers": {},
     "use_json_schema_mode": false
@@ -65,7 +65,7 @@ Ollama example:
 
 **`claude_code_homes` / `codex_homes`** - Directories to scan when using the [local source](sources/local.md).
 
-**`limits`** - Context window and coverage tuning. Defaults are sized for Haiku-class models. Increase `max_timeline_spans` if using a model with a larger context window.
+**`limits`** - Context window and coverage tuning. Increase `max_timeline_spans` if using a model with a larger context window.
 
 ## LLM provider setup
 
@@ -78,7 +78,7 @@ cinsights setup
 One-shot:
 
 ```bash
-cinsights setup --provider anthropic --model claude-haiku-4-5-20251001
+cinsights setup --provider google-gla --model gemini-2.5-flash-lite
 ```
 
 Validate current config:
@@ -125,10 +125,10 @@ cinsights works well as a cron job. Example - refresh daily at 9am, then generat
 
 ---
 
-**[← Previous: Concepts](./concepts.md)**
+**[← Previous: How It Works](./how-it-works.md)**
 
 <div align="right">
 
-**[Next: Local Source →](./sources/local.md)**
+**[Next: FAQ →](./faq.md)**
 
 </div>

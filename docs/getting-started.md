@@ -30,12 +30,10 @@ cinsights setup
 Or one-shot:
 
 ```bash
-cinsights setup --provider anthropic --model claude-haiku-4-5-20251001
+cinsights setup --provider google-gla --model gemini-2.5-flash-lite
 ```
 
-API keys come from environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.) - they're never stored in the config file.
-
-cinsights uses Haiku by default. A full refresh of 50 sessions costs roughly $0.10-0.30. This is intentional - insights should be cheap enough to run daily.
+API keys come from environment variables (`GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.). A full refresh of 50 sessions costs roughly $0.05-0.15.
 
 ### Using Ollama (no API key needed)
 

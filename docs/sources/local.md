@@ -59,7 +59,7 @@ For cross-machine or cross-agent coverage, use [Entire.io](entireio.md). For cen
 
 ---
 
-**[← Previous: Configuration](../configuration.md)**
+**[← Previous: FAQ](../faq.md)**
 
 <div align="right">
 

@@ -9,12 +9,6 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from cinsights.settings import get_settings
 
 
-class SchemaOutdatedError(RuntimeError):
-    """Raised when the DB exists but is missing the alembic_version table or
-    is behind the latest migration. Always actionable: run `alembic upgrade head`.
-    """
-
-
 def _async_url(database_url: str) -> str:
     """Translate a sync DB URL to its async equivalent.
 
@@ -75,6 +69,13 @@ def get_engine() -> AsyncEngine:
             cur.execute("PRAGMA busy_timeout=30000")
             cur.close()
 
+    # Ensure DB parent directory exists for SQLite (e.g. ~/.cinsights/)
+    if is_sqlite:
+        from pathlib import Path
+
+        db_path = settings.database_url.replace("sqlite:///", "", 1)
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+
     _ensure_schema_current_sync(settings.database_url)
     return engine
 
@@ -90,43 +91,59 @@ def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
 
 
 def _ensure_schema_current_sync(database_url: str) -> None:
-    """Verify the DB has been migrated to the latest alembic head.
+    """Auto-migrate the DB to the latest alembic head.
 
-    This runs synchronously using a one-shot sync engine. We don't reuse the
-    application's async engine because (a) this check happens at first call
-    to ``get_engine`` which may be outside any event loop, and (b) it's a
-    one-time bootstrap probe — overhead doesn't matter.
-
-    Alembic is the single source of truth for schema. cinsights never calls
-    ``SQLModel.metadata.create_all``. This check fails fast with an actionable
-    error if the user forgot to run migrations.
+    On first run, creates all tables. On upgrade, applies pending migrations.
+    This runs synchronously at startup so the app is always on the latest schema.
     """
+    import logging
+    from pathlib import Path
+
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    log = logging.getLogger("cinsights.db")
+
+    # Locate alembic config — either repo root (dev) or inside the installed package.
+    repo_ini = Path("alembic.ini")
+    pkg_dir = Path(__file__).resolve().parent.parent
+    pkg_ini = pkg_dir / "alembic.ini"
+
+    if repo_ini.exists():
+        cfg = Config(str(repo_ini))
+    elif pkg_ini.exists():
+        cfg = Config(str(pkg_ini))
+        cfg.set_main_option("script_location", str(pkg_dir / "alembic"))
+    else:
+        raise RuntimeError("Cannot find alembic.ini — reinstall cinsights.")
+
     sync_url = _sync_url(database_url)
+    cfg.set_main_option("sqlalchemy.url", sync_url)
+
+    script = ScriptDirectory.from_config(cfg)
+    head_rev = script.get_current_head()
+
     probe_engine = create_engine(sync_url)
     try:
         inspector = inspect(probe_engine)
-        if not inspector.has_table("alembic_version"):
-            raise SchemaOutdatedError(
-                "cinsights database is not initialized. Run "
-                "`uv run alembic upgrade head` (or `make init`) to create the schema."
-            )
+        needs_migrate = True
 
-        from alembic.config import Config
-        from alembic.script import ScriptDirectory
+        if inspector.has_table("alembic_version"):
+            with probe_engine.connect() as conn:
+                row = conn.execute(text("SELECT version_num FROM alembic_version")).fetchone()
+            current_rev = row[0] if row else None
+            if current_rev == head_rev:
+                needs_migrate = False
 
-        cfg = Config("alembic.ini")
-        script = ScriptDirectory.from_config(cfg)
-        head_rev = script.get_current_head()
+        if needs_migrate:
+            from alembic import command
 
-        with probe_engine.connect() as conn:
-            row = conn.execute(text("SELECT version_num FROM alembic_version")).fetchone()
-        current_rev = row[0] if row else None
-
-        if current_rev != head_rev:
-            raise SchemaOutdatedError(
-                f"cinsights database schema is outdated (current={current_rev}, "
-                f"head={head_rev}). Run `uv run alembic upgrade head` to update."
-            )
+            # Mark config so env.py knows the URL was set programmatically
+            # and should not override it from settings.
+            cfg.attributes["_cinsights_url_set"] = True
+            log.info("Migrating database to latest schema...")
+            command.upgrade(cfg, "head")
+            log.info("Database migration complete.")
     finally:
         probe_engine.dispose()
 
