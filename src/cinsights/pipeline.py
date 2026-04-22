@@ -1563,6 +1563,8 @@ async def _analyze_async(
 
     analysis_input = [(trace, spans) for _, _, trace, spans in work_items]
 
+    from cinsights.analysis.project_detection import ProjectGuess
+
     # Project detection for phoenix source (others already have project names)
     if settings.source not in (SourceType.ENTIREIO, SourceType.LOCAL):
         detect_items_list: list[tuple[str, str | None, list[SpanData]]] = [
@@ -1576,8 +1578,6 @@ async def _analyze_async(
             ),
         )
     else:
-        from cinsights.analysis.project_detection import ProjectGuess
-
         analysis_results = await analyzer.analyze_batch(analysis_input, max_concurrency=concurrency)
         project_guesses = [
             ProjectGuess(
@@ -1597,6 +1597,19 @@ async def _analyze_async(
         for (trace_id, _session_id, _trace, _spans), result, project_guess in zip(
             work_items, analysis_results, project_guesses, strict=True
         ):
+            # Skip sessions where LLM call failed (503, timeout, etc.)
+            if isinstance(result, BaseException):
+                failed += 1
+                err_msg = str(result).split("\n")[0][:80]
+                console.print(f"  [red]✗[/red] {trace_id[:12]} — {err_msg}")
+                continue
+            if isinstance(project_guess, BaseException):
+                project_guess = ProjectGuess(
+                    project_name=previous_tags.get(trace_id),
+                    confidence="low",
+                    reasoning="Project detection failed",
+                )
+
             try:
                 coding_session = await db.get(CodingSession, trace_id)
                 if not coding_session:
