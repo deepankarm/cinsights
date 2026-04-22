@@ -607,7 +607,7 @@ async def _discover_work_items(
                     select_fn(CodingSession)
                     .where(CodingSession.source == str(settings.source))
                     .order_by(col(CodingSession.start_time).desc())
-                    .limit(limit)
+                    .limit(limit or None)
                 )
             ).all()
             session_ids = [cs.id for cs in all_sessions]
@@ -652,7 +652,7 @@ async def _discover_work_items(
 
         skipped = 0
         async with sessionmaker() as db:
-            for d in discovered[:limit]:
+            for d in discovered[:limit] if limit else discovered:
                 existing = await db.get(CodingSession, d.session_id)
                 if existing and existing.status == SessionStatus.ANALYZED:
                     prior = max(existing.span_count, 1)
@@ -713,7 +713,6 @@ def _get_project_name(
 
 async def _index_async(
     hours: int,
-    limit: int,
     force: bool,
     verbose: bool,
     trace_ids: list[str] | None = None,
@@ -744,7 +743,7 @@ async def _index_async(
         source,
         sessionmaker,
         hours,
-        limit,
+        0,  # no limit — indexing is zero LLM cost
         force,
         trace_ids,
     )
@@ -828,19 +827,135 @@ async def _index_async(
         else:
             console.print(f"  [dim]·[/dim] {trace_id[:12]} — {reason}")
 
+    # Build rich summary from indexed sessions
     console.print()
-    table = Table(title="Index Summary")
-    table.add_column("Metric", style="bold")
-    table.add_column("Count", justify="right")
-    table.add_row("Indexed", str(indexed))
-    table.add_row("Failed", str(failed))
+    await _print_index_summary(sessionmaker, work_items, indexed, failed, scored_rows)
+
+
+async def _print_index_summary(
+    sessionmaker: async_sessionmaker,
+    work_items: list,
+    indexed: int,
+    failed: int,
+    scored_rows: list[tuple[str, float, str]],
+) -> None:
+    """Print a rich summary of what was indexed."""
+    from collections import Counter
+
+    from rich.columns import Columns
+    from rich.panel import Panel
+    from rich.text import Text
+
+    from cinsights.db.models import CodingSession, ToolCall
+
+    trace_ids = [trace_id for trace_id, _, _, _ in work_items]
+
+    async with sessionmaker() as db:
+        sessions = []
+        for tid in trace_ids:
+            cs = await db.get(CodingSession, tid)
+            if cs:
+                sessions.append(cs)
+
+        # Tool call stats
+        tool_counts: Counter[str] = Counter()
+        total_tool_calls = 0
+        for tid in trace_ids:
+            tcs = await db.exec(select_fn(ToolCall).where(ToolCall.session_id == tid))
+            for tc in tcs.all():
+                tool_counts[tc.tool_name] += 1
+                total_tool_calls += 1
+
+    # Compute aggregates
+    total_turns = sum(s.turn_count or 0 for s in sessions)
+    total_tokens = sum(s.total_tokens for s in sessions)
+    projects = {s.project_name for s in sessions if s.project_name}
+    users = {s.user_id for s in sessions if s.user_id}
+    agents = Counter(s.agent_type for s in sessions)
+    models = Counter(s.model for s in sessions if s.model and not s.model.startswith("<"))
+
+    # Duration stats
+    durations = []
+    for s in sessions:
+        if s.start_time and s.end_time:
+            dur = (s.end_time - s.start_time).total_seconds() / 60
+            if dur > 0:
+                durations.append(dur)
+    median_duration = sorted(durations)[len(durations) // 2] if durations else 0
+
+    # Score buckets
+    high = sum(1 for _, s, _ in scored_rows if s >= 0.6)
+    medium = sum(1 for _, s, _ in scored_rows if 0.4 <= s < 0.6)
+    low = sum(1 for _, s, _ in scored_rows if s < 0.4)
+
+    # --- Left panel: Sessions ---
+    left_lines = []
+    left_lines.append(f"  [bold]{indexed}[/bold] indexed, [bold]{failed}[/bold] failed")
+    left_lines.append(f"  [bold]{total_turns:,}[/bold] total turns across sessions")
+    left_lines.append(f"  [bold]{total_tool_calls:,}[/bold] tool calls")
+    if total_tokens:
+        if total_tokens >= 1_000_000_000:
+            left_lines.append(f"  [bold]{total_tokens / 1_000_000_000:.1f}B[/bold] tokens consumed")
+        elif total_tokens >= 1_000_000:
+            left_lines.append(f"  [bold]{total_tokens / 1_000_000:.0f}M[/bold] tokens consumed")
+        else:
+            left_lines.append(f"  [bold]{total_tokens:,}[/bold] tokens consumed")
+    if durations:
+        left_lines.append(f"  Median session length: [bold]{median_duration:.0f}min[/bold]")
+    left_lines.append("")
+    left_lines.append(
+        f"  [bold]{len(users)}[/bold] developer(s): {', '.join(sorted(users)) or '—'}"
+    )
+    left_lines.append(
+        f"  [bold]{len(projects)}[/bold] project(s): {', '.join(sorted(projects)) or '—'}"
+    )
+    if len(agents) > 1 or (agents and list(agents.keys()) != ["claude-code"]):
+        agent_parts = [f"{name} ({n})" for name, n in agents.most_common()]
+        left_lines.append(f"  Agents: {', '.join(agent_parts)}")
+    if models:
+        model_parts = [f"{name} ({n})" for name, n in models.most_common(3)]
+        left_lines.append(f"  Models: {', '.join(model_parts)}")
+
+    left_panel = Panel(
+        Text.from_markup("\n".join(left_lines)),
+        title="[bold]Sessions[/bold]",
+        border_style="cyan",
+        expand=True,
+    )
+
+    # --- Right panel: Scoring & Tools ---
+    right_lines = []
     if scored_rows:
-        table.add_row("High interest (≥0.6)", str(sum(1 for _, s, _ in scored_rows if s >= 0.6)))
-        table.add_row(
-            "Medium interest (≥0.4)", str(sum(1 for _, s, _ in scored_rows if 0.4 <= s < 0.6))
+        right_lines.append(f"  [bold red]★[/bold red] High interest (≥0.6):  [bold]{high}[/bold]")
+        right_lines.append(f"  [yellow]◆[/yellow] Medium interest (≥0.4): [bold]{medium}[/bold]")
+        right_lines.append(f"  [dim]·[/dim] Low interest (<0.4):    [bold]{low}[/bold]")
+    right_lines.append("")
+    right_lines.append("  [bold]Top tools:[/bold]")
+    for tool, count in tool_counts.most_common(8):
+        bar_len = int(count / max(tool_counts.values()) * 15) if tool_counts else 0
+        bar = "█" * bar_len
+        right_lines.append(f"  {tool:<16} {count:>4}  [cyan]{bar}[/cyan]")
+
+    right_panel = Panel(
+        Text.from_markup("\n".join(right_lines)),
+        title="[bold]Scoring & Tools[/bold]",
+        border_style="yellow",
+        expand=True,
+    )
+
+    console.print(Columns([left_panel, right_panel], equal=True, expand=True))
+
+    if high + medium > 0:
+        console.print(
+            f"\n  [bold]Next:[/bold] run [cyan]cinsights analyze --source local[/cyan]"
+            f" to get LLM insights on {high + medium} interesting session(s)"
         )
-        table.add_row("Low interest (<0.4)", str(sum(1 for _, s, _ in scored_rows if s < 0.4)))
-    console.print(table)
+    else:
+        console.print(
+            "\n  [dim]No high-interest sessions found."
+            " Try [cyan]cinsights analyze --source local --min-score 0[/cyan]"
+            " to analyze all sessions.[/dim]"
+        )
 
 
 async def _score_async(

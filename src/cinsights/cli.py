@@ -39,7 +39,6 @@ def _apply_source_overrides(source: str | None, repo: str | None) -> None:
 @app.command()
 def index(
     hours: int = typer.Option(24, help="Index sessions from the last N hours."),
-    limit: int = typer.Option(50, help="Max sessions to index."),
     force: bool = typer.Option(False, help="Re-index already-indexed sessions."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
     source: str | None = typer.Option(None, help="Override source (phoenix, entireio, local)."),
@@ -53,7 +52,6 @@ def index(
         async with _track_run("analyze") as run:
             await _index_async(
                 hours=hours,
-                limit=limit,
                 force=force,
                 verbose=verbose,
                 trace_ids=trace_ids,
@@ -175,7 +173,6 @@ def refresh(
             run.extra["min_score"] = min_score
             await _index_async(
                 hours=hours,
-                limit=limit,
                 force=force,
                 verbose=verbose,
                 run=run,
