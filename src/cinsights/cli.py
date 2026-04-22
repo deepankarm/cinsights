@@ -370,7 +370,6 @@ def setup(
 
     # Download embedding model for label clustering (only on first setup)
     if not digest:
-        console.print("\n  Downloading embedding model...")
         _download_embedding_model()
 
     # Offer to test
@@ -388,8 +387,13 @@ def _download_embedding_model() -> None:
         os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
         from sentence_transformers import SentenceTransformer
 
-        SentenceTransformer("all-MiniLM-L6-v2")
-        console.print("  [green]✓[/green] Embedding model ready (all-MiniLM-L6-v2)")
+        try:
+            SentenceTransformer("all-MiniLM-L6-v2", local_files_only=True)
+            # Already cached, no need to print anything
+        except Exception:
+            console.print("\n  Downloading embedding model...")
+            SentenceTransformer("all-MiniLM-L6-v2")
+            console.print("  [green]✓[/green] Embedding model ready (all-MiniLM-L6-v2)")
     except Exception as e:
         console.print(f"  [yellow]⚠[/yellow] Could not download embedding model: {e}")
         console.print("    Label clustering will fall back to raw labels.")
