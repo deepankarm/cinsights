@@ -34,8 +34,6 @@ Computed during indexing from tool call sequences alone. No LLM needed.
 
 Quality metrics are the smoke detectors. They tell you something is off before you spend tokens figuring out what.
 
-![Quality metrics with trend charts](../.github/images/project-stats.png)
-
 ## Scoring and budget modes
 
 Not every session is worth analyzing with an LLM. cinsights scores sessions on "interestingness" - how much they deviate from the developer's baseline.
@@ -133,6 +131,8 @@ Computed from tool call sequences during analysis. These surface recurring inter
 Behavioral patterns appear in the Activity section of developer profiles and require analyzed sessions to populate.
 
 ## Quality comparison
+
+![Quality metrics with team comparison](../.github/images/quality-metrics-trends.png)
 
 The web UI computes team averages for each quality metric and shows how individual developers compare. When a developer's metric deviates more than 15% from the team average, a directional indicator shows whether they're above or below. This helps identify developers who might benefit from specific CLAUDE.md rules or workflow changes.
 
