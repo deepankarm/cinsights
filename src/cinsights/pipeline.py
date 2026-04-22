@@ -612,21 +612,30 @@ async def _discover_work_items(
             ).all()
             session_ids = [cs.id for cs in all_sessions]
 
-        console.print(f"  Force re-indexing {len(session_ids)} {settings.source} session(s)...")
-
         not_found = 0
-        for sid in session_ids:
-            spans = await asyncio.to_thread(source.get_spans_by_session, sid)
-            if not spans:
-                not_found += 1
-                continue
-            trace = TraceData(
-                trace_id=sid,
-                start_time=spans[0].start_time,
-                end_time=spans[-1].end_time,
-                spans=spans,
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task(
+                f"Loading {len(session_ids)} {settings.source} session(s)...", total=None
             )
-            work_items.append((sid, sid, trace, spans))
+            for sid in session_ids:
+                spans = await asyncio.to_thread(source.get_spans_by_session, sid)
+                if not spans:
+                    not_found += 1
+                    continue
+                trace = TraceData(
+                    trace_id=sid,
+                    start_time=spans[0].start_time,
+                    end_time=spans[-1].end_time,
+                    spans=spans,
+                )
+                work_items.append((sid, sid, trace, spans))
+            progress.update(
+                task, description=f"Loaded {len(work_items)} session(s), {not_found} not found"
+            )
 
         if not_found:
             console.print(f"  [dim]{not_found} session(s) not found in source, skipped[/dim]")
