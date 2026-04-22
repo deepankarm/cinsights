@@ -479,11 +479,13 @@ async def _run_one_digest(
                         .distinct()
                     )
                     avail = sorted({r for r in (await db.exec(avail_q)).all() if r})
-                    hint = (
-                        f"Available projects: {', '.join(avail[:10])}"
-                        if avail
-                        else "No projects found. Run cinsights index first."
-                    )
+                    if avail:
+                        console.print(f"  [yellow]·[/yellow] {label} — not found")
+                        console.print(f"  Available projects: {', '.join(avail)}")
+                    else:
+                        console.print(
+                            f"  [yellow]·[/yellow] {label} — no projects found. Run cinsights index first."
+                        )
                 elif user_id:
                     avail_q = (
                         select_fn(CodingSession.user_id)
@@ -491,14 +493,18 @@ async def _run_one_digest(
                         .distinct()
                     )
                     avail = sorted({r for r in (await db.exec(avail_q)).all() if r})
-                    hint = (
-                        f"Available users: {', '.join(avail[:10])}"
-                        if avail
-                        else "No users found. Run cinsights index first."
-                    )
+                    if avail:
+                        console.print(f"  [yellow]·[/yellow] {label} — not found")
+                        for u in avail:
+                            console.print(f"    {u}")
+                    else:
+                        console.print(
+                            f"  [yellow]·[/yellow] {label} — no users found. Run cinsights index first."
+                        )
                 else:
-                    hint = "Run cinsights index first."
-                console.print(f"  [yellow]·[/yellow] {label} — not found. {hint}")
+                    console.print(
+                        f"  [yellow]·[/yellow] {label} — not found. Run cinsights index first."
+                    )
             return ("empty", 0, 0)
 
         if stats_only:
