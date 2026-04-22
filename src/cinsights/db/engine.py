@@ -117,12 +117,12 @@ def _ensure_schema_current_sync(database_url: str) -> None:
     else:
         raise RuntimeError("Cannot find alembic.ini — reinstall cinsights.")
 
-    cfg.set_main_option("sqlalchemy.url", _sync_url(database_url))
+    sync_url = _sync_url(database_url)
+    cfg.set_main_option("sqlalchemy.url", sync_url)
 
     script = ScriptDirectory.from_config(cfg)
     head_rev = script.get_current_head()
 
-    sync_url = _sync_url(database_url)
     probe_engine = create_engine(sync_url)
     try:
         inspector = inspect(probe_engine)
@@ -138,6 +138,9 @@ def _ensure_schema_current_sync(database_url: str) -> None:
         if needs_migrate:
             from alembic import command
 
+            # Mark config so env.py knows the URL was set programmatically
+            # and should not override it from settings.
+            cfg.attributes["_cinsights_url_set"] = True
             log.info("Migrating database to latest schema...")
             command.upgrade(cfg, "head")
             log.info("Database migration complete.")

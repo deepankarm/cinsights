@@ -23,10 +23,12 @@ if config.config_file_name is not None:
 target_metadata = SQLModel.metadata
 
 # Alembic stays on a sync engine even though the application uses async — it's
-# a one-shot CLI and doesn't need concurrency. Translate the URL in case the
-# user set CINSIGHTS_DATABASE_URL to the async form.
-settings = get_settings()
-config.set_main_option("sqlalchemy.url", _sync_url(settings.database_url))
+# a one-shot CLI and doesn't need concurrency.
+# When called programmatically (auto-migrate on startup), the URL is pre-set
+# on the config object. When called via CLI, read from settings.
+if not config.attributes.get("_cinsights_url_set"):
+    settings = get_settings()
+    config.set_main_option("sqlalchemy.url", _sync_url(settings.database_url))
 
 
 def run_migrations_offline() -> None:
