@@ -90,7 +90,7 @@ def analyze(
     source: str | None = typer.Option(None, help="Override source (phoenix, entireio, local)."),
     repo: str | None = typer.Option(None, help="Repo path for entireio source."),
     min_score: float = typer.Option(
-        0.4, "--min-score", help="Only analyze sessions with score >= this."
+        0.0, "--min-score", help="Only analyze sessions with score >= this."
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
     trace_ids: list[str] | None = typer.Argument(

@@ -1259,7 +1259,7 @@ async def _analyze_async(
     verbose: bool,
     trace_ids: list[str] | None,
     run: _RunHandle | None = None,
-    min_score: float = 0.4,
+    min_score: float = 0.0,
     yes: bool = False,
 ) -> None:
     """LLM-analyze INDEXED sessions that meet the score threshold.
@@ -1350,25 +1350,60 @@ async def _analyze_async(
             console.print(f"[yellow]No sessions selected at --min-score {min_score}.[/yellow]")
             return
 
-        by_score = sum(1 for s in candidates if (s.interestingness_score or 0) >= min_score)
-        by_fill = len(candidates) - by_score
-        console.print(
-            f"\n[bold]Selected {len(candidates)} session(s) for analysis[/bold] "
-            f"({by_score} by score ≥ {min_score}, {by_fill} coverage fills)\n"
-        )
-
-        # Estimate cost and confirm with user
+        # Show score breakdown with cost estimates
         from cinsights.costs import ESTIMATED_RESPONSE_TOKENS, estimate_cost
 
+        def _est_bucket_cost(sessions: list) -> str:
+            prompt_t = sum(s.estimated_analysis_tokens or 0 for s in sessions)
+            resp_t = ESTIMATED_RESPONSE_TOKENS * len(sessions)
+            cost = estimate_cost(input_tokens=prompt_t, output_tokens=resp_t)
+            return f"~${cost:.2f}" if cost else "?"
+
+        buckets = [
+            (
+                "≥0.6  high interest",
+                [s for s in candidates if (s.interestingness_score or 0) >= 0.6],
+            ),
+            (
+                "≥0.4  medium",
+                [s for s in candidates if 0.4 <= (s.interestingness_score or 0) < 0.6],
+            ),
+            ("≥0.2  low", [s for s in candidates if 0.2 <= (s.interestingness_score or 0) < 0.4]),
+            ("<0.2  routine", [s for s in candidates if (s.interestingness_score or 0) < 0.2]),
+        ]
+        # Coverage fills (sessions below min_score that got selected for user/project coverage)
+        by_fill = sum(1 for s in candidates if (s.interestingness_score or 0) < min_score)
+
+        table = Table(title="Analysis Plan", show_edge=False, pad_edge=False)
+        table.add_column("Score", style="bold")
+        table.add_column("Sessions", justify="right")
+        table.add_column("Est. cost", justify="right")
+        for label, bucket in buckets:
+            if bucket:
+                table.add_row(label, str(len(bucket)), _est_bucket_cost(bucket))
+        table.add_section()
         total_est_prompt = sum(s.estimated_analysis_tokens or 0 for s in candidates)
-        total_est_response = ESTIMATED_RESPONSE_TOKENS * len(candidates)
-        est_cost = estimate_cost(input_tokens=total_est_prompt, output_tokens=total_est_response)
-        est_cost_str = f"~${est_cost:.2f}" if est_cost else "unknown"
-        console.print(
-            f"  [bold]{len(candidates)}[/bold] LLM calls, "
-            f"~[bold]{total_est_prompt:,}[/bold] prompt tokens, "
-            f"est. cost: [bold]{est_cost_str}[/bold]\n"
+        total_cost = estimate_cost(
+            input_tokens=total_est_prompt,
+            output_tokens=ESTIMATED_RESPONSE_TOKENS * len(candidates),
         )
+        total_cost_str = f"~${total_cost:.2f}" if total_cost else "unknown"
+        table.add_row(
+            f"Total (≥{min_score})",
+            str(len(candidates)),
+            f"[bold]{total_cost_str}[/bold]",
+        )
+        console.print()
+        console.print(table)
+        if by_fill:
+            console.print(
+                f"  [dim]includes {by_fill} coverage fill(s) for underrepresented projects/users[/dim]"
+            )
+        console.print(
+            "\n  [dim]Use [cyan]--min-score 0.4[/cyan] to analyze only medium+ interest sessions[/dim]"
+        )
+        console.print()
+
         if not yes:
             from rich.prompt import Confirm
 
