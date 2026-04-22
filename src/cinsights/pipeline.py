@@ -471,7 +471,34 @@ async def _run_one_digest(
                     f"Try [cyan]--days {suggested}[/cyan]"
                 )
             else:
-                console.print(f"  [yellow]·[/yellow] {label} — no sessions found")
+                # List available values to help the user
+                if scope_project:
+                    avail_q = (
+                        select_fn(CodingSession.project_name)
+                        .where(CodingSession.project_name.is_not(None))
+                        .distinct()
+                    )
+                    avail = sorted({r for r in (await db.exec(avail_q)).all() if r})
+                    hint = (
+                        f"Available projects: {', '.join(avail[:10])}"
+                        if avail
+                        else "No projects found. Run cinsights index first."
+                    )
+                elif user_id:
+                    avail_q = (
+                        select_fn(CodingSession.user_id)
+                        .where(CodingSession.user_id.is_not(None))
+                        .distinct()
+                    )
+                    avail = sorted({r for r in (await db.exec(avail_q)).all() if r})
+                    hint = (
+                        f"Available users: {', '.join(avail[:10])}"
+                        if avail
+                        else "No users found. Run cinsights index first."
+                    )
+                else:
+                    hint = "Run cinsights index first."
+                console.print(f"  [yellow]·[/yellow] {label} — not found. {hint}")
             return ("empty", 0, 0)
 
         if stats_only:
@@ -1830,7 +1857,7 @@ async def _digest_async(
         )
         console.print(f"\n  View at: [bold]http://localhost:{settings.port}{url_path}[/bold]")
     elif status == "empty":
-        console.print(f"  [yellow]·[/yellow] {label} — no sessions")
+        pass  # detailed message already printed in _run_one_digest
     elif status == "stats_only":
         console.print(f"  [cyan]·[/cyan] {label} — stats only")
     elif status == "unchanged":
