@@ -811,7 +811,7 @@ async def _index_async(
             except Exception as e:
                 await db.rollback()
                 failed += 1
-                console.print(f"  [red]✗[/red] {trace_id[:12]} — {e}")
+                console.print(f"  [red]✗[/red] {trace_id} — {e}")
 
     # Score all indexed sessions against baselines
     console.print(f"\n[bold]Scoring {indexed} session(s)...[/bold]\n")
@@ -1601,7 +1601,7 @@ async def _analyze_async(
             if isinstance(result, BaseException):
                 failed += 1
                 err_msg = str(result).split("\n")[0][:80]
-                console.print(f"  [red]✗[/red] {trace_id[:12]} — {err_msg}")
+                console.print(f"  [red]✗[/red] {trace_id} — {err_msg}")
                 continue
             if isinstance(project_guess, BaseException):
                 project_guess = ProjectGuess(
@@ -1641,7 +1641,7 @@ async def _analyze_async(
             except Exception as e:
                 await db.rollback()
                 failed += 1
-                console.print(f"  [red]✗[/red] {trace_id[:12]} — {e}")
+                console.print(f"  [red]✗[/red] {trace_id} — {e}")
 
     console.print()
     table = Table(title="Analysis Summary")
