@@ -261,7 +261,7 @@
 			<div class="chart-card">
 				<div class="chart-header">
 					<h3>Agent Distribution</h3>
-					<span class="chart-total">{sessionCount || agentTotal} sessions</span>
+					<span class="chart-total">{agentTotal} sessions</span>
 				</div>
 				<p class="chart-desc">Coding agents used across all sessions.</p>
 				<div class="pie-inner">
