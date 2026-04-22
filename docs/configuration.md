@@ -125,10 +125,10 @@ cinsights works well as a cron job. Example - refresh daily at 9am, then generat
 
 ---
 
-**[← Previous: Concepts](./concepts.md)**
+**[← Previous: How It Works](./how-it-works.md)**
 
 <div align="right">
 
-**[Next: Local Source →](./sources/local.md)**
+**[Next: FAQ →](./faq.md)**
 
 </div>

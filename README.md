@@ -30,6 +30,23 @@ cinsights helps engineering teams track, understand, and improve how their devel
 
 ![Features to try - hooks, custom skills, plan mode](.github/images/developer-insights-features.png)
 
+**Developer mood quotes** - things your developers actually say to their coding agents, categorized by mood (frustrated, curious, amused, relieved, assertive). Verbatim quotes extracted from sessions.
+
+**Quality comparison** - per-developer quality metrics with team average comparison. See who's above or below baseline on read:edit ratio, error rate, and other metrics at a glance.
+
+## Web UI
+
+`cinsights serve` starts a dashboard at [localhost:8100](http://localhost:8100) with:
+
+- **Projects overview** — all projects with session counts, analysis coverage, and quick stats
+- **Project detail** — digest narrative, friction analysis, CLAUDE.md suggestions, recommendations
+- **Developer profiles** — work areas, developer persona, activity charts, behavioral patterns, mood quotes
+- **Developer cards** — at-a-glance metrics (turns/session, avg duration, tokens/sec) with team comparison
+- **Session drill-down** — per-session quality metrics, tool call timeline, insights with severity
+- **Doctor page** — system health, run history, cost tracking, daily cost chart, LLM call breakdown
+
+All data stays local. The web UI reads from your SQLite database and makes no external calls.
+
 ## Quick start
 
 ```bash
@@ -67,6 +84,8 @@ Open [http://localhost:8100](http://localhost:8100). See the [getting started gu
 
 - [Getting started](docs/getting-started.md) - install, configure, first run
 - [Concepts](docs/concepts.md) - pipeline, quality metrics, scoring, insights, digests
+- [How it works](docs/how-it-works.md) - what data goes to the LLM, what stays local, cost breakdown
 - [Configuration](docs/configuration.md) - env vars, config file, CLI reference
+- [FAQ](docs/faq.md) - common questions and troubleshooting
 - **Sources**: [Local](docs/sources/local.md) · [Entire.io](docs/sources/entireio.md) · [Phoenix](docs/sources/phoenix.md)
 - [Self-hosting](docs/self-hosting.md) - run cinsights on your infrastructure

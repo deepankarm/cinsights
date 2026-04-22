@@ -2,7 +2,9 @@
 
 - [Getting started](getting-started.md) - install, configure, first run
 - [Concepts](concepts.md) - pipeline, quality metrics, scoring, insights, digests
+- [How it works](how-it-works.md) - what data goes to the LLM, what stays local, cost breakdown
 - [Configuration](configuration.md) - env vars, config file, CLI reference
+- [FAQ](faq.md) - common questions and troubleshooting
 
 ### Sources
 
