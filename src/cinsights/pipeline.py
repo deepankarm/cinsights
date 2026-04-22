@@ -1334,6 +1334,17 @@ async def _analyze_async(
             result = await db.exec(query)
             all_indexed = result.all()
 
+            # Counts for context
+            from sqlalchemy import func as sa_func
+
+            total_q = select_fn(sa_func.count()).where(CodingSession.source == str(settings.source))
+            total_sessions = (await db.exec(total_q)).one()
+            analyzed_q = select_fn(sa_func.count()).where(
+                CodingSession.source == str(settings.source),
+                CodingSession.status == SessionStatus.ANALYZED,
+            )
+            already_analyzed = (await db.exec(analyzed_q)).one()
+
         if not all_indexed:
             console.print("[yellow]No scored INDEXED sessions found.[/yellow]")
             console.print(
@@ -1349,6 +1360,12 @@ async def _analyze_async(
         if not candidates:
             console.print(f"[yellow]No sessions selected at --min-score {min_score}.[/yellow]")
             return
+
+        console.print(
+            f"\n  [bold]{total_sessions}[/bold] total sessions, "
+            f"[bold]{already_analyzed}[/bold] already analyzed, "
+            f"[bold]{len(all_indexed)}[/bold] indexed and pending analysis"
+        )
 
         # Show score breakdown with cost estimates
         from cinsights.costs import ESTIMATED_RESPONSE_TOKENS, estimate_cost
