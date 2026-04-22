@@ -900,6 +900,9 @@ def _cluster_and_aggregate_labels(
         from sklearn.metrics.pairwise import cosine_similarity
 
         os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+        # Suppress noisy model loading logs
+        for _lib in ("sentence_transformers", "transformers", "huggingface_hub", "torch"):
+            logging.getLogger(_lib).setLevel(logging.ERROR)
         # Use local cache only — download via `cinsights setup`
         try:
             model = SentenceTransformer("all-MiniLM-L6-v2", local_files_only=True)
