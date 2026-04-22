@@ -55,9 +55,12 @@ class LLMConfig(BaseModel):
     extra_headers: dict[str, str] = Field(default_factory=dict)
 
     @classmethod
-    def load(cls) -> "LLMConfig":
+    def load(cls, *, digest: bool = False) -> "LLMConfig":
         """Convenience: load just the LLM section from config.json."""
-        return AppConfig.load().llm
+        config = AppConfig.load()
+        if digest:
+            return config.digest_llm or config.llm
+        return config.llm
 
     def _make_provider(self, provider_name: str):
         """Provider factory that injects base_url and extra headers."""
@@ -156,6 +159,7 @@ class AppConfig(BaseModel):
     """
 
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    digest_llm: LLMConfig | None = None
     claude_code_homes: list[str] = Field(default_factory=lambda: ["~/.claude"])
     codex_homes: list[str] = Field(default_factory=lambda: ["~/.codex"])
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
@@ -173,9 +177,19 @@ class AppConfig(BaseModel):
         return cls()
 
     def save(self) -> None:
-        """Write config to ~/.cinsights/config.json."""
+        """Write config to ~/.cinsights/config.json, omitting defaults."""
         Paths.config_dir.mkdir(parents=True, exist_ok=True)
-        Paths.config_file.write_text(self.model_dump_json(indent=2, exclude_none=True) + "\n")
+        data = self.model_dump(exclude_defaults=True, exclude_none=True)
+        # Always include llm (even if default) so the file is self-documenting
+        data["llm"] = self.llm.model_dump(exclude_defaults=True)
+        # Always include provider and model in llm configs
+        for key in ("llm", "digest_llm"):
+            if key in data:
+                cfg = getattr(self, key)
+                if cfg:
+                    data[key]["provider"] = cfg.provider
+                    data[key]["model"] = cfg.model
+        Paths.config_file.write_text(json.dumps(data, indent=2) + "\n")
 
     @property
     def resolved_claude_code_homes(self) -> list[Path]:
@@ -234,6 +248,12 @@ def get_config() -> AppConfig:
     return AppConfig.load()
 
 
-@lru_cache
-def get_llm_config() -> LLMConfig:
-    return get_config().llm
+def get_llm_config(*, digest: bool = False) -> LLMConfig:
+    """Return the LLM config for analysis or digest.
+
+    Resolution: digest=True returns digest_llm → llm; digest=False returns llm.
+    """
+    config = get_config()
+    if digest:
+        return config.digest_llm or config.llm
+    return config.llm

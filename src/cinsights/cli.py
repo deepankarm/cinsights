@@ -12,6 +12,13 @@ to the async pipeline. All real work lives in:
 from __future__ import annotations
 
 import asyncio
+import os
+
+# Suppress noisy third-party progress bars before any imports
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+
 from typing import TYPE_CHECKING
 
 import typer
@@ -22,6 +29,10 @@ from cinsights.settings import get_settings
 
 if TYPE_CHECKING:
     from cinsights.settings import LLMConfig
+
+import logging
+
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 app = typer.Typer(name="cinsights", help="LLM-powered insights from coding agent sessions.")
 
@@ -39,7 +50,6 @@ def _apply_source_overrides(source: str | None, repo: str | None) -> None:
 @app.command()
 def index(
     hours: int = typer.Option(24, help="Index sessions from the last N hours."),
-    limit: int = typer.Option(50, help="Max sessions to index."),
     force: bool = typer.Option(False, help="Re-index already-indexed sessions."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
     source: str | None = typer.Option(None, help="Override source (phoenix, entireio, local)."),
@@ -53,7 +63,6 @@ def index(
         async with _track_run("analyze") as run:
             await _index_async(
                 hours=hours,
-                limit=limit,
                 force=force,
                 verbose=verbose,
                 trace_ids=trace_ids,
@@ -85,7 +94,7 @@ def score(
 
 @app.command()
 def analyze(
-    limit: int = typer.Option(50, help="Max sessions to analyze."),
+    limit: int = typer.Option(50, help="Max sessions to analyze. Use 0 for no limit."),
     force: bool = typer.Option(False, help="Re-analyze already-analyzed sessions."),
     concurrency: int = typer.Option(5, help="Max concurrent LLM analysis requests."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
@@ -94,6 +103,7 @@ def analyze(
     min_score: float = typer.Option(
         0.0, "--min-score", help="Only analyze sessions with score >= this."
     ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
     trace_ids: list[str] | None = typer.Argument(
         None, help="Specific trace/session IDs to analyze."
     ),
@@ -115,9 +125,16 @@ def analyze(
                 trace_ids=trace_ids,
                 run=run,
                 min_score=min_score,
+                yes=yes,
             )
 
     asyncio.run(_entry())
+
+
+# British English alias
+app.registered_commands.append(
+    typer.models.CommandInfo(name="analyse", callback=analyze, hidden=True)
+)
 
 
 @app.command()
@@ -175,7 +192,6 @@ def refresh(
             run.extra["min_score"] = min_score
             await _index_async(
                 hours=hours,
-                limit=limit,
                 force=force,
                 verbose=verbose,
                 run=run,
@@ -213,12 +229,63 @@ def serve(
     )
 
 
+def _prompt_llm_config(
+    current: LLMConfig,
+    provider: str | None,
+    model: str | None,
+    base_url: str | None,
+    extra_headers: str | None,
+    interactive: bool,
+    default_model: str | None = None,
+) -> LLMConfig:
+    """Prompt for LLM config values, reusing current as defaults."""
+    import json
+
+    from cinsights.settings import LLMConfig
+
+    if provider is None:
+        provider = typer.prompt("LLM Provider", default=current.provider)
+    if model is None:
+        model = typer.prompt("Model name", default=default_model or current.model)
+    if interactive:
+        if base_url is None:
+            base_url = typer.prompt(
+                "Base URL (blank for default)",
+                default=current.base_url or "",
+                show_default=False,
+            )
+        if extra_headers is None:
+            current_headers = json.dumps(current.extra_headers) if current.extra_headers else ""
+            extra_headers = typer.prompt(
+                "Extra HTTP headers as JSON (blank for none)",
+                default=current_headers,
+                show_default=bool(current_headers),
+            )
+
+    import contextlib
+
+    headers_dict: dict[str, str] = {}
+    if extra_headers:
+        with contextlib.suppress(json.JSONDecodeError):
+            headers_dict = json.loads(extra_headers)
+
+    return LLMConfig(
+        provider=provider,
+        model=model,
+        base_url=base_url or None,
+        extra_headers=headers_dict,
+    )
+
+
 @app.command()
 def setup(
     provider: str | None = typer.Option(None, help="LLM provider (e.g. anthropic, openai)."),
     model: str | None = typer.Option(None, help="Model name."),
     base_url: str | None = typer.Option(None, help="Custom base URL (for gateways/proxies)."),
     extra_headers: str | None = typer.Option(None, help="Extra HTTP headers as JSON string."),
+    digest: bool = typer.Option(
+        False, "--digest", help="Configure the digest model (separate from analyze)."
+    ),
     validate: bool = typer.Option(
         False, "--validate", help="Test current config without prompting."
     ),
@@ -227,70 +294,87 @@ def setup(
 
     Interactive mode (no args): prompts for each value, like `aws configure`.
     One-shot mode: pass --provider, --model, etc. directly.
+    Digest mode: --digest configures a separate model for digest generation.
     Validate mode: --validate tests the current config.
     """
-    import json
 
     from cinsights.runtime import console
-    from cinsights.settings import AppConfig, LLMConfig, Paths
+    from cinsights.settings import AppConfig, Paths
 
     app_config = AppConfig.load()
-    llm = app_config.llm
+    llm = app_config.digest_llm or app_config.llm if digest else app_config.llm
 
     if validate:
+        analyze_cfg = app_config.llm
+        console.print("  [bold]Analyze model:[/bold]")
         console.print(
-            f"  Provider: [bold]{llm.provider}[/bold]\n"
-            f"  Model:    [bold]{llm.model}[/bold]\n"
-            f"  Base URL: {llm.base_url or '(default)'}\n"
-            f"  Headers:  {llm.extra_headers or '(none)'}"
+            f"    Provider: [bold]{analyze_cfg.provider}[/bold]\n"
+            f"    Model:    [bold]{analyze_cfg.model}[/bold]\n"
+            f"    Base URL: {analyze_cfg.base_url or '(default)'}"
         )
-        _test_connection(llm)
+        digest_cfg = app_config.digest_llm
+        if digest_cfg:
+            console.print("\n  [bold]Digest model:[/bold]")
+            console.print(
+                f"    Provider: [bold]{digest_cfg.provider}[/bold]\n"
+                f"    Model:    [bold]{digest_cfg.model}[/bold]\n"
+                f"    Base URL: {digest_cfg.base_url or '(default)'}"
+            )
+        else:
+            console.print("\n  [bold]Digest model:[/bold] (same as analyze)")
+        _test_connection(analyze_cfg)
         return
 
-    # Interactive mode: prompt for values with current defaults
-    if provider is None:
-        provider = typer.prompt("LLM Provider", default=llm.provider)
-    if model is None:
-        model = typer.prompt("Model name", default=llm.model)
-    if base_url is None:
-        base_url = typer.prompt(
-            "Base URL (blank for default)",
-            default=llm.base_url or "",
-            show_default=False,
+    # One-shot mode (provider/model given) vs interactive mode (prompt for all)
+    interactive = provider is None and model is None
+
+    if interactive and not digest:
+        console.print(
+            "\n  [bold]Analyze model[/bold] — used for per-session analysis (high volume, cost-sensitive).\n"
+            "  A fast, cheap model works best (e.g. gemini-2.5-flash-lite).\n"
         )
-    if extra_headers is None:
-        current = json.dumps(llm.extra_headers) if llm.extra_headers else ""
-        extra_headers = typer.prompt(
-            "Extra HTTP headers as JSON (blank for none)",
-            default=current,
-            show_default=bool(current),
+    elif interactive and digest:
+        console.print(
+            "\n  [bold]Digest model[/bold] — used for cross-session reports (low volume, quality matters).\n"
+            "  A smarter model produces better insights (e.g. gemini-2.5-flash).\n"
         )
 
-    # Parse extra headers
-    headers_dict: dict[str, str] = {}
-    if extra_headers:
-        try:
-            headers_dict = json.loads(extra_headers)
-        except json.JSONDecodeError as e:
-            console.print("[red]Invalid JSON for extra headers.[/red]")
-            raise typer.Exit(1) from e
+    new_config = _prompt_llm_config(llm, provider, model, base_url, extra_headers, interactive)
 
-    app_config.llm = LLMConfig(
-        provider=provider,
-        model=model,
-        base_url=base_url or None,
-        extra_headers=headers_dict,
-    )
+    if digest:
+        app_config.digest_llm = new_config
+    else:
+        app_config.llm = new_config
+
+    # In interactive mode, also ask about digest model
+    if interactive and not digest:
+        console.print(
+            "\n  [bold]Digest model[/bold] — used for cross-session reports (low volume, quality matters).\n"
+            "  A smarter model produces better insights (e.g. gemini-2.5-flash).\n"
+        )
+        if typer.confirm("Configure a separate digest model?", default=False):
+            digest_llm = app_config.digest_llm or new_config
+            console.print()
+            app_config.digest_llm = _prompt_llm_config(
+                digest_llm,
+                None,
+                None,
+                None,
+                None,
+                interactive=True,
+                default_model="gemini-2.5-flash",
+            )
+
     app_config.save()
     console.print(f"\n  Configuration written to [bold]{Paths.config_file}[/bold]")
 
-    # Download embedding model for label clustering
-    console.print("\n  Downloading embedding model...")
-    _download_embedding_model()
+    # Download embedding model for label clustering (only on first setup)
+    if not digest:
+        _download_embedding_model()
 
     # Offer to test
     if typer.confirm("Test connection?", default=True):
-        _test_connection(app_config.llm)
+        _test_connection(new_config)
 
 
 def _download_embedding_model() -> None:
@@ -303,8 +387,13 @@ def _download_embedding_model() -> None:
         os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
         from sentence_transformers import SentenceTransformer
 
-        SentenceTransformer("all-MiniLM-L6-v2")
-        console.print("  [green]✓[/green] Embedding model ready (all-MiniLM-L6-v2)")
+        try:
+            SentenceTransformer("all-MiniLM-L6-v2", local_files_only=True)
+            # Already cached, no need to print anything
+        except Exception:
+            console.print("\n  Downloading embedding model...")
+            SentenceTransformer("all-MiniLM-L6-v2")
+            console.print("  [green]✓[/green] Embedding model ready (all-MiniLM-L6-v2)")
     except Exception as e:
         console.print(f"  [yellow]⚠[/yellow] Could not download embedding model: {e}")
         console.print("    Label clustering will fall back to raw labels.")

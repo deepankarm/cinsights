@@ -106,18 +106,16 @@
 		</div>
 	</div>
 	<div class="chart-box">
-		<h3>Coding hours</h3>
+		<h3>Coding hours <span style="font-weight:400;color:#94a3b8;font-size:11px">(UTC)</span></h3>
 		<div class="hour-bars">
-			{#each Object.entries(timeOfDay) as [hour, count]}
+			{#each Array.from({length: 24}, (_, i) => i) as hour}
+				{@const count = timeOfDay[String(hour)] ?? 0}
 				{@const pct = barPct(count, maxVal(timeOfDay))}
-				<div class="hour-col" title="{hour}:00 — {count} sessions">
+				<div class="hour-col" title="{hour}:00 UTC — {count} sessions">
 					<div class="hour-fill" style="height:{pct}%"></div>
 					<span class="hour-label">{hour}</span>
 				</div>
 			{/each}
-			{#if Object.keys(timeOfDay).length === 0}
-				<span class="chart-empty">No data</span>
-			{/if}
 		</div>
 	</div>
 	<div class="chart-box" class:chart-wide={errorDetails && errorDetails.length > 0}>

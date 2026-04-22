@@ -139,7 +139,19 @@ async def _store_indexed(
         from cinsights.sources.entireio import EntireioSource
 
         if isinstance(source, EntireioSource):
-            coding_session.metadata_json = source.get_session_metadata_json(trace_id)
+            # Merge source metadata into existing (preserves notable_quotes from analysis)
+            source_meta_json = source.get_session_metadata_json(trace_id)
+            if source_meta_json:
+                import contextlib
+
+                existing = {}
+                if coding_session.metadata_json:
+                    with contextlib.suppress(Exception):
+                        existing = json_mod.loads(coding_session.metadata_json)
+                with contextlib.suppress(Exception):
+                    source_meta = json_mod.loads(source_meta_json)
+                    existing.update(source_meta)
+                coding_session.metadata_json = json_mod.dumps(existing)
             idx = source._build_index()
             for _, ref in idx.items():
                 if ref.checkpoint_id == trace_id.split(":")[1] and ref.session_idx == int(
@@ -406,7 +418,14 @@ async def _run_one_digest(
     """
     import json as json_mod
 
-    from cinsights.db.models import Digest, DigestSection, DigestSectionType, DigestStatus
+    from cinsights.db.models import (
+        CodingSession,
+        Digest,
+        DigestSection,
+        DigestSectionType,
+        DigestStatus,
+        SessionStatus,
+    )
     from cinsights.stats import compute_all
 
     label = scope_project or (f"user:{user_id}" if user_id else "global")
@@ -428,7 +447,64 @@ async def _run_one_digest(
             await db.commit()
 
         if stats.session_count == 0:
-            console.print(f"  [yellow]·[/yellow] {label} — no sessions, skipped")
+            # Check if sessions exist outside the time window
+            from sqlalchemy import func as sa_func
+
+            total_q = select_fn(sa_func.count(), sa_func.max(CodingSession.start_time)).where(
+                col(CodingSession.status).in_([SessionStatus.INDEXED, SessionStatus.ANALYZED]),
+            )
+            if scope_project:
+                total_q = total_q.where(CodingSession.project_name == scope_project)
+            if user_id:
+                total_q = total_q.where(CodingSession.user_id == user_id)
+            total_count, latest = (await db.exec(total_q)).one()
+
+            if total_count and latest:
+                if latest.tzinfo is None:
+                    latest = latest.replace(tzinfo=UTC)
+                days_ago = (end - latest).days
+                suggested = max(days_ago + 1, 30)
+                console.print(
+                    f"  [yellow]·[/yellow] {label} — no sessions in the last "
+                    f"{(end - start).days} days. "
+                    f"{total_count} session(s) exist, latest {days_ago} days ago. "
+                    f"Try [cyan]--days {suggested}[/cyan]"
+                )
+            else:
+                # List available values to help the user
+                if scope_project:
+                    avail_q = (
+                        select_fn(CodingSession.project_name)
+                        .where(CodingSession.project_name.is_not(None))
+                        .distinct()
+                    )
+                    avail = sorted({r for r in (await db.exec(avail_q)).all() if r})
+                    if avail:
+                        console.print(f"  [yellow]·[/yellow] {label} — not found")
+                        console.print(f"  Available projects: {', '.join(avail)}")
+                    else:
+                        console.print(
+                            f"  [yellow]·[/yellow] {label} — no projects found. Run cinsights index first."
+                        )
+                elif user_id:
+                    avail_q = (
+                        select_fn(CodingSession.user_id)
+                        .where(CodingSession.user_id.is_not(None))
+                        .distinct()
+                    )
+                    avail = sorted({r for r in (await db.exec(avail_q)).all() if r})
+                    if avail:
+                        console.print(f"  [yellow]·[/yellow] {label} — not found")
+                        for u in avail:
+                            console.print(f"    {u}")
+                    else:
+                        console.print(
+                            f"  [yellow]·[/yellow] {label} — no users found. Run cinsights index first."
+                        )
+                else:
+                    console.print(
+                        f"  [yellow]·[/yellow] {label} — not found. Run cinsights index first."
+                    )
             return ("empty", 0, 0)
 
         if stats_only:
@@ -543,10 +619,11 @@ async def _run_one_digest(
             return (True, result.total_prompt_tokens, result.total_completion_tokens)
         except Exception as e:
             digest_record.status = DigestStatus.FAILED
-            digest_record.error_message = str(e)
+            digest_record.error_message = str(e)[:500]
             await db.commit()
-            console.print(f"  [red]✗[/red] {label} — {e}")
-            raise
+            err_msg = str(e).split("\n")[0][:120]
+            console.print(f"  [red]✗[/red] {label} — {err_msg}")
+            return ("failed", 0, 0)
 
 
 async def _discover_work_items(
@@ -607,26 +684,35 @@ async def _discover_work_items(
                     select_fn(CodingSession)
                     .where(CodingSession.source == str(settings.source))
                     .order_by(col(CodingSession.start_time).desc())
-                    .limit(limit)
+                    .limit(limit or None)
                 )
             ).all()
             session_ids = [cs.id for cs in all_sessions]
 
-        console.print(f"  Force re-indexing {len(session_ids)} {settings.source} session(s)...")
-
         not_found = 0
-        for sid in session_ids:
-            spans = await asyncio.to_thread(source.get_spans_by_session, sid)
-            if not spans:
-                not_found += 1
-                continue
-            trace = TraceData(
-                trace_id=sid,
-                start_time=spans[0].start_time,
-                end_time=spans[-1].end_time,
-                spans=spans,
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task(
+                f"Loading {len(session_ids)} {settings.source} session(s)...", total=None
             )
-            work_items.append((sid, sid, trace, spans))
+            for sid in session_ids:
+                spans = await asyncio.to_thread(source.get_spans_by_session, sid)
+                if not spans:
+                    not_found += 1
+                    continue
+                trace = TraceData(
+                    trace_id=sid,
+                    start_time=spans[0].start_time,
+                    end_time=spans[-1].end_time,
+                    spans=spans,
+                )
+                work_items.append((sid, sid, trace, spans))
+            progress.update(
+                task, description=f"Loaded {len(work_items)} session(s), {not_found} not found"
+            )
 
         if not_found:
             console.print(f"  [dim]{not_found} session(s) not found in source, skipped[/dim]")
@@ -652,7 +738,7 @@ async def _discover_work_items(
 
         skipped = 0
         async with sessionmaker() as db:
-            for d in discovered[:limit]:
+            for d in discovered[:limit] if limit else discovered:
                 existing = await db.get(CodingSession, d.session_id)
                 if existing and existing.status == SessionStatus.ANALYZED:
                     prior = max(existing.span_count, 1)
@@ -713,7 +799,6 @@ def _get_project_name(
 
 async def _index_async(
     hours: int,
-    limit: int,
     force: bool,
     verbose: bool,
     trace_ids: list[str] | None = None,
@@ -744,13 +829,15 @@ async def _index_async(
         source,
         sessionmaker,
         hours,
-        limit,
+        0,  # no limit — indexing is zero LLM cost
         force,
         trace_ids,
     )
 
     if not work_items:
-        console.print("[yellow]No sessions to index.[/yellow]")
+        console.print("[yellow]No new sessions to index.[/yellow]")
+        # Still refresh stats in case code changed (e.g. removed time window)
+        await _refresh_scope_stats(sessionmaker)
         return
 
     console.print(f"\n[bold]Indexing {len(work_items)} session(s)...[/bold]\n")
@@ -789,7 +876,7 @@ async def _index_async(
             except Exception as e:
                 await db.rollback()
                 failed += 1
-                console.print(f"  [red]✗[/red] {trace_id[:12]} — {e}")
+                console.print(f"  [red]✗[/red] {trace_id} — {e}")
 
     # Score all indexed sessions against baselines
     console.print(f"\n[bold]Scoring {indexed} session(s)...[/bold]\n")
@@ -828,19 +915,160 @@ async def _index_async(
         else:
             console.print(f"  [dim]·[/dim] {trace_id[:12]} — {reason}")
 
+    # Refresh stats for affected users/projects
+    await _refresh_scope_stats(sessionmaker, work_items)
+
+    # Build rich summary from indexed sessions
     console.print()
-    table = Table(title="Index Summary")
-    table.add_column("Metric", style="bold")
-    table.add_column("Count", justify="right")
-    table.add_row("Indexed", str(indexed))
-    table.add_row("Failed", str(failed))
-    if scored_rows:
-        table.add_row("High interest (≥0.6)", str(sum(1 for _, s, _ in scored_rows if s >= 0.6)))
-        table.add_row(
-            "Medium interest (≥0.4)", str(sum(1 for _, s, _ in scored_rows if 0.4 <= s < 0.6))
+    await _print_index_summary(
+        sessionmaker, work_items, indexed, failed, scored_rows, settings.source
+    )
+
+
+async def _print_index_summary(
+    sessionmaker: async_sessionmaker,
+    work_items: list,
+    indexed: int,
+    failed: int,
+    scored_rows: list[tuple[str, float, str]],
+    source: str = "local",
+) -> None:
+    """Print a rich summary of what was indexed."""
+    from collections import Counter
+
+    from rich.columns import Columns
+    from rich.panel import Panel
+    from rich.text import Text
+
+    from cinsights.db.models import CodingSession, ToolCall
+
+    trace_ids = [trace_id for trace_id, _, _, _ in work_items]
+
+    async with sessionmaker() as db:
+        sessions = []
+        for tid in trace_ids:
+            cs = await db.get(CodingSession, tid)
+            if cs:
+                sessions.append(cs)
+
+        # Tool call stats
+        tool_counts: Counter[str] = Counter()
+        total_tool_calls = 0
+        for tid in trace_ids:
+            tcs = await db.exec(select_fn(ToolCall).where(ToolCall.session_id == tid))
+            for tc in tcs.all():
+                tool_counts[tc.tool_name] += 1
+                total_tool_calls += 1
+
+    # Compute aggregates
+    total_turns = sum(s.turn_count or 0 for s in sessions)
+    total_tokens = sum(s.total_tokens for s in sessions)
+    projects = {s.project_name for s in sessions if s.project_name}
+    raw_users = {s.user_id for s in sessions if s.user_id}
+    # Clean up display names: "12345+user@noreply.github.com" → "user", "a@b.com" → "a"
+    users = set()
+    for u in raw_users:
+        name = u.split("@")[0]
+        if "+" in name and name.split("+")[0].isdigit():
+            name = name.split("+", 1)[1]
+        users.add(name)
+    agents = Counter(s.agent_type for s in sessions)
+    models = Counter(s.model for s in sessions if s.model and not s.model.startswith("<"))
+
+    # Duration stats
+    durations = []
+    for s in sessions:
+        if s.start_time and s.end_time:
+            dur = (s.end_time - s.start_time).total_seconds() / 60
+            if dur > 0:
+                durations.append(dur)
+    median_duration = sorted(durations)[len(durations) // 2] if durations else 0
+
+    # Score buckets
+    high = sum(1 for _, s, _ in scored_rows if s >= 0.6)
+    medium = sum(1 for _, s, _ in scored_rows if 0.4 <= s < 0.6)
+    low = sum(1 for _, s, _ in scored_rows if s < 0.4)
+
+    # --- Left panel: Sessions ---
+    left_lines = []
+    left_lines.append(f"  [bold]{indexed}[/bold] indexed, [bold]{failed}[/bold] failed")
+    left_lines.append(f"  [bold]{total_turns:,}[/bold] total turns across sessions")
+    left_lines.append(f"  [bold]{total_tool_calls:,}[/bold] tool calls")
+    if total_tokens:
+        if total_tokens >= 1_000_000_000:
+            left_lines.append(f"  [bold]{total_tokens / 1_000_000_000:.1f}B[/bold] tokens consumed")
+        elif total_tokens >= 1_000_000:
+            left_lines.append(f"  [bold]{total_tokens / 1_000_000:.0f}M[/bold] tokens consumed")
+        else:
+            left_lines.append(f"  [bold]{total_tokens:,}[/bold] tokens consumed")
+    if durations:
+        left_lines.append(f"  Median session length: [bold]{median_duration:.0f}min[/bold]")
+    left_lines.append("")
+    sorted_users = sorted(users)
+    if len(sorted_users) <= 3:
+        left_lines.append(
+            f"  [bold]{len(users)}[/bold] developer(s): {', '.join(sorted_users) or '—'}"
         )
-        table.add_row("Low interest (<0.4)", str(sum(1 for _, s, _ in scored_rows if s < 0.4)))
-    console.print(table)
+    else:
+        left_lines.append(
+            f"  [bold]{len(users)}[/bold] developer(s): {', '.join(sorted_users[:3])}, …"
+        )
+    sorted_projects = sorted(projects)
+    if len(sorted_projects) <= 5:
+        left_lines.append(
+            f"  [bold]{len(projects)}[/bold] project(s): {', '.join(sorted_projects) or '—'}"
+        )
+    else:
+        left_lines.append(
+            f"  [bold]{len(projects)}[/bold] project(s): {', '.join(sorted_projects[:5])}, …"
+        )
+    if len(agents) > 1 or (agents and list(agents.keys()) != ["claude-code"]):
+        agent_parts = [f"{name} ({n})" for name, n in agents.most_common()]
+        left_lines.append(f"  Agents: {', '.join(agent_parts)}")
+    if models:
+        model_parts = [f"{name} ({n})" for name, n in models.most_common(3)]
+        left_lines.append(f"  Models: {', '.join(model_parts)}")
+
+    left_panel = Panel(
+        Text.from_markup("\n".join(left_lines)),
+        title="[bold]Sessions[/bold]",
+        border_style="cyan",
+        expand=True,
+    )
+
+    # --- Right panel: Scoring & Tools ---
+    right_lines = []
+    if scored_rows:
+        right_lines.append(f"  [bold red]★[/bold red] High interest (≥0.6):  [bold]{high}[/bold]")
+        right_lines.append(f"  [yellow]◆[/yellow] Medium interest (≥0.4): [bold]{medium}[/bold]")
+        right_lines.append(f"  [dim]·[/dim] Low interest (<0.4):    [bold]{low}[/bold]")
+    right_lines.append("")
+    right_lines.append("  [bold]Top tools:[/bold]")
+    for tool, count in tool_counts.most_common(8):
+        bar_len = int(count / max(tool_counts.values()) * 15) if tool_counts else 0
+        bar = "█" * bar_len
+        right_lines.append(f"  {tool:<16} {count:>4}  [cyan]{bar}[/cyan]")
+
+    right_panel = Panel(
+        Text.from_markup("\n".join(right_lines)),
+        title="[bold]Scoring & Tools[/bold]",
+        border_style="yellow",
+        expand=True,
+    )
+
+    console.print(Columns([left_panel, right_panel], equal=True, expand=True))
+
+    if high + medium > 0:
+        console.print(
+            f"\n  [bold]Next:[/bold] run [cyan]cinsights analyze --source {source}[/cyan]"
+            f" to get LLM insights on {high + medium} interesting session(s)"
+        )
+    else:
+        console.print(
+            "\n  [dim]No high-interest sessions found."
+            f" Try [cyan]cinsights analyze --source {source} --min-score 0[/cyan]"
+            " to analyze all sessions.[/dim]"
+        )
 
 
 async def _score_async(
@@ -1123,6 +1351,7 @@ async def _analyze_async(
     trace_ids: list[str] | None,
     run: _RunHandle | None = None,
     min_score: float = 0.0,
+    yes: bool = False,
 ) -> None:
     """LLM-analyze INDEXED sessions that meet the score threshold.
 
@@ -1134,6 +1363,14 @@ async def _analyze_async(
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
+        # Suppress noisy third-party logs (httpx already suppressed in cli.py)
+        for noisy in (
+            "sentence_transformers",
+            "transformers",
+            "huggingface_hub",
+            "torch",
+        ):
+            logging.getLogger(noisy).setLevel(logging.WARNING)
 
     settings = get_settings()
 
@@ -1159,6 +1396,7 @@ async def _analyze_async(
         )
         known_projects = sorted({p for p in kp_result.all() if p})
 
+    skipped_stale = 0
     if trace_ids:
         # Analyze specific sessions by ID
         work_items = await _discover_work_items(
@@ -1174,9 +1412,15 @@ async def _analyze_async(
         # Select INDEXED sessions using scoring + coverage fills
         from cinsights.scoring import select_for_analysis
 
+        if force:
+            status_filter = col(CodingSession.status).in_(
+                [SessionStatus.INDEXED, SessionStatus.ANALYZED]
+            )
+        else:
+            status_filter = CodingSession.status == SessionStatus.INDEXED
         query = (
             select_fn(CodingSession)
-            .where(CodingSession.status == SessionStatus.INDEXED)
+            .where(status_filter)
             .where(CodingSession.interestingness_score.isnot(None))
             .where(CodingSession.source == str(settings.source))
             .order_by(col(CodingSession.interestingness_score).desc())
@@ -1185,6 +1429,26 @@ async def _analyze_async(
         async with sessionmaker() as db:
             result = await db.exec(query)
             all_indexed = result.all()
+
+            # Count already-analyzed for the total row
+            from sqlalchemy import func as sa_func
+
+            analyzed_count_q = select_fn(sa_func.count()).where(
+                CodingSession.source == str(settings.source),
+                CodingSession.status == SessionStatus.ANALYZED,
+            )
+            already_analyzed = (await db.exec(analyzed_count_q)).one()
+
+        # Also fetch already-analyzed sessions for the full picture
+        async with sessionmaker() as db:
+            analyzed_q = (
+                select_fn(CodingSession)
+                .where(CodingSession.source == str(settings.source))
+                .where(CodingSession.status == SessionStatus.ANALYZED)
+                .where(CodingSession.interestingness_score.isnot(None))
+            )
+            result = await db.exec(analyzed_q)
+            all_analyzed = result.all()
 
         if not all_indexed:
             console.print("[yellow]No scored INDEXED sessions found.[/yellow]")
@@ -1196,18 +1460,110 @@ async def _analyze_async(
         # Build scored tuples and apply selection with coverage fills
         scored_tuples = [(s, s.interestingness_score or 0.0, {}) for s in all_indexed]
         candidates, _ = select_for_analysis(scored_tuples, min_score=min_score)
-        candidates = candidates[:limit]
+        total_candidates = len(candidates)
+        if limit:
+            candidates = candidates[:limit]
 
         if not candidates:
             console.print(f"[yellow]No sessions selected at --min-score {min_score}.[/yellow]")
             return
 
-        by_score = sum(1 for s in candidates if (s.interestingness_score or 0) >= min_score)
-        by_fill = len(candidates) - by_score
-        console.print(
-            f"\n[bold]Selected {len(candidates)} INDEXED session(s)[/bold] "
-            f"({by_score} by score ≥ {min_score}, {by_fill} by coverage fills)\n"
+        # Show unified status table
+        from cinsights.costs import ESTIMATED_RESPONSE_TOKENS, estimate_cost
+
+        def _est_bucket_cost(sessions: list) -> str:
+            prompt_t = sum(s.estimated_analysis_tokens or 0 for s in sessions)
+            resp_t = ESTIMATED_RESPONSE_TOKENS * len(sessions)
+            cost = estimate_cost(input_tokens=prompt_t, output_tokens=resp_t)
+            return f"~${cost:.4f}" if cost else "?"
+
+        def _score_bucket(score: float) -> int:
+            if score >= 0.6:
+                return 0
+            if score >= 0.4:
+                return 1
+            if score >= 0.2:
+                return 2
+            return 3
+
+        bucket_labels = ["≥0.6  high interest", "≥0.4  medium", "≥0.2  low", "<0.2  routine"]
+
+        # Count analyzed per bucket
+        analyzed_buckets: list[int] = [0, 0, 0, 0]
+        for s in all_analyzed:
+            analyzed_buckets[_score_bucket(s.interestingness_score or 0)] += 1
+
+        # Count ALL indexed (pending) per bucket — not limited by --limit
+        indexed_buckets: list[list[CodingSession]] = [[], [], [], []]
+        for s in all_indexed:
+            indexed_buckets[_score_bucket(s.interestingness_score or 0)].append(s)
+
+        # Count this run's candidates per bucket
+        run_buckets: list[list[CodingSession]] = [[], [], [], []]
+        for s in candidates:
+            run_buckets[_score_bucket(s.interestingness_score or 0)].append(s)
+
+        table = Table(title="Analysis Plan", show_edge=False, pad_edge=False)
+        table.add_column("Score", style="bold")
+        table.add_column("Total", justify="right")
+        table.add_column("Analyzed", justify="right", style="green")
+        table.add_column("Pending", justify="right")
+        table.add_column("This run", justify="right", style="cyan")
+        table.add_column("Est. cost", justify="right")
+        for i, label in enumerate(bucket_labels):
+            a_count = analyzed_buckets[i]
+            p_count = len(indexed_buckets[i])
+            r_bucket = run_buckets[i]
+            total = a_count + p_count
+            cost = _est_bucket_cost(r_bucket) if r_bucket else "-"
+            style = "dim" if total == 0 else None
+            table.add_row(
+                label,
+                str(total),
+                str(a_count),
+                str(p_count),
+                str(len(r_bucket)),
+                cost,
+                style=style,
+            )
+        table.add_section()
+        this_run_cost = estimate_cost(
+            input_tokens=sum(s.estimated_analysis_tokens or 0 for s in candidates),
+            output_tokens=ESTIMATED_RESPONSE_TOKENS * len(candidates),
         )
+        this_run_cost_str = f"~${this_run_cost:.4f}" if this_run_cost else "unknown"
+        table.add_row(
+            "Total",
+            str(already_analyzed + len(all_indexed)),
+            str(already_analyzed),
+            str(len(all_indexed)),
+            str(len(candidates)),
+            f"[bold]{this_run_cost_str}[/bold]",
+        )
+        console.print()
+        console.print(table)
+        if limit and total_candidates > limit:
+            console.print(
+                f"\n  [dim]Showing [bold]--limit {limit}[/bold] of {total_candidates} eligible."
+                f" Use [cyan]--limit 0[/cyan] to analyze all.[/dim]"
+            )
+        # Coverage fills (sessions below min_score that got selected for user/project coverage)
+        by_fill = sum(1 for s in candidates if (s.interestingness_score or 0) < min_score)
+        if by_fill:
+            console.print(
+                f"  [dim]includes {by_fill} coverage fill(s) for underrepresented projects/users[/dim]"
+            )
+        console.print(
+            "\n  [dim]Use [cyan]--min-score 0.4[/cyan] to analyze only medium+ interest sessions[/dim]"
+        )
+        console.print()
+
+        if not yes:
+            from rich.prompt import Confirm
+
+            if not Confirm.ask("  Proceed?", default=True, console=console):
+                console.print("[dim]Cancelled.[/dim]")
+                return
 
         work_items = []
         # Build source instances per source type to load spans
@@ -1230,21 +1586,29 @@ async def _analyze_async(
             except Exception:
                 return None
 
+        skipped_stale = 0
         for cs in candidates:
             src = _get_source(cs.source) or source
             spans = await asyncio.to_thread(src.get_spans_by_session, cs.id)
-            if spans:
-                trace = TraceData(
-                    trace_id=cs.id,
-                    start_time=spans[0].start_time,
-                    end_time=spans[-1].end_time,
-                    spans=spans,
-                )
-                work_items.append((cs.id, cs.id, trace, spans))
-                console.print(
-                    f"  [yellow]◆[/yellow] {cs.id[:12]} — score={cs.interestingness_score:.2f}, "
-                    f"user={cs.user_id or '-'}, project={cs.project_name or '-'}"
-                )
+            if not spans:
+                skipped_stale += 1
+                continue
+            trace = TraceData(
+                trace_id=cs.id,
+                start_time=spans[0].start_time,
+                end_time=spans[-1].end_time,
+                spans=spans,
+            )
+            work_items.append((cs.id, cs.id, trace, spans))
+            console.print(
+                f"  [yellow]◆[/yellow] {cs.id[:12]} — score={cs.interestingness_score:.2f}, "
+                f"user={cs.user_id or '-'}, project={cs.project_name or '-'}"
+            )
+
+    if skipped_stale:
+        console.print(
+            f"  [dim]{skipped_stale} session(s) skipped (transcript no longer available)[/dim]"
+        )
 
     if not work_items:
         console.print("[yellow]No sessions to analyze.[/yellow]")
@@ -1263,6 +1627,8 @@ async def _analyze_async(
 
     analysis_input = [(trace, spans) for _, _, trace, spans in work_items]
 
+    from cinsights.analysis.project_detection import ProjectGuess
+
     # Project detection for phoenix source (others already have project names)
     if settings.source not in (SourceType.ENTIREIO, SourceType.LOCAL):
         detect_items_list: list[tuple[str, str | None, list[SpanData]]] = [
@@ -1276,8 +1642,6 @@ async def _analyze_async(
             ),
         )
     else:
-        from cinsights.analysis.project_detection import ProjectGuess
-
         analysis_results = await analyzer.analyze_batch(analysis_input, max_concurrency=concurrency)
         project_guesses = [
             ProjectGuess(
@@ -1297,6 +1661,19 @@ async def _analyze_async(
         for (trace_id, _session_id, _trace, _spans), result, project_guess in zip(
             work_items, analysis_results, project_guesses, strict=True
         ):
+            # Skip sessions where LLM call failed (503, timeout, etc.)
+            if isinstance(result, BaseException):
+                failed += 1
+                err_msg = str(result).split("\n")[0][:80]
+                console.print(f"  [red]✗[/red] {trace_id} — {err_msg}")
+                continue
+            if isinstance(project_guess, BaseException):
+                project_guess = ProjectGuess(
+                    project_name=previous_tags.get(trace_id),
+                    confidence="low",
+                    reasoning="Project detection failed",
+                )
+
             try:
                 coding_session = await db.get(CodingSession, trace_id)
                 if not coding_session:
@@ -1328,7 +1705,7 @@ async def _analyze_async(
             except Exception as e:
                 await db.rollback()
                 failed += 1
-                console.print(f"  [red]✗[/red] {trace_id[:12]} — {e}")
+                console.print(f"  [red]✗[/red] {trace_id} — {e}")
 
     console.print()
     table = Table(title="Analysis Summary")
@@ -1343,45 +1720,51 @@ async def _analyze_async(
         await _refresh_scope_stats(sessionmaker, work_items)
 
 
-async def _refresh_scope_stats(sessionmaker, work_items: list) -> None:
-    """Recompute stats for users/projects affected by this analysis run."""
+async def _refresh_scope_stats(sessionmaker, work_items: list | None = None) -> None:
+    """Recompute stats for users/projects.
+
+    If work_items is provided, only refresh scopes touched by those sessions.
+    If work_items is None or empty, refresh ALL existing scopes in the DB.
+    """
     import json as json_mod
 
     from cinsights.db.models import CodingSession, ScopeStats
     from cinsights.stats import compute_all
 
-    # Collect affected users and projects
-    affected_users: set[str] = set()
-    affected_projects: set[str] = set()
-    async with sessionmaker() as db:
-        for trace_id, _, _, _ in work_items:
-            cs = await db.get(CodingSession, trace_id)
-            if cs:
-                if cs.user_id:
-                    affected_users.add(cs.user_id)
-                if cs.project_name:
-                    affected_projects.add(cs.project_name)
-
-    scopes: list[tuple[str, str]] = [
-        *[("user", u) for u in affected_users],
-        *[("project", p) for p in affected_projects],
-    ]
+    if work_items:
+        # Collect affected users and projects from work items
+        affected_users: set[str] = set()
+        affected_projects: set[str] = set()
+        async with sessionmaker() as db:
+            for trace_id, _, _, _ in work_items:
+                cs = await db.get(CodingSession, trace_id)
+                if cs:
+                    if cs.user_id:
+                        affected_users.add(cs.user_id)
+                    if cs.project_name:
+                        affected_projects.add(cs.project_name)
+        scopes: list[tuple[str, str]] = [
+            *[("user", u) for u in affected_users],
+            *[("project", p) for p in affected_projects],
+        ]
+    else:
+        # Refresh all existing scopes
+        async with sessionmaker() as db:
+            result = await db.exec(select_fn(ScopeStats))
+            scopes = [(s.scope_type, s.scope_value) for s in result.all()]
 
     if not scopes:
         return
 
     console.print(f"\n[dim]Updating stats for {len(scopes)} scope(s)...[/dim]")
 
-    end = datetime.now(UTC)
-    start = end - timedelta(days=90)
-
     for scope_type, scope_value in scopes:
         try:
             async with sessionmaker() as db:
                 stats = await compute_all(
                     db,
-                    start,
-                    end,
+                    None,
+                    None,
                     project_name=scope_value if scope_type == "project" else None,
                     user_id=scope_value if scope_type == "user" else None,
                 )
@@ -1452,7 +1835,7 @@ async def _digest_async(
         from cinsights.analysis.digest import DigestAnalyzer
         from cinsights.settings import get_llm_config
 
-        analyzer = DigestAnalyzer(llm_config=get_llm_config())
+        analyzer = DigestAnalyzer(llm_config=get_llm_config(digest=True))
 
     console.print(f"[bold]Running digest for {label} (last {days} days)...[/bold]\n")
 
@@ -1479,7 +1862,7 @@ async def _digest_async(
         )
         console.print(f"\n  View at: [bold]http://localhost:{settings.port}{url_path}[/bold]")
     elif status == "empty":
-        console.print(f"  [yellow]·[/yellow] {label} — no sessions")
+        pass  # detailed message already printed in _run_one_digest
     elif status == "stats_only":
         console.print(f"  [cyan]·[/cyan] {label} — stats only")
     elif status == "unchanged":

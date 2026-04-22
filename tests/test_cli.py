@@ -32,6 +32,7 @@ def test_cli_index_help():
     out = _strip_ansi(result.output)
     assert "--hours" in out
     assert "--source" in out
+    assert "--limit" not in out  # indexing is free, no cap needed
 
 
 def test_cli_analyze_help():
@@ -55,6 +56,7 @@ def test_cli_refresh_help():
     assert result.exit_code == 0
     out = _strip_ansi(result.output)
     assert "--hours" in out
+    assert "--limit" in out  # analyze step still has a limit
 
 
 def test_cli_setup_help():

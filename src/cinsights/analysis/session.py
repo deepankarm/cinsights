@@ -384,8 +384,12 @@ class SessionAnalyzer(LLMAnalyzer):
         self,
         items: list[tuple[TraceData, list[SpanData]]],
         max_concurrency: int = 5,
-    ) -> list[AnalysisResult]:
-        """Analyze multiple sessions concurrently."""
+    ) -> list[AnalysisResult | BaseException]:
+        """Analyze multiple sessions concurrently.
+
+        Returns a list matching the input order. Successful analyses return
+        AnalysisResult; failures return the exception (not raised).
+        """
         semaphore = asyncio.Semaphore(max_concurrency)
 
         async def _bounded(trace: TraceData, spans: list[SpanData]) -> AnalysisResult:
@@ -393,4 +397,4 @@ class SessionAnalyzer(LLMAnalyzer):
                 return await self.analyze(trace, spans)
 
         tasks = [_bounded(trace, spans) for trace, spans in items]
-        return await asyncio.gather(*tasks)
+        return await asyncio.gather(*tasks, return_exceptions=True)

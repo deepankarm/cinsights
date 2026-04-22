@@ -16,7 +16,10 @@ def create_source(settings: Settings):
             from cinsights.sources.entireio import EntireioSource
 
             if not settings.entireio_repo_path:
-                raise ValueError("CINSIGHTS_ENTIREIO_REPO_PATH is required when source=entireio")
+                raise ValueError(
+                    "Repo path required for entireio source. "
+                    "Use --repo /path/to/repo or set CINSIGHTS_ENTIREIO_REPO_PATH"
+                )
             return EntireioSource(
                 repo_path=Path(settings.entireio_repo_path),
                 branch=settings.entireio_branch,

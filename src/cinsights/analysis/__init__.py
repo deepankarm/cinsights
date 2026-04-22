@@ -6,6 +6,7 @@ tool-calling is unreliable on local models (pydantic-ai#4160).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import TYPE_CHECKING, TypeVar
@@ -135,6 +136,7 @@ class LLMAnalyzer:
         system_prompt: str,
         user_prompt: str,
         max_tokens: int,
+        _max_retries: int = 3,
     ) -> tuple[T, int, int]:
         agent = Agent(
             self._model,
@@ -144,9 +146,28 @@ class LLMAnalyzer:
             model_settings=ModelSettings(max_tokens=max_tokens),
             instrument=False,
         )
-        result = await agent.run(user_prompt)
-        usage = result.usage()
-        return result.output, usage.input_tokens or 0, usage.output_tokens or 0
+        last_exc: BaseException | None = None
+        for attempt in range(_max_retries):
+            try:
+                result = await agent.run(user_prompt)
+                usage = result.usage()
+                return result.output, usage.input_tokens or 0, usage.output_tokens or 0
+            except Exception as exc:
+                exc_str = str(exc)
+                is_retryable = "503" in exc_str or "429" in exc_str or "500" in exc_str
+                if not is_retryable or attempt == _max_retries - 1:
+                    raise
+                last_exc = exc
+                wait = 2 ** (attempt + 1)  # 2s, 4s
+                logger.warning(
+                    "LLM call failed (attempt %d/%d), retrying in %ds: %s",
+                    attempt + 1,
+                    _max_retries,
+                    wait,
+                    exc_str[:80],
+                )
+                await asyncio.sleep(wait)
+        raise last_exc  # type: ignore[misc]
 
     async def _run_ollama_direct(
         self,

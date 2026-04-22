@@ -1,17 +1,19 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
-	import { getProjects, getDigests, getDigest, type ProjectRead } from '$lib/api';
-	import type { SessionRead, DigestDetail } from '$lib/types';
+	import { getProjects, getDigests, getDigest, getProjectStats, type ProjectRead } from '$lib/api';
+	import type { SessionRead, DigestDetail, DigestStatsData } from '$lib/types';
 	import { fmtTokens, fmtDate, fmtDuration } from '$lib/format';
 	import DashboardView from '$lib/components/DashboardView.svelte';
 	import InsightsPanel from '$lib/components/InsightsPanel.svelte';
+	import ActivityCharts from '$lib/components/ActivityCharts.svelte';
 	import ExportHTML from '$lib/components/ExportHTML.svelte';
 
 	const projectName = $derived(decodeURIComponent(page.params.name ?? ''));
 
 	let project: ProjectRead | null = $state(null);
 	let digest: DigestDetail | null = $state(null);
+	let scopeStats: DigestStatsData | null = $state(null);
 	let loading = $state(true);
 	let error: string | null = $state(null);
 	let expandedUsers: Set<string> = $state(new Set());
@@ -20,12 +22,14 @@
 
 	onMount(async () => {
 		try {
-			const [projects, digests] = await Promise.all([
+			const [projects, digests, stats] = await Promise.all([
 				getProjects(),
 				getDigests(projectName).catch(() => []),
+				getProjectStats(projectName).catch(() => null),
 			]);
 			project = projects.find(p => p.name === projectName) ?? null;
 			if (!project) error = `Project not found: ${projectName}`;
+			if (stats) scopeStats = stats as unknown as DigestStatsData;
 
 			const completed = digests.find(d => d.status === 'complete');
 			if (completed) {
@@ -101,7 +105,7 @@
 			{@const visibleUsers = showAllUsers ? sessionsByUser : sessionsByUser.slice(0, userLimit)}
 			{#if sessionsByUser.length > 0}
 				<div class="section">
-					<h2>Sessions <span class="dim">({sessions.length} total, {sessionsByUser.length} developers)</span></h2>
+					<h2>Sessions <span class="dim">({project?.session_count ?? sessions.length} total, {project?.developer_count ?? sessionsByUser.length} developers)</span></h2>
 					<div class="user-list">
 						{#each visibleUsers as [userId, userSessions]}
 							{@const isOpen = expandedUsers.has(userId)}
@@ -165,12 +169,27 @@
 							<span class="generated-at">{new Date(digest.created_at).toLocaleDateString()}</span>
 						</span>
 					</div>
-					<InsightsPanel {digest} />
+					<InsightsPanel {digest} scopeStats={scopeStats ?? undefined} />
+				</div>
+			{:else if scopeStats}
+				<div class="section">
+					<h2>Activity</h2>
+					<ActivityCharts
+						toolDistribution={scopeStats.tool_distribution}
+						languageDistribution={scopeStats.language_distribution}
+						timeOfDay={scopeStats.time_of_day}
+						errorTypes={scopeStats.error_types}
+						sessionCount={scopeStats.session_count}
+						analyzedCount={scopeStats.analyzed_count}
+					/>
+					<div class="empty-insights" style="margin-top: 16px">
+						Run <code>cinsights digest project {projectName} --days 30</code> to generate insights.
+					</div>
 				</div>
 			{:else}
 				<div class="section">
 					<div class="empty-insights">
-						No insights yet. Run <code>cinsights digest --days 30 --project {projectName}</code> to generate.
+						No insights yet. Run <code>cinsights digest project {projectName} --days 30</code> to generate.
 					</div>
 				</div>
 			{/if}
