@@ -1379,8 +1379,10 @@ async def _analyze_async(
         table.add_column("Sessions", justify="right")
         table.add_column("Est. cost", justify="right")
         for label, bucket in buckets:
-            if bucket:
-                table.add_row(label, str(len(bucket)), _est_bucket_cost(bucket))
+            count = str(len(bucket))
+            cost = _est_bucket_cost(bucket) if bucket else "-"
+            style = "dim" if not bucket else None
+            table.add_row(label, count, cost, style=style)
         table.add_section()
         total_est_prompt = sum(s.estimated_analysis_tokens or 0 for s in candidates)
         total_cost = estimate_cost(
