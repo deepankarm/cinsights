@@ -829,7 +829,9 @@ async def _index_async(
 
     # Build rich summary from indexed sessions
     console.print()
-    await _print_index_summary(sessionmaker, work_items, indexed, failed, scored_rows)
+    await _print_index_summary(
+        sessionmaker, work_items, indexed, failed, scored_rows, settings.source
+    )
 
 
 async def _print_index_summary(
@@ -838,6 +840,7 @@ async def _print_index_summary(
     indexed: int,
     failed: int,
     scored_rows: list[tuple[str, float, str]],
+    source: str = "local",
 ) -> None:
     """Print a rich summary of what was indexed."""
     from collections import Counter
@@ -870,7 +873,14 @@ async def _print_index_summary(
     total_turns = sum(s.turn_count or 0 for s in sessions)
     total_tokens = sum(s.total_tokens for s in sessions)
     projects = {s.project_name for s in sessions if s.project_name}
-    users = {s.user_id for s in sessions if s.user_id}
+    raw_users = {s.user_id for s in sessions if s.user_id}
+    # Clean up display names: "12345+user@noreply.github.com" → "user", "a@b.com" → "a"
+    users = set()
+    for u in raw_users:
+        name = u.split("@")[0]
+        if "+" in name and name.split("+")[0].isdigit():
+            name = name.split("+", 1)[1]
+        users.add(name)
     agents = Counter(s.agent_type for s in sessions)
     models = Counter(s.model for s in sessions if s.model and not s.model.startswith("<"))
 
@@ -903,12 +913,24 @@ async def _print_index_summary(
     if durations:
         left_lines.append(f"  Median session length: [bold]{median_duration:.0f}min[/bold]")
     left_lines.append("")
-    left_lines.append(
-        f"  [bold]{len(users)}[/bold] developer(s): {', '.join(sorted(users)) or '—'}"
-    )
-    left_lines.append(
-        f"  [bold]{len(projects)}[/bold] project(s): {', '.join(sorted(projects)) or '—'}"
-    )
+    sorted_users = sorted(users)
+    if len(sorted_users) <= 3:
+        left_lines.append(
+            f"  [bold]{len(users)}[/bold] developer(s): {', '.join(sorted_users) or '—'}"
+        )
+    else:
+        left_lines.append(
+            f"  [bold]{len(users)}[/bold] developer(s): {', '.join(sorted_users[:3])}, …"
+        )
+    sorted_projects = sorted(projects)
+    if len(sorted_projects) <= 5:
+        left_lines.append(
+            f"  [bold]{len(projects)}[/bold] project(s): {', '.join(sorted_projects) or '—'}"
+        )
+    else:
+        left_lines.append(
+            f"  [bold]{len(projects)}[/bold] project(s): {', '.join(sorted_projects[:5])}, …"
+        )
     if len(agents) > 1 or (agents and list(agents.keys()) != ["claude-code"]):
         agent_parts = [f"{name} ({n})" for name, n in agents.most_common()]
         left_lines.append(f"  Agents: {', '.join(agent_parts)}")
@@ -947,13 +969,13 @@ async def _print_index_summary(
 
     if high + medium > 0:
         console.print(
-            f"\n  [bold]Next:[/bold] run [cyan]cinsights analyze --source local[/cyan]"
+            f"\n  [bold]Next:[/bold] run [cyan]cinsights analyze --source {source}[/cyan]"
             f" to get LLM insights on {high + medium} interesting session(s)"
         )
     else:
         console.print(
             "\n  [dim]No high-interest sessions found."
-            " Try [cyan]cinsights analyze --source local --min-score 0[/cyan]"
+            f" Try [cyan]cinsights analyze --source {source} --min-score 0[/cyan]"
             " to analyze all sessions.[/dim]"
         )
 

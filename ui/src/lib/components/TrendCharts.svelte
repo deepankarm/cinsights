@@ -1,15 +1,42 @@
 <script lang="ts">
 	import type { TrendPoint, TokenDistribution } from '$lib/api';
+	import type { SessionRead } from '$lib/types';
 	import { fmtTokens } from '$lib/format';
 
-	let { trends, tokenDist = null }: { trends: TrendPoint[]; tokenDist?: TokenDistribution | null } = $props();
+	let { trends, tokenDist = null, sessions = [], sessionCount = 0 }: { trends: TrendPoint[]; tokenDist?: TokenDistribution | null; sessions?: SessionRead[]; sessionCount?: number } = $props();
 
 	const bp = $derived.by(() => {
 		if (!tokenDist) return null;
-		const logMax = Math.log10(tokenDist.max_val + 1);
-		const scale = (v: number) => (Math.log10(v + 1) / logMax) * 100;
-		return { ...tokenDist, scale };
+		const lo = tokenDist.whisker_low;
+		const hi = tokenDist.whisker_high;
+		const range = hi - lo || 1;
+		const scale = (v: number) => ((v - lo) / range) * 100;
+		const points = [
+			{ label: 'Min', value: tokenDist.whisker_low, x: scale(tokenDist.whisker_low) },
+			{ label: 'Q1', value: tokenDist.q1, x: scale(tokenDist.q1) },
+			{ label: 'Median', value: tokenDist.median, x: scale(tokenDist.median) },
+			{ label: 'Q3', value: tokenDist.q3, x: scale(tokenDist.q3) },
+			{ label: 'Max', value: tokenDist.whisker_high, x: scale(tokenDist.whisker_high) },
+		];
+		return { ...tokenDist, scale, points };
 	});
+
+	let bpHover: { label: string; value: number; x: number; y: number } | null = $state(null);
+
+	function bpMove(e: MouseEvent) {
+		if (!bp) return;
+		const svg = e.currentTarget as SVGElement;
+		const rect = svg.getBoundingClientRect();
+		const relX = (e.clientX - rect.left) / rect.width * 100;
+		// Find closest point
+		let closest = bp.points[0];
+		let minDist = Infinity;
+		for (const p of bp.points) {
+			const d = Math.abs(p.x - relX);
+			if (d < minDist) { minDist = d; closest = p; }
+		}
+		bpHover = { ...closest, y: e.clientY - rect.top };
+	}
 
 	let chartHoverIdx: Record<string, number | null> = $state({});
 
@@ -97,17 +124,24 @@
 		{ id: 'c6', key: 'total_tokens', title: 'Token Usage', desc: 'Tokens consumed per day.', color: '#06b6d4', suffix: '', invertTrend: false, type: 'bar' },
 	];
 
-	// Agent distribution from trend data
+	// Agent distribution — prefer sessions (accurate), fall back to trend data (pre-aggregated)
 	const agentDist = $derived.by(() => {
 		const counts: Record<string, number> = {};
-		for (const t of trends) {
-			if (t.agent_distribution_json) {
-				try {
-					const dist = JSON.parse(t.agent_distribution_json) as Record<string, number>;
-					for (const [agent, count] of Object.entries(dist)) {
-						counts[agent] = (counts[agent] ?? 0) + count;
-					}
-				} catch { /* skip */ }
+		if (sessions.length > 0) {
+			for (const s of sessions) {
+				const agent = s.agent_type || 'unknown';
+				counts[agent] = (counts[agent] ?? 0) + 1;
+			}
+		} else {
+			for (const t of trends) {
+				if (t.agent_distribution_json) {
+					try {
+						const dist = JSON.parse(t.agent_distribution_json) as Record<string, number>;
+						for (const [agent, count] of Object.entries(dist)) {
+							counts[agent] = (counts[agent] ?? 0) + count;
+						}
+					} catch { /* skip */ }
+				}
 			}
 		}
 		const total = Object.values(counts).reduce((s, v) => s + v, 0);
@@ -227,7 +261,7 @@
 			<div class="chart-card">
 				<div class="chart-header">
 					<h3>Agent Distribution</h3>
-					<span class="chart-total">{agentTotal} sessions</span>
+					<span class="chart-total">{sessionCount || agentTotal} sessions</span>
 				</div>
 				<p class="chart-desc">Coding agents used across all sessions.</p>
 				<div class="pie-inner">
@@ -255,28 +289,53 @@
 		{/if}
 
 		{#if bp}
+			{@const PAD_X = 40}
+			{@const BW = 720}
+			{@const BH = 90}
+			{@const iw = BW - PAD_X * 2}
+			{@const cy = 50}
+			{@const boxH = 28}
+			{@const x = (v: number) => PAD_X + (bp.scale(v) / 100) * iw}
 			<div class="chart-card">
 				<div class="chart-header">
 					<h3>Token Distribution</h3>
-					<span class="chart-total">{bp.count} sessions</span>
+					<span class="chart-total">{sessionCount || bp.count} sessions</span>
 				</div>
-				<p class="chart-desc">Token usage per session. Log scale. Median: {fmtTokens(bp.median)}</p>
-				<div class="bp-container">
-					<div class="bp-labels">
-						<span>Min: {fmtTokens(bp.whisker_low)}</span>
-						<span>Q1: {fmtTokens(bp.q1)}</span>
-						<span class="bp-median-label">Median: {fmtTokens(bp.median)}</span>
-						<span>Q3: {fmtTokens(bp.q3)}</span>
-						<span>Max: {fmtTokens(bp.whisker_high)}</span>
-					</div>
-					<div class="bp-track">
-						<div class="bp-whisker" style="left: {bp.scale(bp.whisker_low)}%; width: {bp.scale(bp.q1) - bp.scale(bp.whisker_low)}%"></div>
-						<div class="bp-box" style="left: {bp.scale(bp.q1)}%; width: {bp.scale(bp.q3) - bp.scale(bp.q1)}%">
-							<div class="bp-median-line" style="left: {((bp.scale(bp.median) - bp.scale(bp.q1)) / Math.max(bp.scale(bp.q3) - bp.scale(bp.q1), 1)) * 100}%"></div>
-						</div>
-						<div class="bp-whisker" style="left: {bp.scale(bp.q3)}%; width: {bp.scale(bp.whisker_high) - bp.scale(bp.q3)}%"></div>
-					</div>
-				</div>
+				<p class="chart-desc">Token usage per session. Median: {fmtTokens(bp.median)}</p>
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<svg class="bp-svg" viewBox="0 0 {BW} {BH}"
+					onmousemove={bpMove} onmouseleave={() => bpHover = null}>
+					<!-- whiskers -->
+					<line x1={x(bp.whisker_low)} x2={x(bp.q1)} y1={cy} y2={cy} stroke="#94a3b8" stroke-width="2" />
+					<line x1={x(bp.q3)} x2={x(bp.whisker_high)} y1={cy} y2={cy} stroke="#94a3b8" stroke-width="2" />
+					<!-- whisker caps -->
+					<line x1={x(bp.whisker_low)} x2={x(bp.whisker_low)} y1={cy - 8} y2={cy + 8} stroke="#94a3b8" stroke-width="2" />
+					<line x1={x(bp.whisker_high)} x2={x(bp.whisker_high)} y1={cy - 8} y2={cy + 8} stroke="#94a3b8" stroke-width="2" />
+					<!-- box (Q1–Q3) -->
+					<rect x={x(bp.q1)} y={cy - boxH / 2} width={x(bp.q3) - x(bp.q1)} height={boxH}
+						rx="4" fill="url(#bpGrad)" stroke="#3b82f6" stroke-width="1" />
+					<!-- median line -->
+					<line x1={x(bp.median)} x2={x(bp.median)} y1={cy - boxH / 2} y2={cy + boxH / 2}
+						stroke="#1e3a5f" stroke-width="2.5" />
+					<!-- labels -->
+					<text x={x(bp.whisker_low)} y={cy + boxH / 2 + 14} text-anchor="start" class="bp-tick">{fmtTokens(bp.whisker_low)}</text>
+					<text x={x(bp.q1)} y={cy - boxH / 2 - 6} text-anchor="middle" class="bp-tick">{fmtTokens(bp.q1)}</text>
+					<text x={x(bp.median)} y={cy - boxH / 2 - 6} text-anchor="middle" class="bp-tick bp-tick-median">{fmtTokens(bp.median)}</text>
+					<text x={x(bp.q3)} y={cy + boxH / 2 + 14} text-anchor="middle" class="bp-tick">{fmtTokens(bp.q3)}</text>
+					<text x={x(bp.whisker_high)} y={cy + boxH / 2 + 14} text-anchor="end" class="bp-tick">{fmtTokens(bp.whisker_high)}</text>
+					<!-- hover highlight -->
+					{#if bpHover}
+						<circle cx={x(bpHover.value)} cy={cy} r="5" fill="#8b5cf6" />
+						<rect x={x(bpHover.value) - 45} y={cy - boxH / 2 - 28} width="90" height="20" rx="4" fill="#1e293b" />
+						<text x={x(bpHover.value)} y={cy - boxH / 2 - 14} text-anchor="middle" fill="white" font-size="11" font-weight="600">{bpHover.label}: {fmtTokens(bpHover.value)}</text>
+					{/if}
+					<defs>
+						<linearGradient id="bpGrad" x1="0%" x2="100%">
+							<stop offset="0%" stop-color="#3b82f6" />
+							<stop offset="100%" stop-color="#93c5fd" />
+						</linearGradient>
+					</defs>
+				</svg>
 			</div>
 		{/if}
 	</div>
@@ -310,13 +369,9 @@
 	.pie-leg-name { font-size: 13px; font-weight: 600; color: #232326; font-family: monospace; }
 	.pie-leg-val { font-size: 12px; color: #94a3b8; margin-left: auto; }
 
-	.bp-container { padding: 16px 0 4px; }
-	.bp-labels { display: flex; justify-content: space-between; font-size: 10px; color: #64748b; margin-bottom: 8px; }
-	.bp-median-label { font-weight: 700; color: #232326; }
-	.bp-track { position: relative; height: 28px; background: #f1f5f9; border-radius: 6px; }
-	.bp-whisker { position: absolute; top: 12px; height: 4px; background: #94a3b8; border-radius: 2px; }
-	.bp-box { position: absolute; top: 4px; height: 20px; background: linear-gradient(90deg, #3b82f6, #93c5fd); border-radius: 6px; }
-	.bp-median-line { position: absolute; top: 0; width: 2px; height: 100%; background: #1e40af; border-radius: 1px; }
+	.bp-svg { width: 100%; height: auto; cursor: crosshair; margin-top: 8px; }
+	.bp-tick { font-size: 10px; fill: #64748b; }
+	.bp-tick-median { font-weight: 700; fill: #232326; }
 
 	@media (max-width: 768px) { .charts-grid { grid-template-columns: 1fr; } }
 </style>

@@ -98,6 +98,11 @@ class EntireioSource:
                 meta_dir = "/".join(sess_meta_path.split("/")[:-1])
                 transcript_path = f"{meta_dir}/full.jsonl"
 
+            # Skip sessions without transcripts (incomplete/abandoned)
+            tree_cache = self.reader._build_tree_cache()
+            if transcript_path not in tree_cache:
+                continue
+
             index[session_id] = _SessionRef(
                 checkpoint_id=summary.checkpoint_id,
                 checkpoint_dir=cp_dir,

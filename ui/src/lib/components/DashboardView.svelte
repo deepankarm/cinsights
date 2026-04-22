@@ -123,7 +123,7 @@
 		<QualityBar metrics={qualityMetrics} />
 	{/if}
 
-	<TrendCharts {trends} {tokenDist} />
+	<TrendCharts {trends} {tokenDist} {sessions} sessionCount={matchedUser?.session_count ?? sessions.length} />
 
 	{#if extra}
 		{@render extra({ users, sessions, projects })}
