@@ -42,6 +42,9 @@
 			if (scope === 'user' || scope === 'project') {
 				promises.push(getSessions(0, 500, undefined, userId, projectName));
 			}
+			if (scope === 'project') {
+				promises.push(getProjects());
+			}
 
 			const results = await Promise.all(promises);
 			trends = results[0] as TrendPoint[];
@@ -55,6 +58,9 @@
 			if (scope === 'user' || scope === 'project') {
 				sessions = results[3] as SessionRead[];
 			}
+			if (scope === 'project') {
+				projects = results[4] as ProjectRead[];
+			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load dashboard';
 		} finally {
@@ -67,6 +73,7 @@
 	const latestDate = $derived(trends.length ? trends[trends.length - 1].date : '-');
 
 	const matchedUser = $derived(scope === 'user' ? users.find(u => u.user_id === userId) ?? null : null);
+	const matchedProject = $derived(scope === 'project' ? projects.find(p => p.name === projectName) ?? null : null);
 
 	const teamAvgs = $derived.by<Record<string, number | null>>(() => {
 		if (scope !== 'user' || users.length < 2) return {};
@@ -103,11 +110,13 @@
 			];
 		}
 		// project scope
+		const sc = matchedProject?.session_count ?? sessions.length;
+		const ac = matchedProject?.analyzed_count ?? 0;
 		return [
-			{ value: String(sessions.length), label: 'Sessions', sub: 'in this project' },
-			{ value: fmtTokens(totalTokens), label: 'Total Tokens', sub: 'across all sessions' },
-			{ value: String(users.length), label: 'Developers', sub: users.slice(0, 3).map(u => u.display_name).join(', ') || '-' },
-			{ value: String(daysTracked), label: 'Days Active', sub: `${latestDate.slice(5)} latest` },
+			{ value: String(sc), label: 'Sessions', sub: `${ac} analyzed · ${sc - ac} indexed` },
+			{ value: fmtTokens(matchedProject?.total_tokens ?? totalTokens), label: 'Total Tokens', sub: 'across all sessions' },
+			{ value: String(matchedProject?.developer_count ?? users.length), label: 'Developers', sub: users.slice(0, 3).map(u => u.display_name).join(', ') || '-' },
+			{ value: String(matchedProject?.active_days ?? daysTracked), label: 'Days Active', sub: `${latestDate.slice(5)} latest` },
 		];
 	});
 </script>
@@ -123,7 +132,7 @@
 		<QualityBar metrics={qualityMetrics} />
 	{/if}
 
-	<TrendCharts {trends} {tokenDist} {sessions} sessionCount={matchedUser?.session_count ?? sessions.length} />
+	<TrendCharts {trends} {tokenDist} {sessions} sessionCount={matchedUser?.session_count ?? matchedProject?.session_count ?? sessions.length} />
 
 	{#if extra}
 		{@render extra({ users, sessions, projects })}

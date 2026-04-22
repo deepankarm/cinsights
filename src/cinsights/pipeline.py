@@ -827,6 +827,9 @@ async def _index_async(
         else:
             console.print(f"  [dim]·[/dim] {trace_id[:12]} — {reason}")
 
+    # Refresh stats for affected users/projects
+    await _refresh_scope_stats(sessionmaker, work_items)
+
     # Build rich summary from indexed sessions
     console.print()
     await _print_index_summary(
