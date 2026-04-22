@@ -749,7 +749,9 @@ async def _index_async(
     )
 
     if not work_items:
-        console.print("[yellow]No sessions to index.[/yellow]")
+        console.print("[yellow]No new sessions to index.[/yellow]")
+        # Still refresh stats in case code changed (e.g. removed time window)
+        await _refresh_scope_stats(sessionmaker)
         return
 
     console.print(f"\n[bold]Indexing {len(work_items)} session(s)...[/bold]\n")
@@ -1614,29 +1616,38 @@ async def _analyze_async(
         await _refresh_scope_stats(sessionmaker, work_items)
 
 
-async def _refresh_scope_stats(sessionmaker, work_items: list) -> None:
-    """Recompute stats for users/projects affected by this analysis run."""
+async def _refresh_scope_stats(sessionmaker, work_items: list | None = None) -> None:
+    """Recompute stats for users/projects.
+
+    If work_items is provided, only refresh scopes touched by those sessions.
+    If work_items is None or empty, refresh ALL existing scopes in the DB.
+    """
     import json as json_mod
 
     from cinsights.db.models import CodingSession, ScopeStats
     from cinsights.stats import compute_all
 
-    # Collect affected users and projects
-    affected_users: set[str] = set()
-    affected_projects: set[str] = set()
-    async with sessionmaker() as db:
-        for trace_id, _, _, _ in work_items:
-            cs = await db.get(CodingSession, trace_id)
-            if cs:
-                if cs.user_id:
-                    affected_users.add(cs.user_id)
-                if cs.project_name:
-                    affected_projects.add(cs.project_name)
-
-    scopes: list[tuple[str, str]] = [
-        *[("user", u) for u in affected_users],
-        *[("project", p) for p in affected_projects],
-    ]
+    if work_items:
+        # Collect affected users and projects from work items
+        affected_users: set[str] = set()
+        affected_projects: set[str] = set()
+        async with sessionmaker() as db:
+            for trace_id, _, _, _ in work_items:
+                cs = await db.get(CodingSession, trace_id)
+                if cs:
+                    if cs.user_id:
+                        affected_users.add(cs.user_id)
+                    if cs.project_name:
+                        affected_projects.add(cs.project_name)
+        scopes: list[tuple[str, str]] = [
+            *[("user", u) for u in affected_users],
+            *[("project", p) for p in affected_projects],
+        ]
+    else:
+        # Refresh all existing scopes
+        async with sessionmaker() as db:
+            result = await db.exec(select_fn(ScopeStats))
+            scopes = [(s.scope_type, s.scope_value) for s in result.all()]
 
     if not scopes:
         return
