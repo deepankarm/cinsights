@@ -103,6 +103,8 @@ The digest is the product. Individual session insights are evidence. If you only
 
 ## Developer mood quotes
 
+![Things you've said when you were...](../.github/images/mood-quotes.png)
+
 During analysis, cinsights extracts notable things developers say to their coding agents, categorized by mood:
 
 | Mood | What it captures |
