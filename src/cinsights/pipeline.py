@@ -1643,16 +1643,13 @@ async def _refresh_scope_stats(sessionmaker, work_items: list) -> None:
 
     console.print(f"\n[dim]Updating stats for {len(scopes)} scope(s)...[/dim]")
 
-    end = datetime.now(UTC)
-    start = end - timedelta(days=90)
-
     for scope_type, scope_value in scopes:
         try:
             async with sessionmaker() as db:
                 stats = await compute_all(
                     db,
-                    start,
-                    end,
+                    None,
+                    None,
                     project_name=scope_value if scope_type == "project" else None,
                     user_id=scope_value if scope_type == "user" else None,
                 )

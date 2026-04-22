@@ -6,7 +6,7 @@ All functions take a SQLModel Session, date range, and optional project_name fil
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel
@@ -152,8 +152,8 @@ class Benchmarks(BaseModel):
 class DigestStats(BaseModel):
     """All computed statistics for a digest period."""
 
-    period_start: datetime
-    period_end: datetime
+    period_start: datetime | None = None
+    period_end: datetime | None = None
     session_count: int
     analyzed_count: int
 
@@ -200,8 +200,8 @@ class DigestStats(BaseModel):
 
 
 def _session_filter(
-    start: datetime,
-    end: datetime,
+    start: datetime | None,
+    end: datetime | None,
     project_name: str | None = None,
     user_id: str | None = None,
     *,
@@ -213,10 +213,11 @@ def _session_filter(
     extracted metadata). Pass ``analyzed_only=True`` to restrict to sessions
     that have LLM-generated insights.
     """
-    clauses: list[Any] = [
-        CodingSession.start_time >= start,
-        CodingSession.start_time <= end,
-    ]
+    clauses: list[Any] = []
+    if start is not None:
+        clauses.append(CodingSession.start_time >= start)
+    if end is not None:
+        clauses.append(CodingSession.start_time <= end)
     if analyzed_only:
         clauses.append(CodingSession.status == SessionStatus.ANALYZED)
     else:
@@ -231,8 +232,8 @@ def _session_filter(
 
 
 def _base_query(
-    start: datetime,
-    end: datetime,
+    start: datetime | None,
+    end: datetime | None,
     project_name: str | None = None,
     user_id: str | None = None,
     *,
@@ -250,8 +251,8 @@ def _base_query(
 
 def _tc_agg_query(
     columns: tuple[Any, ...],
-    start: datetime,
-    end: datetime,
+    start: datetime | None,
+    end: datetime | None,
     project_name: str | None = None,
     user_id: str | None = None,
     *,
@@ -274,8 +275,8 @@ def _tc_agg_query(
 
 async def compute_tool_distribution(
     db: AsyncSession,
-    start: datetime,
-    end: datetime,
+    start: datetime | None,
+    end: datetime | None,
     project_name: str | None = None,
     user_id: str | None = None,
 ) -> dict[str, int]:
@@ -289,8 +290,8 @@ async def compute_tool_distribution(
 
 async def compute_error_breakdown(
     db: AsyncSession,
-    start: datetime,
-    end: datetime,
+    start: datetime | None,
+    end: datetime | None,
     project_name: str | None = None,
     user_id: str | None = None,
 ) -> tuple[dict[str, int], dict[str, int]]:
@@ -331,8 +332,8 @@ async def compute_error_breakdown(
 
 async def compute_language_distribution(
     db: AsyncSession,
-    start: datetime,
-    end: datetime,
+    start: datetime | None,
+    end: datetime | None,
     project_name: str | None = None,
     user_id: str | None = None,
 ) -> dict[str, int]:
@@ -416,8 +417,8 @@ def _compute_hourly_quality(
 
 async def compute_time_of_day(
     db: AsyncSession,
-    start: datetime,
-    end: datetime,
+    start: datetime | None,
+    end: datetime | None,
     project_name: str | None = None,
     user_id: str | None = None,
 ) -> dict[int, int]:
@@ -431,8 +432,8 @@ async def compute_time_of_day(
 
 async def compute_session_health(
     db: AsyncSession,
-    start: datetime,
-    end: datetime,
+    start: datetime | None,
+    end: datetime | None,
     project_name: str | None = None,
     user_id: str | None = None,
 ) -> list[SessionHealthScore]:
@@ -503,8 +504,8 @@ async def compute_session_health(
 
 async def compute_permission_stats(
     db: AsyncSession,
-    start: datetime,
-    end: datetime,
+    start: datetime | None,
+    end: datetime | None,
     project_name: str | None = None,
     user_id: str | None = None,
 ) -> PermissionStats:
@@ -553,8 +554,8 @@ async def compute_permission_stats(
 
 async def compute_plan_mode_stats(
     db: AsyncSession,
-    start: datetime,
-    end: datetime,
+    start: datetime | None,
+    end: datetime | None,
     project_name: str | None = None,
     user_id: str | None = None,
 ) -> PlanModeStats:
@@ -603,8 +604,8 @@ async def compute_plan_mode_stats(
 
 async def detect_claude_md(
     db: AsyncSession,
-    start: datetime,
-    end: datetime,
+    start: datetime | None,
+    end: datetime | None,
     project_name: str | None = None,
     user_id: str | None = None,
 ) -> bool:
@@ -634,8 +635,8 @@ async def detect_claude_md(
 
 async def detect_overlapping_sessions(
     db: AsyncSession,
-    start: datetime,
-    end: datetime,
+    start: datetime | None,
+    end: datetime | None,
     project_name: str | None = None,
     user_id: str | None = None,
 ) -> list[dict]:
@@ -663,8 +664,8 @@ async def detect_overlapping_sessions(
 
 async def collect_session_summaries(
     db: AsyncSession,
-    start: datetime,
-    end: datetime,
+    start: datetime | None,
+    end: datetime | None,
     project_name: str | None = None,
     user_id: str | None = None,
 ) -> list[dict]:
@@ -830,8 +831,8 @@ def _compute_cost_context(
 
 async def _compute_benchmarks(
     db: AsyncSession,
-    start: datetime,
-    end: datetime,
+    start: datetime | None,
+    end: datetime | None,
     project_name: str | None,
     user_id: str | None,
 ) -> Benchmarks | None:
@@ -1009,8 +1010,8 @@ def _cluster_and_aggregate_labels(
 
 async def compute_all(
     db: AsyncSession,
-    start: datetime,
-    end: datetime,
+    start: datetime | None,
+    end: datetime | None,
     project_name: str | None = None,
     user_id: str | None = None,
 ) -> DigestStats:
@@ -1143,8 +1144,9 @@ async def compute_all(
     )
 
     return DigestStats(
-        period_start=start,
-        period_end=end,
+        period_start=start
+        or (min(s.start_time for s in sessions) if sessions else datetime.now(UTC)),
+        period_end=end or (max(s.start_time for s in sessions) if sessions else datetime.now(UTC)),
         session_count=len(sessions),
         analyzed_count=analyzed_count,
         total_tool_calls=total_tool_calls,
