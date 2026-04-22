@@ -229,6 +229,54 @@ def serve(
     )
 
 
+def _prompt_llm_config(
+    current: LLMConfig,
+    provider: str | None,
+    model: str | None,
+    base_url: str | None,
+    extra_headers: str | None,
+    interactive: bool,
+    default_model: str | None = None,
+) -> LLMConfig:
+    """Prompt for LLM config values, reusing current as defaults."""
+    import json
+
+    from cinsights.settings import LLMConfig
+
+    if provider is None:
+        provider = typer.prompt("LLM Provider", default=current.provider)
+    if model is None:
+        model = typer.prompt("Model name", default=default_model or current.model)
+    if interactive:
+        if base_url is None:
+            base_url = typer.prompt(
+                "Base URL (blank for default)",
+                default=current.base_url or "",
+                show_default=False,
+            )
+        if extra_headers is None:
+            current_headers = json.dumps(current.extra_headers) if current.extra_headers else ""
+            extra_headers = typer.prompt(
+                "Extra HTTP headers as JSON (blank for none)",
+                default=current_headers,
+                show_default=bool(current_headers),
+            )
+
+    import contextlib
+
+    headers_dict: dict[str, str] = {}
+    if extra_headers:
+        with contextlib.suppress(json.JSONDecodeError):
+            headers_dict = json.loads(extra_headers)
+
+    return LLMConfig(
+        provider=provider,
+        model=model,
+        base_url=base_url or None,
+        extra_headers=headers_dict,
+    )
+
+
 @app.command()
 def setup(
     provider: str | None = typer.Option(None, help="LLM provider (e.g. anthropic, openai)."),
@@ -249,22 +297,15 @@ def setup(
     Digest mode: --digest configures a separate model for digest generation.
     Validate mode: --validate tests the current config.
     """
-    import json
 
     from cinsights.runtime import console
-    from cinsights.settings import AppConfig, LLMConfig, Paths
+    from cinsights.settings import AppConfig, Paths
 
     app_config = AppConfig.load()
-    target_label = "digest" if digest else "analyze"
-
-    # Resolve current config for the target
-    if digest:
-        llm = app_config.digest_llm or app_config.analyze_llm or app_config.llm
-    else:
-        llm = app_config.analyze_llm or app_config.llm
+    llm = app_config.digest_llm or app_config.llm if digest else app_config.llm
 
     if validate:
-        analyze_cfg = app_config.analyze_llm or app_config.llm
+        analyze_cfg = app_config.llm
         console.print("  [bold]Analyze model:[/bold]")
         console.print(
             f"    Provider: [bold]{analyze_cfg.provider}[/bold]\n"
@@ -284,64 +325,44 @@ def setup(
         _test_connection(analyze_cfg)
         return
 
-    console.print(f"\n  Configuring [bold]{target_label}[/bold] model:\n")
-
     # One-shot mode (provider/model given) vs interactive mode (prompt for all)
     interactive = provider is None and model is None
-    if provider is None:
-        provider = typer.prompt("LLM Provider", default=llm.provider)
-    if model is None:
-        model = typer.prompt("Model name", default=llm.model)
-    if interactive:
-        if base_url is None:
-            base_url = typer.prompt(
-                "Base URL (blank for default)",
-                default=llm.base_url or "",
-                show_default=False,
-            )
-        if extra_headers is None:
-            current = json.dumps(llm.extra_headers) if llm.extra_headers else ""
-            extra_headers = typer.prompt(
-                "Extra HTTP headers as JSON (blank for none)",
-                default=current,
-                show_default=bool(current),
-            )
 
-    # Parse extra headers
-    headers_dict: dict[str, str] = {}
-    if extra_headers:
-        try:
-            headers_dict = json.loads(extra_headers)
-        except json.JSONDecodeError as e:
-            console.print("[red]Invalid JSON for extra headers.[/red]")
-            raise typer.Exit(1) from e
+    if interactive and not digest:
+        console.print(
+            "\n  [bold]Analyze model[/bold] — used for per-session analysis (high volume, cost-sensitive).\n"
+            "  A fast, cheap model works best (e.g. gemini-2.5-flash-lite).\n"
+        )
+    elif interactive and digest:
+        console.print(
+            "\n  [bold]Digest model[/bold] — used for cross-session reports (low volume, quality matters).\n"
+            "  A smarter model produces better insights (e.g. gemini-2.5-flash).\n"
+        )
 
-    new_config = LLMConfig(
-        provider=provider,
-        model=model,
-        base_url=base_url or None,
-        extra_headers=headers_dict,
-    )
+    new_config = _prompt_llm_config(llm, provider, model, base_url, extra_headers, interactive)
 
     if digest:
         app_config.digest_llm = new_config
     else:
-        app_config.analyze_llm = new_config
-        # Keep llm in sync for backward compat
         app_config.llm = new_config
 
     # In interactive mode, also ask about digest model
     if interactive and not digest:
         console.print()
         if typer.confirm("Configure a separate digest model?", default=False):
+            digest_llm = app_config.digest_llm or new_config
             console.print(
-                "\n  [bold]Digest model[/bold] (higher quality, used for cross-session reports):\n"
+                "\n  [bold]Digest model[/bold] — used for cross-session reports (low volume, quality matters).\n"
+                "  A smarter model produces better insights (e.g. gemini-2.5-flash).\n"
             )
-            d_provider = typer.prompt("LLM Provider", default=new_config.provider)
-            d_model = typer.prompt("Model name", default="gemini-2.5-flash")
-            app_config.digest_llm = LLMConfig(
-                provider=d_provider,
-                model=d_model,
+            app_config.digest_llm = _prompt_llm_config(
+                digest_llm,
+                None,
+                None,
+                None,
+                None,
+                interactive=True,
+                default_model="gemini-2.5-flash",
             )
 
     app_config.save()
