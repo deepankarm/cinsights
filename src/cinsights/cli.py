@@ -330,6 +330,20 @@ def setup(
         # Keep llm in sync for backward compat
         app_config.llm = new_config
 
+    # In interactive mode, also ask about digest model
+    if interactive and not digest:
+        console.print()
+        if typer.confirm("Configure a separate digest model?", default=False):
+            console.print(
+                "\n  [bold]Digest model[/bold] (higher quality, used for cross-session reports):\n"
+            )
+            d_provider = typer.prompt("LLM Provider", default=new_config.provider)
+            d_model = typer.prompt("Model name", default="gemini-2.5-flash")
+            app_config.digest_llm = LLMConfig(
+                provider=d_provider,
+                model=d_model,
+            )
+
     app_config.save()
     console.print(f"\n  Configuration written to [bold]{Paths.config_file}[/bold]")
 
