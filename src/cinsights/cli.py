@@ -14,10 +14,11 @@ from __future__ import annotations
 import asyncio
 import os
 
-# Suppress HuggingFace progress bars and telemetry before any imports
+# Suppress noisy third-party progress bars before any imports
 os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+
 from typing import TYPE_CHECKING
 
 import typer
@@ -28,6 +29,10 @@ from cinsights.settings import get_settings
 
 if TYPE_CHECKING:
     from cinsights.settings import LLMConfig
+
+import logging
+
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 app = typer.Typer(name="cinsights", help="LLM-powered insights from coding agent sessions.")
 

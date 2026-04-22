@@ -1363,9 +1363,8 @@ async def _analyze_async(
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
-        # Suppress noisy third-party logs
+        # Suppress noisy third-party logs (httpx already suppressed in cli.py)
         for noisy in (
-            "httpx",
             "sentence_transformers",
             "transformers",
             "huggingface_hub",
