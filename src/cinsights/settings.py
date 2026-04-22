@@ -32,7 +32,7 @@ class Paths:
     project_root: Path = Path(__file__).resolve().parent.parent.parent
     config_dir: Path = Path.home() / ".cinsights"
     config_file: Path = config_dir / "config.json"
-    default_db: str = f"sqlite:///{project_root / 'cinsights.db'}"
+    default_db: str = f"sqlite:///{config_dir / 'cinsights.db'}"
     templates_dir: Path = Path(__file__).resolve().parent / "prompts" / "templates"
     jinja_env: Environment = Environment(
         loader=FileSystemLoader(str(templates_dir)), keep_trailing_newline=True

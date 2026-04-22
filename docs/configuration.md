@@ -8,7 +8,7 @@ Start with defaults. The only thing you need to set on day one is your API key.
 |----------|---------|-------------|
 | `ANTHROPIC_API_KEY` | - | Anthropic API key (required for default LLM config; not needed with Ollama) |
 | `CINSIGHTS_SOURCE` | `phoenix` | Data source: `phoenix`, `local`, or `entireio` |
-| `CINSIGHTS_DATABASE_URL` | `sqlite:///cinsights.db` | Database connection string |
+| `CINSIGHTS_DATABASE_URL` | `sqlite:///~/.cinsights/cinsights.db` | Database connection string |
 | `CINSIGHTS_BUDGET_MODE` | `balanced` | Scoring budget: `frugal`, `balanced`, `thorough`, `all` |
 | `CINSIGHTS_COLD_START_SESSIONS` | `10` | Always analyze first N sessions per (user, project) |
 | `CINSIGHTS_MIN_SESSION_TOOL_COUNT` | `10` | Minimum tool calls to include session in digest evidence |
