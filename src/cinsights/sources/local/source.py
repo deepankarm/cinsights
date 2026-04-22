@@ -279,7 +279,7 @@ class LocalSource:
         index = self._build_index()
         ref = index.get(session_id)
         if not ref:
-            logger.error("Session not found in index: %s", session_id)
+            logger.debug("Session not found in index: %s", session_id)
             return []
 
         try:

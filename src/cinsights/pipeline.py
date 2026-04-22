@@ -1259,7 +1259,8 @@ async def _analyze_async(
     verbose: bool,
     trace_ids: list[str] | None,
     run: _RunHandle | None = None,
-    min_score: float = 0.0,
+    min_score: float = 0.4,
+    yes: bool = False,
 ) -> None:
     """LLM-analyze INDEXED sessions that meet the score threshold.
 
@@ -1271,6 +1272,15 @@ async def _analyze_async(
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
+        # Suppress noisy third-party logs
+        for noisy in (
+            "httpx",
+            "sentence_transformers",
+            "transformers",
+            "huggingface_hub",
+            "torch",
+        ):
+            logging.getLogger(noisy).setLevel(logging.WARNING)
 
     settings = get_settings()
 
@@ -1296,6 +1306,7 @@ async def _analyze_async(
         )
         known_projects = sorted({p for p in kp_result.all() if p})
 
+    skipped_stale = 0
     if trace_ids:
         # Analyze specific sessions by ID
         work_items = await _discover_work_items(
@@ -1342,9 +1353,28 @@ async def _analyze_async(
         by_score = sum(1 for s in candidates if (s.interestingness_score or 0) >= min_score)
         by_fill = len(candidates) - by_score
         console.print(
-            f"\n[bold]Selected {len(candidates)} INDEXED session(s)[/bold] "
-            f"({by_score} by score ≥ {min_score}, {by_fill} by coverage fills)\n"
+            f"\n[bold]Selected {len(candidates)} session(s) for analysis[/bold] "
+            f"({by_score} by score ≥ {min_score}, {by_fill} coverage fills)\n"
         )
+
+        # Estimate cost and confirm with user
+        from cinsights.costs import ESTIMATED_RESPONSE_TOKENS, estimate_cost
+
+        total_est_prompt = sum(s.estimated_analysis_tokens or 0 for s in candidates)
+        total_est_response = ESTIMATED_RESPONSE_TOKENS * len(candidates)
+        est_cost = estimate_cost(input_tokens=total_est_prompt, output_tokens=total_est_response)
+        est_cost_str = f"~${est_cost:.2f}" if est_cost else "unknown"
+        console.print(
+            f"  [bold]{len(candidates)}[/bold] LLM calls, "
+            f"~[bold]{total_est_prompt:,}[/bold] prompt tokens, "
+            f"est. cost: [bold]{est_cost_str}[/bold]\n"
+        )
+        if not yes:
+            from rich.prompt import Confirm
+
+            if not Confirm.ask("  Proceed?", default=True, console=console):
+                console.print("[dim]Cancelled.[/dim]")
+                return
 
         work_items = []
         # Build source instances per source type to load spans
@@ -1367,21 +1397,29 @@ async def _analyze_async(
             except Exception:
                 return None
 
+        skipped_stale = 0
         for cs in candidates:
             src = _get_source(cs.source) or source
             spans = await asyncio.to_thread(src.get_spans_by_session, cs.id)
-            if spans:
-                trace = TraceData(
-                    trace_id=cs.id,
-                    start_time=spans[0].start_time,
-                    end_time=spans[-1].end_time,
-                    spans=spans,
-                )
-                work_items.append((cs.id, cs.id, trace, spans))
-                console.print(
-                    f"  [yellow]◆[/yellow] {cs.id[:12]} — score={cs.interestingness_score:.2f}, "
-                    f"user={cs.user_id or '-'}, project={cs.project_name or '-'}"
-                )
+            if not spans:
+                skipped_stale += 1
+                continue
+            trace = TraceData(
+                trace_id=cs.id,
+                start_time=spans[0].start_time,
+                end_time=spans[-1].end_time,
+                spans=spans,
+            )
+            work_items.append((cs.id, cs.id, trace, spans))
+            console.print(
+                f"  [yellow]◆[/yellow] {cs.id[:12]} — score={cs.interestingness_score:.2f}, "
+                f"user={cs.user_id or '-'}, project={cs.project_name or '-'}"
+            )
+
+    if skipped_stale:
+        console.print(
+            f"  [dim]{skipped_stale} session(s) skipped (transcript no longer available)[/dim]"
+        )
 
     if not work_items:
         console.print("[yellow]No sessions to analyze.[/yellow]")
