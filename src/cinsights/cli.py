@@ -235,6 +235,9 @@ def setup(
     model: str | None = typer.Option(None, help="Model name."),
     base_url: str | None = typer.Option(None, help="Custom base URL (for gateways/proxies)."),
     extra_headers: str | None = typer.Option(None, help="Extra HTTP headers as JSON string."),
+    digest: bool = typer.Option(
+        False, "--digest", help="Configure the digest model (separate from analyze)."
+    ),
     validate: bool = typer.Option(
         False, "--validate", help="Test current config without prompting."
     ),
@@ -243,6 +246,7 @@ def setup(
 
     Interactive mode (no args): prompts for each value, like `aws configure`.
     One-shot mode: pass --provider, --model, etc. directly.
+    Digest mode: --digest configures a separate model for digest generation.
     Validate mode: --validate tests the current config.
     """
     import json
@@ -251,36 +255,57 @@ def setup(
     from cinsights.settings import AppConfig, LLMConfig, Paths
 
     app_config = AppConfig.load()
-    llm = app_config.llm
+    target_label = "digest" if digest else "analyze"
+
+    # Resolve current config for the target
+    if digest:
+        llm = app_config.digest_llm or app_config.analyze_llm or app_config.llm
+    else:
+        llm = app_config.analyze_llm or app_config.llm
 
     if validate:
+        analyze_cfg = app_config.analyze_llm or app_config.llm
+        console.print("  [bold]Analyze model:[/bold]")
         console.print(
-            f"  Provider: [bold]{llm.provider}[/bold]\n"
-            f"  Model:    [bold]{llm.model}[/bold]\n"
-            f"  Base URL: {llm.base_url or '(default)'}\n"
-            f"  Headers:  {llm.extra_headers or '(none)'}"
+            f"    Provider: [bold]{analyze_cfg.provider}[/bold]\n"
+            f"    Model:    [bold]{analyze_cfg.model}[/bold]\n"
+            f"    Base URL: {analyze_cfg.base_url or '(default)'}"
         )
-        _test_connection(llm)
+        digest_cfg = app_config.digest_llm
+        if digest_cfg:
+            console.print("\n  [bold]Digest model:[/bold]")
+            console.print(
+                f"    Provider: [bold]{digest_cfg.provider}[/bold]\n"
+                f"    Model:    [bold]{digest_cfg.model}[/bold]\n"
+                f"    Base URL: {digest_cfg.base_url or '(default)'}"
+            )
+        else:
+            console.print("\n  [bold]Digest model:[/bold] (same as analyze)")
+        _test_connection(analyze_cfg)
         return
 
-    # Interactive mode: prompt for values with current defaults
+    console.print(f"\n  Configuring [bold]{target_label}[/bold] model:\n")
+
+    # One-shot mode (provider/model given) vs interactive mode (prompt for all)
+    interactive = provider is None and model is None
     if provider is None:
         provider = typer.prompt("LLM Provider", default=llm.provider)
     if model is None:
         model = typer.prompt("Model name", default=llm.model)
-    if base_url is None:
-        base_url = typer.prompt(
-            "Base URL (blank for default)",
-            default=llm.base_url or "",
-            show_default=False,
-        )
-    if extra_headers is None:
-        current = json.dumps(llm.extra_headers) if llm.extra_headers else ""
-        extra_headers = typer.prompt(
-            "Extra HTTP headers as JSON (blank for none)",
-            default=current,
-            show_default=bool(current),
-        )
+    if interactive:
+        if base_url is None:
+            base_url = typer.prompt(
+                "Base URL (blank for default)",
+                default=llm.base_url or "",
+                show_default=False,
+            )
+        if extra_headers is None:
+            current = json.dumps(llm.extra_headers) if llm.extra_headers else ""
+            extra_headers = typer.prompt(
+                "Extra HTTP headers as JSON (blank for none)",
+                default=current,
+                show_default=bool(current),
+            )
 
     # Parse extra headers
     headers_dict: dict[str, str] = {}
@@ -291,22 +316,31 @@ def setup(
             console.print("[red]Invalid JSON for extra headers.[/red]")
             raise typer.Exit(1) from e
 
-    app_config.llm = LLMConfig(
+    new_config = LLMConfig(
         provider=provider,
         model=model,
         base_url=base_url or None,
         extra_headers=headers_dict,
     )
+
+    if digest:
+        app_config.digest_llm = new_config
+    else:
+        app_config.analyze_llm = new_config
+        # Keep llm in sync for backward compat
+        app_config.llm = new_config
+
     app_config.save()
     console.print(f"\n  Configuration written to [bold]{Paths.config_file}[/bold]")
 
-    # Download embedding model for label clustering
-    console.print("\n  Downloading embedding model...")
-    _download_embedding_model()
+    # Download embedding model for label clustering (only on first setup)
+    if not digest:
+        console.print("\n  Downloading embedding model...")
+        _download_embedding_model()
 
     # Offer to test
     if typer.confirm("Test connection?", default=True):
-        _test_connection(app_config.llm)
+        _test_connection(new_config)
 
 
 def _download_embedding_model() -> None:

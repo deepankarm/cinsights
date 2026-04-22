@@ -55,9 +55,12 @@ class LLMConfig(BaseModel):
     extra_headers: dict[str, str] = Field(default_factory=dict)
 
     @classmethod
-    def load(cls) -> "LLMConfig":
+    def load(cls, *, digest: bool = False) -> "LLMConfig":
         """Convenience: load just the LLM section from config.json."""
-        return AppConfig.load().llm
+        config = AppConfig.load()
+        if digest:
+            return config.digest_llm or config.analyze_llm or config.llm
+        return config.analyze_llm or config.llm
 
     def _make_provider(self, provider_name: str):
         """Provider factory that injects base_url and extra headers."""
@@ -155,7 +158,9 @@ class AppConfig(BaseModel):
         }
     """
 
-    llm: LLMConfig = Field(default_factory=LLMConfig)
+    llm: LLMConfig = Field(default_factory=LLMConfig)  # backward compat alias
+    analyze_llm: LLMConfig | None = None
+    digest_llm: LLMConfig | None = None
     claude_code_homes: list[str] = Field(default_factory=lambda: ["~/.claude"])
     codex_homes: list[str] = Field(default_factory=lambda: ["~/.codex"])
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
@@ -234,6 +239,14 @@ def get_config() -> AppConfig:
     return AppConfig.load()
 
 
-@lru_cache
-def get_llm_config() -> LLMConfig:
-    return get_config().llm
+def get_llm_config(*, digest: bool = False) -> LLMConfig:
+    """Return the LLM config for analysis or digest.
+
+    Resolution order:
+    - digest=True:  config.digest_llm → config.analyze_llm → config.llm
+    - digest=False: config.analyze_llm → config.llm
+    """
+    config = get_config()
+    if digest:
+        return config.digest_llm or config.analyze_llm or config.llm
+    return config.analyze_llm or config.llm

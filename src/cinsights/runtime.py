@@ -101,8 +101,8 @@ async def _track_run(command: str) -> AsyncIterator[_RunHandle]:
         config = get_config()
         run_metadata = _json.dumps(
             {
-                "model": config.llm.model,
-                "provider": config.llm.provider,
+                "model": (config.analyze_llm or config.llm).model,
+                "provider": (config.analyze_llm or config.llm).provider,
             }
         )
     except Exception:

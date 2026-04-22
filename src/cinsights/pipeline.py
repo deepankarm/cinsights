@@ -1835,7 +1835,7 @@ async def _digest_async(
         from cinsights.analysis.digest import DigestAnalyzer
         from cinsights.settings import get_llm_config
 
-        analyzer = DigestAnalyzer(llm_config=get_llm_config())
+        analyzer = DigestAnalyzer(llm_config=get_llm_config(digest=True))
 
     console.print(f"[bold]Running digest for {label} (last {days} days)...[/bold]\n")
 

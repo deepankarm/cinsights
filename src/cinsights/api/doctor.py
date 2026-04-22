@@ -308,8 +308,8 @@ async def get_health(db: AsyncSession = Depends(get_db)) -> SystemHealthResponse
         for k, v in config.limits.model_dump().items()
     ]
     config_snap = ConfigSnapshot(
-        model=config.llm.model,
-        provider=config.llm.provider,
+        model=(config.analyze_llm or config.llm).model,
+        provider=(config.analyze_llm or config.llm).provider,
         limits=limits_list,
     )
 
