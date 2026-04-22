@@ -1397,44 +1397,52 @@ async def _analyze_async(
         for s in all_analyzed:
             analyzed_buckets[_score_bucket(s.interestingness_score or 0)] += 1
 
-        # Count to-analyze per bucket
-        pending_buckets: list[list[CodingSession]] = [[], [], [], []]
+        # Count ALL indexed (pending) per bucket — not limited by --limit
+        indexed_buckets: list[list[CodingSession]] = [[], [], [], []]
+        for s in all_indexed:
+            indexed_buckets[_score_bucket(s.interestingness_score or 0)].append(s)
+
+        # Count this run's candidates per bucket
+        run_buckets: list[list[CodingSession]] = [[], [], [], []]
         for s in candidates:
-            pending_buckets[_score_bucket(s.interestingness_score or 0)].append(s)
+            run_buckets[_score_bucket(s.interestingness_score or 0)].append(s)
 
         table = Table(title="Analysis Plan", show_edge=False, pad_edge=False)
         table.add_column("Score", style="bold")
         table.add_column("Total", justify="right")
         table.add_column("Analyzed", justify="right", style="green")
-        table.add_column("To analyze", justify="right", style="cyan")
+        table.add_column("Pending", justify="right")
+        table.add_column("This run", justify="right", style="cyan")
         table.add_column("Est. cost", justify="right")
         for i, label in enumerate(bucket_labels):
             a_count = analyzed_buckets[i]
-            p_bucket = pending_buckets[i]
-            total = a_count + len(p_bucket)
-            cost = _est_bucket_cost(p_bucket) if p_bucket else "-"
+            p_count = len(indexed_buckets[i])
+            r_bucket = run_buckets[i]
+            total = a_count + p_count
+            cost = _est_bucket_cost(r_bucket) if r_bucket else "-"
             style = "dim" if total == 0 else None
             table.add_row(
                 label,
                 str(total),
                 str(a_count),
-                str(len(p_bucket)),
+                str(p_count),
+                str(len(r_bucket)),
                 cost,
                 style=style,
             )
         table.add_section()
-        total_est_prompt = sum(s.estimated_analysis_tokens or 0 for s in candidates)
-        total_cost = estimate_cost(
-            input_tokens=total_est_prompt,
+        this_run_cost = estimate_cost(
+            input_tokens=sum(s.estimated_analysis_tokens or 0 for s in candidates),
             output_tokens=ESTIMATED_RESPONSE_TOKENS * len(candidates),
         )
-        total_cost_str = f"~${total_cost:.4f}" if total_cost else "unknown"
+        this_run_cost_str = f"~${this_run_cost:.4f}" if this_run_cost else "unknown"
         table.add_row(
             "Total",
             str(already_analyzed + len(all_indexed)),
             str(already_analyzed),
+            str(len(all_indexed)),
             str(len(candidates)),
-            f"[bold]{total_cost_str}[/bold]",
+            f"[bold]{this_run_cost_str}[/bold]",
         )
         console.print()
         console.print(table)
