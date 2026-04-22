@@ -49,8 +49,8 @@ class LLMConfig(BaseModel):
     pydantic-ai supports works with zero code changes.
     """
 
-    provider: str = "anthropic"
-    model: str = "claude-haiku-4-5-20251001"
+    provider: str = "google-gla"
+    model: str = "gemini-2.5-flash-lite"
     base_url: str | None = None
     extra_headers: dict[str, str] = Field(default_factory=dict)
 
@@ -142,8 +142,8 @@ class AppConfig(BaseModel):
 
         {
           "llm": {
-            "provider": "anthropic",
-            "model": "claude-haiku-4-5-20251001",
+            "provider": "google-gla",
+            "model": "gemini-2.5-flash-lite",
             "extra_headers": {}
           },
           "claude_code_homes": ["~/.claude-work", "~/.claude"],
