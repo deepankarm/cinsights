@@ -8,7 +8,7 @@ A compressed summary of each session — not the full transcript. Tool call name
 
 ### How much does it cost to run?
 
-Indexing is free. A typical daily refresh (index + analyze ~50 sessions) costs **$0.10-0.30** with Haiku. A project digest costs **$0.05-0.15**. Use Ollama for completely free local inference (slower but works offline). See [How it works — cost breakdown](how-it-works.md#cost-breakdown-by-operation).
+Indexing is free. A typical daily refresh (index + analyze ~50 sessions) costs **$0.05-0.15** with Gemini Flash Lite. A project digest costs **$0.03-0.10**. Use Ollama for completely free local inference (slower but works offline). See [How it works — cost breakdown](how-it-works.md#cost-breakdown-by-operation).
 
 ### Can I use it without an API key?
 

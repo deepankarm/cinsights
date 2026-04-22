@@ -93,7 +93,7 @@ Routine sessions score 0.2-0.4. Interesting ones land at 0.6+.
 | `thorough` | Top ~50% | ~$0.50-1.00 per refresh |
 | `all` | Everything | Varies by session count |
 
-Cost estimates assume Haiku-class models and ~50 sessions per refresh.
+Cost estimates assume Gemini Flash Lite and ~50 sessions per refresh.
 
 **Cold start**: The first 10 sessions per (developer, project) pair are always analyzed regardless of score, because there's no baseline yet.
 
@@ -106,7 +106,7 @@ Cost estimates assume Haiku-class models and ~50 sessions per refresh.
 | `digest` (1 project, 30 days) | 3 concurrent | $0.05-0.15 | Weekly or on-demand |
 | `refresh` (index + analyze) | Same as analyze | Same as analyze | Daily cron |
 
-All costs assume Haiku. Using Ollama makes everything free (but slower — a digest takes ~2-3 minutes vs seconds).
+All costs assume Gemini Flash Lite. Using Ollama makes everything free (but slower — a digest takes ~2-3 minutes vs seconds).
 
 ## Data flow diagram
 
@@ -153,7 +153,7 @@ All truncation limits are configurable in `~/.cinsights/config.json`:
 }
 ```
 
-Increase these if using a model with a larger context window. The defaults are sized for Haiku-class models.
+Increase these if using a model with a larger context window.
 
 ---
 

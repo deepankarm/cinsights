@@ -30,7 +30,7 @@ You can also set these in a `.env` file in the project root.
 {
   "llm": {
     "provider": "anthropic",
-    "model": "claude-haiku-4-5-20251001",
+    "model": "gemini-2.5-flash-lite",
     "base_url": null,
     "extra_headers": {},
     "use_json_schema_mode": false
@@ -65,7 +65,7 @@ Ollama example:
 
 **`claude_code_homes` / `codex_homes`** - Directories to scan when using the [local source](sources/local.md).
 
-**`limits`** - Context window and coverage tuning. Defaults are sized for Haiku-class models. Increase `max_timeline_spans` if using a model with a larger context window.
+**`limits`** - Context window and coverage tuning. Increase `max_timeline_spans` if using a model with a larger context window.
 
 ## LLM provider setup
 
@@ -78,7 +78,7 @@ cinsights setup
 One-shot:
 
 ```bash
-cinsights setup --provider anthropic --model claude-haiku-4-5-20251001
+cinsights setup --provider google-gla --model gemini-2.5-flash-lite
 ```
 
 Validate current config:
