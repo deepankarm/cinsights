@@ -12,6 +12,12 @@ to the async pipeline. All real work lives in:
 from __future__ import annotations
 
 import asyncio
+import os
+
+# Suppress HuggingFace progress bars and telemetry before any imports
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 from typing import TYPE_CHECKING
 
 import typer

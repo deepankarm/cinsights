@@ -901,6 +901,8 @@ def _cluster_and_aggregate_labels(
         from sklearn.metrics.pairwise import cosine_similarity
 
         os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+        os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+        os.environ["TRANSFORMERS_VERBOSITY"] = "error"
         # Suppress noisy model loading logs
         for _lib in ("sentence_transformers", "transformers", "huggingface_hub", "torch"):
             logging.getLogger(_lib).setLevel(logging.ERROR)
