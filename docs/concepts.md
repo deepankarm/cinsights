@@ -121,6 +121,8 @@ The five mood categories are derived from Plutchik's emotion wheel, filtered to 
 
 ## Behavioral patterns
 
+![Behavioral patterns dot timeline](../.github/images/behavioral-patterns.png)
+
 Computed from tool call sequences during analysis. These surface recurring interaction habits:
 
 - **Tool preferences** — which tools the developer reaches for (heavy Bash user? prefers Read over Grep?)
