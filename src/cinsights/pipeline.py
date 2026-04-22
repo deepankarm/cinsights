@@ -1334,16 +1334,25 @@ async def _analyze_async(
             result = await db.exec(query)
             all_indexed = result.all()
 
-            # Counts for context
+            # Count already-analyzed for the total row
             from sqlalchemy import func as sa_func
 
-            total_q = select_fn(sa_func.count()).where(CodingSession.source == str(settings.source))
-            total_sessions = (await db.exec(total_q)).one()
-            analyzed_q = select_fn(sa_func.count()).where(
+            analyzed_count_q = select_fn(sa_func.count()).where(
                 CodingSession.source == str(settings.source),
                 CodingSession.status == SessionStatus.ANALYZED,
             )
-            already_analyzed = (await db.exec(analyzed_q)).one()
+            already_analyzed = (await db.exec(analyzed_count_q)).one()
+
+        # Also fetch already-analyzed sessions for the full picture
+        async with sessionmaker() as db:
+            analyzed_q = (
+                select_fn(CodingSession)
+                .where(CodingSession.source == str(settings.source))
+                .where(CodingSession.status == SessionStatus.ANALYZED)
+                .where(CodingSession.interestingness_score.isnot(None))
+            )
+            result = await db.exec(analyzed_q)
+            all_analyzed = result.all()
 
         if not all_indexed:
             console.print("[yellow]No scored INDEXED sessions found.[/yellow]")
@@ -1363,19 +1372,7 @@ async def _analyze_async(
             console.print(f"[yellow]No sessions selected at --min-score {min_score}.[/yellow]")
             return
 
-        console.print(
-            f"\n  [bold]{total_sessions}[/bold] total sessions, "
-            f"[bold]{already_analyzed}[/bold] already analyzed, "
-            f"[bold]{len(all_indexed)}[/bold] indexed and pending analysis"
-        )
-        if limit and total_candidates > limit:
-            console.print(
-                f"  Showing plan for [bold]--limit {limit}[/bold] "
-                f"({total_candidates} eligible). "
-                f"Use [cyan]--limit 0[/cyan] to analyze all."
-            )
-
-        # Show score breakdown with cost estimates
+        # Show unified status table
         from cinsights.costs import ESTIMATED_RESPONSE_TOKENS, estimate_cost
 
         def _est_bucket_cost(sessions: list) -> str:
@@ -1384,30 +1381,47 @@ async def _analyze_async(
             cost = estimate_cost(input_tokens=prompt_t, output_tokens=resp_t)
             return f"~${cost:.4f}" if cost else "?"
 
-        buckets = [
-            (
-                "≥0.6  high interest",
-                [s for s in candidates if (s.interestingness_score or 0) >= 0.6],
-            ),
-            (
-                "≥0.4  medium",
-                [s for s in candidates if 0.4 <= (s.interestingness_score or 0) < 0.6],
-            ),
-            ("≥0.2  low", [s for s in candidates if 0.2 <= (s.interestingness_score or 0) < 0.4]),
-            ("<0.2  routine", [s for s in candidates if (s.interestingness_score or 0) < 0.2]),
-        ]
-        # Coverage fills (sessions below min_score that got selected for user/project coverage)
-        by_fill = sum(1 for s in candidates if (s.interestingness_score or 0) < min_score)
+        def _score_bucket(score: float) -> int:
+            if score >= 0.6:
+                return 0
+            if score >= 0.4:
+                return 1
+            if score >= 0.2:
+                return 2
+            return 3
+
+        bucket_labels = ["≥0.6  high interest", "≥0.4  medium", "≥0.2  low", "<0.2  routine"]
+
+        # Count analyzed per bucket
+        analyzed_buckets: list[int] = [0, 0, 0, 0]
+        for s in all_analyzed:
+            analyzed_buckets[_score_bucket(s.interestingness_score or 0)] += 1
+
+        # Count to-analyze per bucket
+        pending_buckets: list[list[CodingSession]] = [[], [], [], []]
+        for s in candidates:
+            pending_buckets[_score_bucket(s.interestingness_score or 0)].append(s)
 
         table = Table(title="Analysis Plan", show_edge=False, pad_edge=False)
         table.add_column("Score", style="bold")
-        table.add_column("Sessions", justify="right")
+        table.add_column("Total", justify="right")
+        table.add_column("Analyzed", justify="right", style="green")
+        table.add_column("To analyze", justify="right", style="cyan")
         table.add_column("Est. cost", justify="right")
-        for label, bucket in buckets:
-            count = str(len(bucket))
-            cost = _est_bucket_cost(bucket) if bucket else "-"
-            style = "dim" if not bucket else None
-            table.add_row(label, count, cost, style=style)
+        for i, label in enumerate(bucket_labels):
+            a_count = analyzed_buckets[i]
+            p_bucket = pending_buckets[i]
+            total = a_count + len(p_bucket)
+            cost = _est_bucket_cost(p_bucket) if p_bucket else "-"
+            style = "dim" if total == 0 else None
+            table.add_row(
+                label,
+                str(total),
+                str(a_count),
+                str(len(p_bucket)),
+                cost,
+                style=style,
+            )
         table.add_section()
         total_est_prompt = sum(s.estimated_analysis_tokens or 0 for s in candidates)
         total_cost = estimate_cost(
@@ -1416,12 +1430,21 @@ async def _analyze_async(
         )
         total_cost_str = f"~${total_cost:.4f}" if total_cost else "unknown"
         table.add_row(
-            f"Total (≥{min_score})",
+            "Total",
+            str(already_analyzed + len(all_indexed)),
+            str(already_analyzed),
             str(len(candidates)),
             f"[bold]{total_cost_str}[/bold]",
         )
         console.print()
         console.print(table)
+        if limit and total_candidates > limit:
+            console.print(
+                f"\n  [dim]Showing [bold]--limit {limit}[/bold] of {total_candidates} eligible."
+                f" Use [cyan]--limit 0[/cyan] to analyze all.[/dim]"
+            )
+        # Coverage fills (sessions below min_score that got selected for user/project coverage)
+        by_fill = sum(1 for s in candidates if (s.interestingness_score or 0) < min_score)
         if by_fill:
             console.print(
                 f"  [dim]includes {by_fill} coverage fill(s) for underrepresented projects/users[/dim]"
