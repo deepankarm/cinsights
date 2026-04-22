@@ -348,13 +348,13 @@ def setup(
 
     # In interactive mode, also ask about digest model
     if interactive and not digest:
-        console.print()
+        console.print(
+            "\n  [bold]Digest model[/bold] — used for cross-session reports (low volume, quality matters).\n"
+            "  A smarter model produces better insights (e.g. gemini-2.5-flash).\n"
+        )
         if typer.confirm("Configure a separate digest model?", default=False):
             digest_llm = app_config.digest_llm or new_config
-            console.print(
-                "\n  [bold]Digest model[/bold] — used for cross-session reports (low volume, quality matters).\n"
-                "  A smarter model produces better insights (e.g. gemini-2.5-flash).\n"
-            )
+            console.print()
             app_config.digest_llm = _prompt_llm_config(
                 digest_llm,
                 None,
