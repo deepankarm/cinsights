@@ -139,7 +139,19 @@ async def _store_indexed(
         from cinsights.sources.entireio import EntireioSource
 
         if isinstance(source, EntireioSource):
-            coding_session.metadata_json = source.get_session_metadata_json(trace_id)
+            # Merge source metadata into existing (preserves notable_quotes from analysis)
+            source_meta_json = source.get_session_metadata_json(trace_id)
+            if source_meta_json:
+                import contextlib
+
+                existing = {}
+                if coding_session.metadata_json:
+                    with contextlib.suppress(Exception):
+                        existing = json_mod.loads(coding_session.metadata_json)
+                with contextlib.suppress(Exception):
+                    source_meta = json_mod.loads(source_meta_json)
+                    existing.update(source_meta)
+                coding_session.metadata_json = json_mod.dumps(existing)
             idx = source._build_index()
             for _, ref in idx.items():
                 if ref.checkpoint_id == trace_id.split(":")[1] and ref.session_idx == int(
