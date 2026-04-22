@@ -39,8 +39,11 @@ cinsights setup
 # ollama pull qwen2.5:14b
 # cinsights setup --provider openai --model qwen2.5:14b --base-url http://localhost:11434/v1
 
-# Index + analyze local Claude Code / Codex sessions
-cinsights refresh --source local --hours 8760
+# Index local Claude Code / Codex sessions (free, no LLM calls)
+cinsights index --source local --hours 8760
+
+# Analyze sessions (shows cost estimate, asks for confirmation)
+cinsights analyze --source local
 
 # Generate a project digest
 cinsights digest project my-project --days 30
