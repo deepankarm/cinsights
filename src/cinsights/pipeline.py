@@ -418,7 +418,14 @@ async def _run_one_digest(
     """
     import json as json_mod
 
-    from cinsights.db.models import Digest, DigestSection, DigestSectionType, DigestStatus
+    from cinsights.db.models import (
+        CodingSession,
+        Digest,
+        DigestSection,
+        DigestSectionType,
+        DigestStatus,
+        SessionStatus,
+    )
     from cinsights.stats import compute_all
 
     label = scope_project or (f"user:{user_id}" if user_id else "global")
@@ -440,7 +447,31 @@ async def _run_one_digest(
             await db.commit()
 
         if stats.session_count == 0:
-            console.print(f"  [yellow]·[/yellow] {label} — no sessions, skipped")
+            # Check if sessions exist outside the time window
+            from sqlalchemy import func as sa_func
+
+            total_q = select_fn(sa_func.count(), sa_func.max(CodingSession.start_time)).where(
+                col(CodingSession.status).in_([SessionStatus.INDEXED, SessionStatus.ANALYZED]),
+            )
+            if scope_project:
+                total_q = total_q.where(CodingSession.project_name == scope_project)
+            if user_id:
+                total_q = total_q.where(CodingSession.user_id == user_id)
+            total_count, latest = (await db.exec(total_q)).one()
+
+            if total_count and latest:
+                if latest.tzinfo is None:
+                    latest = latest.replace(tzinfo=UTC)
+                days_ago = (end - latest).days
+                suggested = max(days_ago + 1, 30)
+                console.print(
+                    f"  [yellow]·[/yellow] {label} — no sessions in the last "
+                    f"{(end - start).days} days. "
+                    f"{total_count} session(s) exist, latest {days_ago} days ago. "
+                    f"Try [cyan]--days {suggested}[/cyan]"
+                )
+            else:
+                console.print(f"  [yellow]·[/yellow] {label} — no sessions found")
             return ("empty", 0, 0)
 
         if stats_only:
