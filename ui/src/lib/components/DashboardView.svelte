@@ -40,7 +40,7 @@
 				promises.push(getStats(), getProjects());
 			}
 			if (scope === 'user' || scope === 'project') {
-				promises.push(getSessions(0, 500, undefined, userId, projectName));
+				promises.push(getSessions(0, 2000, undefined, userId, projectName));
 			}
 			if (scope === 'project') {
 				promises.push(getProjects());

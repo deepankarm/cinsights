@@ -101,7 +101,7 @@
 			{@const visibleUsers = showAllUsers ? sessionsByUser : sessionsByUser.slice(0, userLimit)}
 			{#if sessionsByUser.length > 0}
 				<div class="section">
-					<h2>Sessions <span class="dim">({sessions.length} total, {sessionsByUser.length} developers)</span></h2>
+					<h2>Sessions <span class="dim">({project?.session_count ?? sessions.length} total, {project?.developer_count ?? sessionsByUser.length} developers)</span></h2>
 					<div class="user-list">
 						{#each visibleUsers as [userId, userSessions]}
 							{@const isOpen = expandedUsers.has(userId)}
