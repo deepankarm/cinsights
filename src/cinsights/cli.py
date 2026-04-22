@@ -83,7 +83,7 @@ def score(
 
 @app.command()
 def analyze(
-    limit: int = typer.Option(50, help="Max sessions to analyze."),
+    limit: int = typer.Option(50, help="Max sessions to analyze. Use 0 for no limit."),
     force: bool = typer.Option(False, help="Re-analyze already-analyzed sessions."),
     concurrency: int = typer.Option(5, help="Max concurrent LLM analysis requests."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),

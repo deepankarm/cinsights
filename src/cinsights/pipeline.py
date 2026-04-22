@@ -1355,7 +1355,9 @@ async def _analyze_async(
         # Build scored tuples and apply selection with coverage fills
         scored_tuples = [(s, s.interestingness_score or 0.0, {}) for s in all_indexed]
         candidates, _ = select_for_analysis(scored_tuples, min_score=min_score)
-        candidates = candidates[:limit]
+        total_candidates = len(candidates)
+        if limit:
+            candidates = candidates[:limit]
 
         if not candidates:
             console.print(f"[yellow]No sessions selected at --min-score {min_score}.[/yellow]")
@@ -1366,6 +1368,12 @@ async def _analyze_async(
             f"[bold]{already_analyzed}[/bold] already analyzed, "
             f"[bold]{len(all_indexed)}[/bold] indexed and pending analysis"
         )
+        if limit and total_candidates > limit:
+            console.print(
+                f"  Showing plan for [bold]--limit {limit}[/bold] "
+                f"({total_candidates} eligible). "
+                f"Use [cyan]--limit 0[/cyan] to analyze all."
+            )
 
         # Show score breakdown with cost estimates
         from cinsights.costs import ESTIMATED_RESPONSE_TOKENS, estimate_cost
