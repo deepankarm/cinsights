@@ -443,7 +443,8 @@ def _test_connection(llm: LLMConfig) -> None:
         tokens = asyncio.run(_probe())
         console.print(f"  Testing... [green]Got {tokens} tokens back from {llm.model}[/green]")
     except Exception as e:
-        console.print(f"  Testing... [red]Failed: {e}[/red]")
+        err_msg = str(e).encode("ascii", errors="replace").decode()
+        console.print(f"  Testing... [red]Failed: {err_msg}[/red]")
         raise typer.Exit(1) from e
 
 
