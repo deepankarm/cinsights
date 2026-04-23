@@ -82,10 +82,12 @@ jobs:
           echo "Static files in wheel: $STATIC_COUNT"
           [ "$STATIC_COUNT" -ge 10 ] || (echo "FAIL: expected at least 10 static files, got $STATIC_COUNT" && exit 1)
       - name: Install built wheel
-        run: uv pip install dist/*.whl --force-reinstall --system
+        run: |
+          uv venv /tmp/smoke-test-venv
+          VIRTUAL_ENV=/tmp/smoke-test-venv uv pip install dist/*.whl
       - name: Smoke test server
         run: |
-          cinsights serve --port 8199 &
+          /tmp/smoke-test-venv/bin/cinsights serve --port 8199 &
           SERVER_PID=$!
           sleep 3
 
