@@ -46,6 +46,9 @@ def compute_all(
         "tool_calls_per_turn": (
             round(tc_count / turn_count, 1) if turn_count and tc_count else None
         ),
+        "error_retry_sequences": error_retry_sequences(tool_calls),
+        "context_resets": context_resets(context_growth),
+        "duplicate_read_count": duplicate_read_count(tool_calls),
     }
 
 
@@ -174,6 +177,59 @@ def context_pressure(context_growth: list[dict] | None) -> float | None:
     if comparisons == 0:
         return None
     return round(steep_increases / comparisons, 2)
+
+
+def error_retry_sequences(tool_calls: list[ToolCall]) -> int:
+    """Count error→retry patterns: a failed tool call followed by the same tool.
+
+    Indicates the agent retried an approach without changing strategy.
+    """
+    count = 0
+    for i in range(len(tool_calls) - 1):
+        if not tool_calls[i].success:
+            # Check next few calls (within 3) for same tool name
+            for j in range(i + 1, min(i + 4, len(tool_calls))):
+                if tool_calls[j].tool_name == tool_calls[i].tool_name:
+                    count += 1
+                    break
+    return count
+
+
+def context_resets(context_growth: list[dict] | None) -> int:
+    """Count turns where prompt_tokens dropped significantly (>40%).
+
+    A large drop indicates compaction or context reset — the agent had to
+    re-read context, wasting tokens on content it already processed.
+    """
+    if not context_growth or len(context_growth) < 2:
+        return 0
+
+    count = 0
+    for i in range(1, len(context_growth)):
+        prev = context_growth[i - 1].get("prompt_tokens", 0)
+        curr = context_growth[i].get("prompt_tokens", 0)
+        if prev > 1000 and curr < prev * 0.6:
+            count += 1
+    return count
+
+
+def duplicate_read_count(tool_calls: list[ToolCall]) -> int:
+    """Count Read tool calls on files that were already read earlier.
+
+    Re-reading the same file wastes tokens on content already in context.
+    """
+    read_files: dict[str, int] = {}  # file_path → count
+    duplicates = 0
+    for tc in tool_calls:
+        if tc.tool_name not in _READ_TOOLS:
+            continue
+        file_path = _extract_file_path(tc.input_value)
+        if not file_path:
+            continue
+        if file_path in read_files:
+            duplicates += 1
+        read_files[file_path] = read_files.get(file_path, 0) + 1
+    return duplicates
 
 
 def _extract_file_path(input_value: str | None) -> str | None:

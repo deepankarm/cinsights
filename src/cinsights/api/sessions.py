@@ -83,6 +83,19 @@ class SessionDetail(BaseModel):
     effort_level: str | None = None
     adaptive_thinking_disabled: bool | None = None
 
+    # Quality metrics
+    read_edit_ratio: float | None = None
+    edits_without_read_pct: float | None = None
+    error_rate: float | None = None
+    repeated_edits_count: int | None = None
+    tokens_per_useful_edit: float | None = None
+    context_pressure_score: float | None = None
+
+    # Token efficiency signals
+    error_retry_sequences: int | None = None
+    context_resets: int | None = None
+    duplicate_read_count: int | None = None
+
 
 class StatsResponse(BaseModel):
     total_sessions: int
@@ -311,6 +324,15 @@ async def get_session_detail(session_id: str, db: AsyncSession = Depends(get_db)
         agent_version=session.agent_version,
         effort_level=session.effort_level,
         adaptive_thinking_disabled=session.adaptive_thinking_disabled,
+        read_edit_ratio=session.read_edit_ratio,
+        edits_without_read_pct=session.edits_without_read_pct,
+        error_rate=session.error_rate,
+        repeated_edits_count=session.repeated_edits_count,
+        tokens_per_useful_edit=session.tokens_per_useful_edit,
+        context_pressure_score=session.context_pressure_score,
+        error_retry_sequences=session.error_retry_sequences,
+        context_resets=session.context_resets,
+        duplicate_read_count=session.duplicate_read_count,
     )
 
 

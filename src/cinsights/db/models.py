@@ -61,6 +61,11 @@ class CodingSession(SQLModel, table=True):
     turn_count: int | None = None
     tool_calls_per_turn: float | None = None
 
+    # Token efficiency signals (computed during indexing)
+    error_retry_sequences: int | None = None
+    context_resets: int | None = None
+    duplicate_read_count: int | None = None
+
     interrupt_count: int | None = None
     agent_version: str | None = None
     effort_level: str | None = None  # low / medium / high / max

@@ -425,6 +425,42 @@
 		</details>
 	{/if}
 
+	<!-- Token Efficiency Signals -->
+	{@const signals = [
+		{ label: 'Error retries', value: session.error_retry_sequences, desc: 'Failed tool calls followed by same tool retry', icon: '↻', color: '#dc2626' },
+		{ label: 'Context resets', value: session.context_resets, desc: 'Turns where context dropped >40% (compaction)', icon: '⟳', color: '#f59e0b' },
+		{ label: 'Duplicate reads', value: session.duplicate_read_count, desc: 'Re-reads of files already in context', icon: '⊘', color: '#8b5cf6' },
+		{ label: 'Repeated edits', value: session.repeated_edits_count, desc: 'Consecutive edits to the same file', icon: '⇄', color: '#ea580c' },
+	].filter(s => s.value != null && s.value > 0)}
+	{#if signals.length > 0}
+		<div class="section">
+			<h2>Token Efficiency</h2>
+			<div class="efficiency-signals">
+				{#each signals as s}
+					<div class="eff-signal" title={s.desc}>
+						<span class="eff-icon" style="color: {s.color}">{s.icon}</span>
+						<span class="eff-value">{s.value}</span>
+						<span class="eff-label">{s.label}</span>
+					</div>
+				{/each}
+				{#if session.tokens_per_useful_edit}
+					<div class="eff-signal" title="Average tokens consumed per successful edit">
+						<span class="eff-icon" style="color: #0d9488">⚡</span>
+						<span class="eff-value">{fmtTokens(session.tokens_per_useful_edit)}</span>
+						<span class="eff-label">Tokens/edit</span>
+					</div>
+				{/if}
+				{#if session.context_pressure_score != null && session.context_pressure_score > 0}
+					<div class="eff-signal" title="Fraction of turns with >50% context growth">
+						<span class="eff-icon" style="color: #64748b">📈</span>
+						<span class="eff-value">{(session.context_pressure_score * 100).toFixed(0)}%</span>
+						<span class="eff-label">Context pressure</span>
+					</div>
+				{/if}
+			</div>
+		</div>
+	{/if}
+
 	<!-- Insights -->
 	{#if session.insights.length > 0}
 		<div class="section">
@@ -545,6 +581,12 @@
 	.section { margin-bottom: 32px; }
 	h2 { font-size: 18px; font-weight: 600; color: #0f172a; margin-bottom: 16px; }
 	.h2-count { font-size: 13px; font-weight: 500; color: #94a3b8; }
+
+	.efficiency-signals { display: flex; flex-wrap: wrap; gap: 12px; }
+	.eff-signal { display: flex; align-items: center; gap: 8px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 16px; min-width: 150px; }
+	.eff-icon { font-size: 18px; }
+	.eff-value { font-size: 20px; font-weight: 700; color: #0f172a; font-family: 'SF Mono', 'Cascadia Code', monospace; }
+	.eff-label { font-size: 12px; color: #64748b; }
 
 	.insights-grid { display: flex; flex-direction: column; gap: 14px; }
 	.quotes-card { background: #fefce8; border: 1px solid #fde68a; border-radius: 10px; padding: 0; margin-bottom: 20px; font-size: 13px; }

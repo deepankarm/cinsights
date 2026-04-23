@@ -60,6 +60,19 @@ export interface SessionDetail {
 	agent_version: string | null;
 	effort_level: string | null;
 	adaptive_thinking_disabled: boolean | null;
+
+	// Quality metrics
+	read_edit_ratio: number | null;
+	edits_without_read_pct: number | null;
+	error_rate: number | null;
+	repeated_edits_count: number | null;
+	tokens_per_useful_edit: number | null;
+	context_pressure_score: number | null;
+
+	// Token efficiency signals
+	error_retry_sequences: number | null;
+	context_resets: number | null;
+	duplicate_read_count: number | null;
 }
 
 export interface StatsResponse {
