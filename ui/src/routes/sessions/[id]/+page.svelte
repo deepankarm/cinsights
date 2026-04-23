@@ -357,7 +357,6 @@
 						</div>
 						<div class="chart-desc">Prompt tokens per turn</div>
 						<svg viewBox="0 0 {W} {H}" class="trend-svg"
-							preserveAspectRatio={expandedChart === 'ctx' ? 'none' : 'xMidYMid meet'}
 							onmousemove={(e) => chartMove(e, n, v => hoverIdx = v)}
 							onmouseleave={() => hoverIdx = null}>
 							<defs>
@@ -415,7 +414,6 @@
 								</div>
 								<div class="chart-desc">Time per turn (slow turns highlighted)</div>
 								<svg viewBox="0 0 {W} {H}" class="trend-svg"
-									preserveAspectRatio={expandedChart === 'dur' ? 'none' : 'xMidYMid meet'}
 									onmousemove={(e) => chartMove(e, dn, v => durHoverIdx = v)}
 									onmouseleave={() => durHoverIdx = null}>
 									<defs>
@@ -600,10 +598,9 @@
 		position: fixed; top: 5vh; left: 5vw; width: 90vw; height: 90vh;
 		z-index: 1000; padding: 32px 40px;
 		box-shadow: 0 25px 60px rgba(0,0,0,0.3);
-		overflow: hidden; border: 1px solid #e8e5e0;
-		display: flex; flex-direction: column;
+		overflow-x: auto; overflow-y: hidden; border: 1px solid #e8e5e0;
 	}
-	.chart-expanded :global(.trend-svg) { flex: 1; min-height: 0; }
+	.chart-expanded .trend-svg { width: 200%; height: calc(90vh - 120px); }
 	.chart-overlay-backdrop {
 		position: fixed; inset: 0; background: rgba(0,0,0,0.5);
 		z-index: 999; cursor: pointer;
