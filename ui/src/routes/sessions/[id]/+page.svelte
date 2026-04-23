@@ -9,6 +9,8 @@
 	import ActivityCharts, { type ErrorDetail } from '$lib/components/ActivityCharts.svelte';
 	import QualityBar from '$lib/components/QualityBar.svelte';
 	import InsightLabel from '$lib/components/BehavioralTag.svelte';
+	import MoodQuotes from '$lib/components/MoodQuotes.svelte';
+	import type { MoodGroup } from '$lib/api';
 
 	let session: SessionDetail | null = $state(null);
 	let loading = $state(true);
@@ -170,6 +172,17 @@
 	});
 
 	const toolsPerTurn = $derived.by(() => turnCount > 0 ? (session?.tool_calls?.length ?? 0) / turnCount : 0);
+
+	const moodGroups = $derived.by((): MoodGroup[] => {
+		if (!session?.notable_quotes) return [];
+		const groups: Record<string, MoodGroup> = {};
+		for (const q of session.notable_quotes) {
+			const mood = (q.mood ?? q.vibe ?? 'unknown').toLowerCase();
+			if (!groups[mood]) groups[mood] = { mood, quotes: [] };
+			groups[mood].quotes.push({ quote: q.quote, mood, project: session.project_name, session_id: session.id });
+		}
+		return Object.values(groups);
+	});
 
 	const qualityMetrics = $derived.by((): QualityMetric[] => {
 		if (!session) return [];
@@ -445,29 +458,8 @@
 	</div>
 
 	<!-- 5. Notable Quotes -->
-	{#if session.notable_quotes && session.notable_quotes.length > 0}
-		{@const vibeEmoji = (v: string) => {
-			const map: Record<string, string> = {
-				frustrated: '😤', humor: '😄', impatience: '⏳', delight: '✨',
-				sarcasm: '😏', curious: '🤔', rage: '🔥', relieved: '😮‍💨',
-				gratitude: '🙏', confused: '😵', determination: '💪', surprised: '😲',
-				disappointed: '😞', amused: '🎉', assertive: '💪',
-				frustration: '😤', curiosity: '🤔', relief: '😮‍💨',
-				confusion: '😵', surprise: '😲', disappointment: '😞',
-				excitement: '🎉', apology: '🙇',
-			};
-			return map[(v ?? '').toLowerCase()] || '💬';
-		}}
-		<details class="quotes-card" open>
-			<summary class="quotes-toggle">
-				{session.notable_quotes.map(q => vibeEmoji(q.mood ?? q.vibe ?? '')).join(' ')} Things you said
-			</summary>
-			<div class="quotes-list">
-				{#each session.notable_quotes as q}
-					<p class="quote-line">{vibeEmoji(q.mood ?? q.vibe ?? '')} <em>"{q.quote}"</em></p>
-				{/each}
-			</div>
-		</details>
+	{#if moodGroups.length > 0}
+		<MoodQuotes {moodGroups} />
 	{/if}
 
 	<!-- 6. Insights -->
@@ -613,12 +605,6 @@
 	.h2-count { font-size: 13px; font-weight: 500; color: #94a3b8; }
 
 	.insights-grid { display: flex; flex-direction: column; gap: 14px; }
-	.quotes-card { background: #fefce8; border: 1px solid #fde68a; border-radius: 10px; padding: 0; margin-bottom: 20px; font-size: 13px; }
-	.quotes-toggle { padding: 10px 14px; cursor: pointer; color: #92400e; font-weight: 500; list-style: none; }
-	.quotes-toggle::-webkit-details-marker { display: none; }
-	.quotes-toggle::marker { display: none; content: ''; }
-	.quotes-list { padding: 0 14px 12px; }
-	.quote-line { margin: 6px 0; color: #334155; line-height: 1.5; }
 	.insight-card { border: 1px solid; border-radius: 12px; padding: 20px; }
 	.insight-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 	.insight-category { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
