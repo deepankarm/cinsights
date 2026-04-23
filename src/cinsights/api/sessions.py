@@ -14,7 +14,6 @@ from cinsights.db.models import (
     Insight,
     InsightCategory,
     InsightSeverity,
-    SessionBaseline,
     SessionStatus,
     ToolCall,
 )
@@ -294,25 +293,38 @@ async def get_session_detail(
     )
     insights = ins_result.all()
 
-    # Fetch baseline for comparison — project-specific, or largest for this user
+    # Compute baseline averages on the fly from this user's sessions
     baseline_data = None
     if session.user_id:
-        baseline_id = f"{session.user_id}:{session.project_name or ''}"
-        baseline = await db.get(SessionBaseline, baseline_id)
-        if not baseline or baseline.session_count < 3:
-            # Fall back to user's largest baseline (most representative)
-            fallback = await db.exec(
-                select(SessionBaseline)
-                .where(SessionBaseline.user_id == session.user_id)
-                .order_by(col(SessionBaseline.session_count).desc())
-                .limit(1)
+        avg_result = await db.exec(
+            select(
+                func.count(),
+                func.avg(CodingSession.read_edit_ratio),
+                func.avg(CodingSession.edits_without_read_pct),
+                func.avg(CodingSession.error_rate),
+                func.avg(CodingSession.repeated_edits_count),
+                func.avg(CodingSession.context_pressure_score),
+                func.avg(CodingSession.tokens_per_useful_edit),
+                func.avg(CodingSession.error_retry_sequences),
+                func.avg(CodingSession.context_resets),
+                func.avg(CodingSession.duplicate_read_count),
+            ).where(
+                CodingSession.user_id == session.user_id,
+                CodingSession.id != session.id,
             )
-            baseline = fallback.first()
-        if baseline and baseline.session_count >= 3:
+        )
+        row = avg_result.one()
+        if row[0] >= 3:
             baseline_data = {
-                "avg_read_edit_ratio": baseline.avg_read_edit_ratio,
-                "avg_edits_without_read_pct": baseline.avg_edits_without_read_pct,
-                "avg_error_rate": baseline.avg_error_rate,
+                "avg_read_edit_ratio": round(row[1], 2) if row[1] else None,
+                "avg_edits_without_read_pct": round(row[2], 1) if row[2] else None,
+                "avg_error_rate": round(row[3], 1) if row[3] else None,
+                "avg_repeated_edits_count": round(row[4], 1) if row[4] else None,
+                "avg_context_pressure_score": round(row[5], 2) if row[5] else None,
+                "avg_tokens_per_useful_edit": round(row[6], 0) if row[6] else None,
+                "avg_error_retry_sequences": round(row[7], 1) if row[7] else None,
+                "avg_context_resets": round(row[8], 1) if row[8] else None,
+                "avg_duplicate_read_count": round(row[9], 1) if row[9] else None,
             }
 
     return SessionDetail(

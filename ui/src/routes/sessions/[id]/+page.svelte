@@ -172,12 +172,13 @@
 		const bl = session.baseline;
 		const items: QualityMetric[] = [];
 
-		function add(label: string, v: number | null, suffix: string, baselineKey?: string, higherIs?: 'better' | 'worse') {
+		function add(label: string, v: number | null, suffix: string, baselineKey?: string, higherIs?: 'better' | 'worse', fmt?: (n: number) => string) {
 			if (v == null) return;
-			const m: QualityMetric = { label, value: fmtNum(v, suffix) };
+			const format = fmt ?? ((n: number) => fmtNum(n, suffix));
+			const m: QualityMetric = { label, value: format(v) };
 			if (bl && baselineKey && (bl as Record<string, number>)[baselineKey] != null) {
 				const avg = (bl as Record<string, number>)[baselineKey];
-				m.teamAvg = fmtNum(avg, suffix);
+				m.teamAvg = format(avg);
 				if (higherIs) {
 					const pct = Math.abs((v - avg) / (avg || 1)) * 100;
 					if (pct > 15) {
@@ -194,12 +195,14 @@
 		add('Read:Edit', session.read_edit_ratio, '', 'avg_read_edit_ratio', 'better');
 		add('Blind edits', session.edits_without_read_pct, '%', 'avg_edits_without_read_pct', 'worse');
 		add('Error rate', session.error_rate, '%', 'avg_error_rate', 'worse');
-		add('Thrashing', session.repeated_edits_count, '', undefined, undefined);
-		add('Ctx pressure', session.context_pressure_score != null ? session.context_pressure_score * 100 : null, '%', undefined, undefined);
-		if (session.tokens_per_useful_edit) items.push({ label: 'Tokens/edit', value: fmtTokens(session.tokens_per_useful_edit) });
-		if (session.error_retry_sequences) items.push({ label: 'Error retries', value: `${session.error_retry_sequences}` });
-		if (session.context_resets) items.push({ label: 'Ctx resets', value: `${session.context_resets}` });
-		if (session.duplicate_read_count) items.push({ label: 'Dup reads', value: `${session.duplicate_read_count}` });
+		add('Thrashing', session.repeated_edits_count, '', 'avg_repeated_edits_count', 'worse');
+		add('Ctx pressure', session.context_pressure_score, '', 'avg_context_pressure_score', 'worse',
+			(n) => fmtNum(n * 100, '%'));
+		add('Tokens/edit', session.tokens_per_useful_edit, '', 'avg_tokens_per_useful_edit', 'worse', fmtTokens);
+		const fmtInt = (n: number) => Math.round(n).toString();
+		add('Error retries', session.error_retry_sequences, '', 'avg_error_retry_sequences', 'worse', fmtInt);
+		add('Ctx resets', session.context_resets, '', 'avg_context_resets', 'worse', fmtInt);
+		add('Dup reads', session.duplicate_read_count, '', 'avg_duplicate_read_count', 'worse', fmtInt);
 		return items;
 	});
 
