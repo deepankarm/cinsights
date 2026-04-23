@@ -49,7 +49,9 @@ def _apply_source_overrides(source: str | None, repo: str | None) -> None:
 
 @app.command()
 def index(
-    hours: int = typer.Option(24, help="Index sessions from the last N hours."),
+    hours: int = typer.Option(
+        4380, help="Index sessions from the last N hours (default ~6 months)."
+    ),
     force: bool = typer.Option(False, help="Re-index already-indexed sessions."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
     source: str | None = typer.Option(None, help="Override source (phoenix, entireio, local)."),
@@ -117,7 +119,7 @@ def analyze(
             run.extra["min_score"] = min_score
             run.extra["limit"] = limit
             await _analyze_async(
-                hours=24,
+                hours=4380,  # only used when trace_ids are passed
                 limit=limit,
                 force=force,
                 concurrency=concurrency,
@@ -141,7 +143,7 @@ app.registered_commands.append(
 def digest(
     scope_type: str = typer.Argument(help="Scope: 'project' or 'user'."),
     scope_value: str = typer.Argument(help="Project name or user ID."),
-    days: int = typer.Option(7, help="Analyze sessions from the last N days."),
+    days: int = typer.Option(90, help="Digest window in days."),
     stats_only: bool = typer.Option(False, "--stats-only", help="Only compute stats (no LLM)."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging."),
 ) -> None:
@@ -171,8 +173,10 @@ def digest(
 
 @app.command()
 def refresh(
-    hours: int = typer.Option(24, help="Index sessions from the last N hours."),
-    days: int = typer.Option(7, help="Digest window in days."),
+    hours: int = typer.Option(
+        4380, help="Index sessions from the last N hours (default ~6 months)."
+    ),
+    days: int = typer.Option(90, help="Digest window in days."),
     limit: int = typer.Option(50, help="Max sessions to process."),
     force: bool = typer.Option(False, help="Re-process already-processed sessions."),
     concurrency: int = typer.Option(5, help="Max concurrent LLM analysis requests."),
