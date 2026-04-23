@@ -16,6 +16,7 @@
 	let analyzing = $state(false);
 	let toolsExpanded = $state(false);
 	let errorsExpanded = $state(false);
+	let expandedChart: string | null = $state(null);
 	let hoverIdx: number | null = $state(null);
 	let durHoverIdx: number | null = $state(null);
 	let copied = $state(false);
@@ -338,10 +339,11 @@
 					{@const interruptIdxs = pts.map((p, i) => (p.interrupted ? i : -1)).filter(i => i >= 0)}
 					{@const hover = hoverIdx !== null ? pts[hoverIdx] : null}
 					<!-- Context Growth -->
-					<div class="chart-card">
+					<div class="chart-card" class:chart-expanded={expandedChart === 'ctx'}>
 						<div class="chart-header">
 							<h3>Context Growth</h3>
 							<div class="chart-header-right">
+								<button class="expand-btn" onclick={() => expandedChart = expandedChart === 'ctx' ? null : 'ctx'} title={expandedChart === 'ctx' ? 'Collapse' : 'Expand'}>{expandedChart === 'ctx' ? '✕' : '⤢'}</button>
 								{#if hover && hoverIdx !== null}
 									<span class="chart-hover-val">Turn {hover.turn}: {fmtTokens(hover.prompt_tokens)}</span>
 								{/if}
@@ -399,10 +401,11 @@
 							{@const dArea = `${dLine} L ${xOf(dn-1, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
 							{@const slowIdxs = dPts.map((p, i) => (p.duration_ms! > median * 2 ? i : -1)).filter(i => i >= 0)}
 							{@const dHover = durHoverIdx !== null ? dPts[durHoverIdx] : null}
-							<div class="chart-card">
+							<div class="chart-card" class:chart-expanded={expandedChart === 'dur'}>
 								<div class="chart-header">
 									<h3>Turn Duration</h3>
 									<div class="chart-header-right">
+										<button class="expand-btn" onclick={() => expandedChart = expandedChart === 'dur' ? null : 'dur'} title={expandedChart === 'dur' ? 'Collapse' : 'Expand'}>{expandedChart === 'dur' ? '✕' : '⤢'}</button>
 										{#if dHover && durHoverIdx !== null}
 											<span class="chart-hover-val">Turn {dHover.turn}: {fmtSecs(dHover.duration_ms!)}</span>
 										{/if}
@@ -549,6 +552,11 @@
 	{/if}
 {/if}
 
+{#if expandedChart}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="chart-overlay-backdrop" onclick={() => expandedChart = null}></div>
+{/if}
+
 <style>
 	.nav-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
 	.back-link { color: #64748b; text-decoration: none; font-size: 14px; }
@@ -585,7 +593,23 @@
 
 	.grade-badge { font-size: 18px; font-weight: 800; padding: 2px 12px; border-radius: 10px; }
 
-	.chart-card { background: white; border-radius: 16px; padding: 22px 24px; }
+	.chart-card { background: white; border-radius: 16px; padding: 22px 24px; position: relative; transition: all 0.2s; }
+	.chart-expanded {
+		position: fixed; top: 5vh; left: 5vw; width: 90vw; height: 90vh;
+		z-index: 1000; padding: 32px 40px;
+		box-shadow: 0 25px 60px rgba(0,0,0,0.3);
+		overflow: auto; border: 1px solid #e8e5e0;
+	}
+	.chart-overlay-backdrop {
+		position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+		z-index: 999; cursor: pointer;
+	}
+	.expand-btn {
+		background: none; border: 1px solid #e2e8f0; border-radius: 6px;
+		padding: 2px 8px; font-size: 14px; cursor: pointer; color: #94a3b8;
+		transition: all 0.15s; line-height: 1;
+	}
+	.expand-btn:hover { background: #f1f5f9; color: #334155; border-color: #cbd5e1; }
 	.chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1px; }
 	.chart-header h3 { font-size: 14px; font-weight: 700; color: #232326; }
 	.chart-header-right { display: flex; align-items: center; gap: 6px; }
