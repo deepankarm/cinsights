@@ -675,19 +675,48 @@ async def _discover_work_items(
                         console.print(f"  [yellow]No spans for {tid[:16]}...[/yellow]")
             progress.update(task, description=f"Found {len(work_items)} session(s) with spans")
     elif force:
-        # Force mode: re-index all DB sessions belonging to the current source.
+        # Force mode: discover from source AND include DB sessions whose
+        # files may still exist.  This ensures new sessions are picked up
+        # while also re-processing existing ones.
         from cinsights.sources.base import TraceData
 
+        start_time = datetime.now(UTC) - timedelta(hours=hours)
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task(f"Discovering sessions from {settings.source}...", total=None)
+            discovered = await asyncio.to_thread(source.discover_sessions, start_time=start_time)
+            progress.update(task, description=f"Found {len(discovered)} sessions")
+
+        # Also pull DB sessions that may not appear in discovery (e.g. older
+        # than the time window but still worth re-indexing).
         async with sessionmaker() as db:
-            all_sessions = (
+            db_sessions = (
                 await db.exec(
                     select_fn(CodingSession)
                     .where(CodingSession.source == str(settings.source))
                     .order_by(col(CodingSession.start_time).desc())
-                    .limit(limit or None)
                 )
             ).all()
-            session_ids = [cs.id for cs in all_sessions]
+            db_ids = {cs.id for cs in db_sessions}
+
+        # Merge: discovered sessions + DB-only sessions (not in discovery)
+        seen: set[str] = set()
+        all_ids: list[str] = []
+        for d in discovered:
+            if d.session_id not in seen:
+                seen.add(d.session_id)
+                all_ids.append(d.session_id)
+        for db_id in db_ids:
+            if db_id not in seen:
+                seen.add(db_id)
+                all_ids.append(db_id)
+
+        if limit:
+            all_ids = all_ids[:limit]
 
         not_found = 0
         with Progress(
@@ -696,9 +725,9 @@ async def _discover_work_items(
             console=console,
         ) as progress:
             task = progress.add_task(
-                f"Loading {len(session_ids)} {settings.source} session(s)...", total=None
+                f"Loading {len(all_ids)} {settings.source} session(s)...", total=None
             )
-            for sid in session_ids:
+            for sid in all_ids:
                 spans = await asyncio.to_thread(source.get_spans_by_session, sid)
                 if not spans:
                     not_found += 1
@@ -872,7 +901,7 @@ async def _index_async(
                 await update_baseline(db, coding_session)
                 await db.commit()
                 indexed += 1
-                console.print(f"  [cyan]○[/cyan] {trace_id[:12]} — indexed")
+                console.print(f"  [cyan]○[/cyan] {trace_id} — indexed")
             except Exception as e:
                 await db.rollback()
                 failed += 1
