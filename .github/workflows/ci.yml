@@ -18,12 +18,16 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build UI
+        run: cd ui && npm install && npm run build
       - name: Install Python dependencies
         run: uv sync
       - name: Ruff check
         run: uv run ruff check src/
-      - name: Install UI dependencies
-        run: cd ui && npm ci
       - name: ESLint
         run: cd ui && npx eslint .
       - name: Svelte check
@@ -78,10 +82,10 @@ jobs:
           echo "Static files in wheel: $STATIC_COUNT"
           [ "$STATIC_COUNT" -ge 10 ] || (echo "FAIL: expected at least 10 static files, got $STATIC_COUNT" && exit 1)
       - name: Install built wheel
-        run: uv pip install dist/*.whl --force-reinstall
+        run: uv pip install dist/*.whl --force-reinstall --system
       - name: Smoke test server
         run: |
-          uv run cinsights serve --port 8199 &
+          cinsights serve --port 8199 &
           SERVER_PID=$!
           sleep 3
 
