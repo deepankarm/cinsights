@@ -110,6 +110,25 @@ def test_package_includes_alembic_files():
     assert len(migrations) >= 1, "No migration files found"
 
 
+def test_static_files_findable():
+    """Static UI files must be findable — either ui/build (dev) or package/static (pip).
+
+    Skipped on CI where ui/build hasn't been built yet.
+    """
+    import cinsights
+
+    pkg_dir = Path(cinsights.__file__).parent
+    dev_static = pkg_dir.parent.parent / "ui" / "build"
+    pip_static = pkg_dir / "static"
+
+    if not dev_static.is_dir() and not pip_static.is_dir():
+        pytest.skip("UI not built (run 'cd ui && npm run build' or install via pip)")
+
+    static = dev_static if dev_static.is_dir() else pip_static
+    assert (static / "index.html").exists(), "index.html missing from static dir"
+    assert (static / "_app").is_dir(), "_app/ missing from static dir"
+
+
 def test_package_alembic_ini_exists():
     """alembic.ini must be findable — either repo root or package dir."""
     import cinsights

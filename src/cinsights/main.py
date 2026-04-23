@@ -51,7 +51,11 @@ app.include_router(trends_router)
 app.include_router(users_router)
 
 # Serve SvelteKit SPA static files with proper fallback for client-side routing
-_static_dir = Path(__file__).parent.parent.parent / "ui" / "build"
+# Dev: repo_root/ui/build, Pip-installed: package_dir/static
+_pkg_dir = Path(__file__).parent
+_static_dir = _pkg_dir.parent.parent / "ui" / "build"
+if not _static_dir.is_dir():
+    _static_dir = _pkg_dir / "static"
 if _static_dir.is_dir():
     # Mount _app directory for immutable assets
     app.mount(
