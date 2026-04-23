@@ -76,6 +76,7 @@ class SessionDetail(BaseModel):
     context_growth: list[dict] | None = None
     status: SessionStatus
     tool_calls: list[ToolCallRead]
+    total_tool_calls: int = 0
     insights: list[InsightRead]
     notable_quotes: list[dict] | None = None
     interrupt_count: int | None = None
@@ -264,16 +265,25 @@ def _parse_metadata(ins, key: str):
 
 
 @router.get("/{session_id}", response_model=SessionDetail)
-async def get_session_detail(session_id: str, db: AsyncSession = Depends(get_db)) -> SessionDetail:
+async def get_session_detail(
+    session_id: str,
+    tool_limit: int = 500,
+    db: AsyncSession = Depends(get_db),
+) -> SessionDetail:
     """Get session detail with tool calls and insights."""
     session = await db.get(CodingSession, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    tc_result = await db.exec(
+    tc_query = (
         select(ToolCall).where(ToolCall.session_id == session_id).order_by(ToolCall.timestamp)
     )
+    if tool_limit > 0:
+        tc_query = tc_query.limit(tool_limit)
+    tc_result = await db.exec(tc_query)
     tool_calls = tc_result.all()
+
+    total_tc = (await db.exec(select(func.count()).where(ToolCall.session_id == session_id))).one()
 
     ins_result = await db.exec(
         select(Insight).where(Insight.session_id == session_id).order_by(Insight.created_at)
@@ -307,6 +317,7 @@ async def get_session_detail(session_id: str, db: AsyncSession = Depends(get_db)
             )
             for tc in tool_calls
         ],
+        total_tool_calls=total_tc,
         insights=[
             InsightRead(
                 id=ins.id,

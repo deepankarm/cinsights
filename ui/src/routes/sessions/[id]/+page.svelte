@@ -492,7 +492,7 @@
 		<div class="section">
 			<button class="collapse-btn" onclick={() => toolsExpanded = !toolsExpanded}>
 				<span class="collapse-arrow" class:open={toolsExpanded}>&#9654;</span>
-				<h2 style="display:inline; margin-bottom:0">Tool Calls <span class="h2-count">{session.tool_calls.length}</span></h2>
+				<h2 style="display:inline; margin-bottom:0">Tool Calls <span class="h2-count">{session.tool_calls.length}{#if session.total_tool_calls > session.tool_calls.length} of {session.total_tool_calls}{/if}</span></h2>
 			</button>
 			{#if toolsExpanded}
 				<div class="tool-list">

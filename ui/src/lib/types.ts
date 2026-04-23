@@ -54,6 +54,7 @@ export interface SessionDetail {
 	context_growth: Array<{ turn: number; prompt_tokens: number; completion_tokens: number; duration_ms?: number; interrupted?: boolean }> | null;
 	status: string;
 	tool_calls: ToolCallRead[];
+	total_tool_calls: number;
 	insights: InsightRead[];
 	notable_quotes: Array<{ quote: string; vibe: string }> | null;
 	interrupt_count: number | null;
