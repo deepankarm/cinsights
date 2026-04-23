@@ -86,26 +86,4 @@ jobs:
           uv venv /tmp/smoke-test-venv
           VIRTUAL_ENV=/tmp/smoke-test-venv uv pip install dist/*.whl
       - name: Smoke test server
-        run: |
-          /tmp/smoke-test-venv/bin/cinsights serve --port 8199 &
-          SERVER_PID=$!
-          sleep 3
-
-          # Check index page loads with SvelteKit content
-          curl -sf http://localhost:8199/ | grep -q "sveltekit" || (echo "FAIL: index.html missing sveltekit" && kill $SERVER_PID && exit 1)
-          echo "OK: / serves SvelteKit app"
-
-          # Check _app assets are mounted
-          curl -sf -o /dev/null -w "%{http_code}" http://localhost:8199/_app/version.json | grep -q "200" || (echo "FAIL: _app assets not served" && kill $SERVER_PID && exit 1)
-          echo "OK: /_app/version.json returns 200"
-
-          # Check API endpoint works
-          curl -sf http://localhost:8199/api/sessions/stats | grep -q "total_sessions" || (echo "FAIL: API not responding" && kill $SERVER_PID && exit 1)
-          echo "OK: /api/sessions/stats returns data"
-
-          # Check SPA routing (unknown path falls back to index.html)
-          curl -sf http://localhost:8199/projects | grep -q "sveltekit" || (echo "FAIL: SPA fallback broken" && kill $SERVER_PID && exit 1)
-          echo "OK: /projects falls back to SPA"
-
-          kill $SERVER_PID
-          echo "All smoke tests passed"
+        run: /tmp/smoke-test-venv/bin/python tests/smoke_test_server.py
