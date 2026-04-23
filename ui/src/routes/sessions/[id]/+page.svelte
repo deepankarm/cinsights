@@ -3,7 +3,7 @@
 	import { page } from '$app/state';
 	import { getSession, triggerAnalysis } from '$lib/api';
 	import { renderMarkdown } from '$lib/markdown';
-	import { fmtTokens, gradeColor, gradeBg } from '$lib/format';
+	import { fmtTokens, fmtDateRange, gradeColor, gradeBg } from '$lib/format';
 	import type { SessionDetail } from '$lib/types';
 	import ActivityCharts, { type ErrorDetail } from '$lib/components/ActivityCharts.svelte';
 	import InsightLabel from '$lib/components/BehavioralTag.svelte';
@@ -235,7 +235,7 @@
 			{#if session.project_name}
 				<a href="/projects/{session.project_name}" class="tag-link project">{session.project_name}</a>
 			{/if}
-			<span class="tag-static">{fmtDate(session.start_time)}</span>
+			<span class="tag-static">{fmtDateRange(session.start_time, session.end_time)}</span>
 			{#if session.agent_version}
 				<span class="tag-static mono">v{session.agent_version}</span>
 			{/if}
