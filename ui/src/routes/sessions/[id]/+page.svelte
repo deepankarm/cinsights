@@ -75,11 +75,15 @@
 	});
 
 	const turnCount = $derived.by(() => session?.context_growth?.length ?? 0);
-	const errorCount = $derived.by(() => session?.tool_calls?.filter(tc => !tc.success).length ?? 0);
-	const errorRate = $derived.by(() => {
-		const len = session?.tool_calls?.length ?? 0;
-		return len > 0 ? (errorCount / len) * 100 : 0;
+	const errorCount = $derived.by(() => {
+		if (!session) return 0;
+		// Use DB error_rate * total tool calls for accurate count (tool_calls array is capped)
+		if (session.error_rate != null && session.total_tool_calls) {
+			return Math.round(session.error_rate / 100 * session.total_tool_calls);
+		}
+		return session.tool_calls.filter(tc => !tc.success).length;
 	});
+	const errorRate = $derived.by(() => session?.error_rate ?? 0);
 
 	const grade = $derived.by(() => {
 		const rate = errorRate / 100;
@@ -295,7 +299,7 @@
 			<div class="hero-sub">{fmtTokens(session.prompt_tokens)} in / {fmtTokens(session.completion_tokens)} out</div>
 		</div>
 		<div class="hero-metric">
-			<div class="hero-value" style="color: {errorRate > 15 ? '#dc2626' : errorRate > 5 ? '#f59e0b' : '#10b981'}">{session.tool_calls.length}</div>
+			<div class="hero-value" style="color: {errorRate > 15 ? '#dc2626' : errorRate > 5 ? '#f59e0b' : '#10b981'}">{session.total_tool_calls || session.tool_calls.length}</div>
 			<div class="hero-label">Tool Calls</div>
 			<div class="hero-sub">{errorCount} errors ({errorRate.toFixed(0)}%)</div>
 		</div>
