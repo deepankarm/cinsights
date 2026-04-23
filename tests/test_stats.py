@@ -49,7 +49,7 @@ def _session(
 
 def test_hourly_quality_single_hour():
     sessions = [_session(hour=9, read_edit_ratio=2.0), _session(hour=9, read_edit_ratio=4.0)]
-    rows, variance = _compute_hourly_quality(sessions)
+    rows, _variance = _compute_hourly_quality(sessions)
     assert len(rows) == 1
     assert rows[0]["hour"] == 9
     assert rows[0]["sessions"] == 2
