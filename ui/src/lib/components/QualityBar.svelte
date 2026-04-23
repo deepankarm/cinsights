@@ -15,6 +15,10 @@
 		'Ctx pressure': 'How fast context fills up (0-1). High = approaching context window limits.',
 		'Tools/turn': 'Tool calls per conversation turn. Higher = more autonomous per prompt.',
 		'Avg duration': 'Average wall-clock time per session.',
+		'Tokens/edit': 'Tokens consumed per successful edit. Lower = more efficient.',
+		'Error retries': 'Failed tool calls followed by same tool retry. High = agent retrying without changing strategy.',
+		'Ctx resets': 'Turns where context dropped >40%. Indicates compaction — agent re-reads previously processed content.',
+		'Dup reads': 'Re-reads of files already in context. Wastes tokens on content already processed.',
 	};
 </script>
 

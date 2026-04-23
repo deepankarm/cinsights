@@ -3,9 +3,11 @@
 	import { page } from '$app/state';
 	import { getSession, triggerAnalysis } from '$lib/api';
 	import { renderMarkdown } from '$lib/markdown';
-	import { fmtTokens, fmtDateRange, gradeColor, gradeBg } from '$lib/format';
+	import { fmtTokens, fmtDateRange, fmtNum, gradeColor, gradeBg } from '$lib/format';
+	import type { QualityMetric } from '$lib/format';
 	import type { SessionDetail } from '$lib/types';
 	import ActivityCharts, { type ErrorDetail } from '$lib/components/ActivityCharts.svelte';
+	import QualityBar from '$lib/components/QualityBar.svelte';
 	import InsightLabel from '$lib/components/BehavioralTag.svelte';
 
 	let session: SessionDetail | null = $state(null);
@@ -59,15 +61,6 @@
 		if (s >= 3600) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
 		if (s >= 60) return `${Math.floor(s / 60)}m ${Math.floor(s % 60)}s`;
 		return `${s.toFixed(1)}s`;
-	}
-
-	function fmtDate(iso: string): string {
-		const d = new Date(iso);
-		const day = d.getDate().toString().padStart(2, '0');
-		const mon = d.toLocaleString('en', { month: 'short' });
-		const h = d.getHours().toString().padStart(2, '0');
-		const m = d.getMinutes().toString().padStart(2, '0');
-		return `${day} ${mon} ${h}:${m}`;
 	}
 
 	function wallMs(): number {
@@ -173,6 +166,23 @@
 
 	const toolsPerTurn = $derived.by(() => turnCount > 0 ? (session?.tool_calls?.length ?? 0) / turnCount : 0);
 
+	const qualityMetrics = $derived.by((): QualityMetric[] => {
+		if (!session) return [];
+		const items: QualityMetric[] = [];
+		const add = (label: string, v: number | null, suffix = '') => {
+			if (v != null) items.push({ label, value: fmtNum(v, suffix) });
+		};
+		add('Read:Edit', session.read_edit_ratio);
+		add('Blind edits', session.edits_without_read_pct, '%');
+		add('Error rate', session.error_rate, '%');
+		add('Thrashing', session.repeated_edits_count);
+		add('Ctx pressure', session.context_pressure_score != null ? session.context_pressure_score * 100 : null, '%');
+		if (session.tokens_per_useful_edit) items.push({ label: 'Tokens/edit', value: fmtTokens(session.tokens_per_useful_edit) });
+		if (session.error_retry_sequences) items.push({ label: 'Error retries', value: `${session.error_retry_sequences}` });
+		if (session.context_resets) items.push({ label: 'Ctx resets', value: `${session.context_resets}` });
+		if (session.duplicate_read_count) items.push({ label: 'Dup reads', value: `${session.duplicate_read_count}` });
+		return items;
+	});
 
 	function categoryColor(cat: string): string {
 		const m: Record<string, string> = { friction: '#dc2626', win: '#16a34a', recommendation: '#2563eb', pattern: '#7c3aed', skill_proposal: '#0891b2', summary: '#0f172a' };
@@ -216,7 +226,7 @@
 {:else if error}
 	<div class="error">{error}</div>
 {:else if session}
-	<!-- Session ID + tags row -->
+	<!-- 1. Header -->
 	<div class="session-header">
 		<div class="sh-left">
 			<button class="session-id-btn" onclick={copyId} title="Copy full session ID">
@@ -245,7 +255,7 @@
 		</div>
 	</div>
 
-	<!-- Hero Metrics -->
+	<!-- 2. Hero Metrics -->
 	<div class="hero">
 		<div class="hero-metric">
 			<div class="hero-value" style="color: #6366f1">{activeMs ? fmtSecs(activeMs) : fmtSecs(wallMs())}</div>
@@ -281,139 +291,148 @@
 		</div>
 	</div>
 
-	<!-- Activity Charts -->
+	<!-- 3. Quality Bar -->
+	{#if qualityMetrics.length > 0}
+		<QualityBar metrics={qualityMetrics} />
+	{/if}
+
+	<!-- 4. Activity Charts -->
 	<div class="section">
-		<ActivityCharts {toolDistribution} {languageDistribution} {timeOfDay} {errorTypes} {errorDetails}>
-			{#snippet extra()}
-				{#if session?.context_growth && session.context_growth.length > 1}
-					{@const pts = session.context_growth}
-					{@const n = pts.length}
-					{@const maxY = Math.max(...pts.map(p => p.prompt_tokens), 1)}
-					{@const yOf = (v: number) => PAD.t + iH - (v / maxY) * iH}
-					{@const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, n).toFixed(1)} ${yOf(p.prompt_tokens).toFixed(1)}`).join(' ')}
-					{@const areaPath = `${linePath} L ${xOf(n-1, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
-					{@const compactionIdxs = pts.map((p, i) => (i > 0 && p.prompt_tokens < pts[i-1].prompt_tokens * 0.85 ? i : -1)).filter(i => i >= 0)}
-					{@const interruptIdxs = pts.map((p, i) => (p.interrupted ? i : -1)).filter(i => i >= 0)}
-					{@const hover = hoverIdx !== null ? pts[hoverIdx] : null}
-					<!-- Context Growth -->
+		<ActivityCharts {toolDistribution} {languageDistribution} {timeOfDay} {errorTypes} {errorDetails} />
+	</div>
+
+	<!-- 5. Context Growth + Turn Duration -->
+	{#if session?.context_growth && session.context_growth.length > 1}
+		{@const pts = session.context_growth}
+		{@const n = pts.length}
+		{@const maxY = Math.max(...pts.map(p => p.prompt_tokens), 1)}
+		{@const yOf = (v: number) => PAD.t + iH - (v / maxY) * iH}
+		{@const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, n).toFixed(1)} ${yOf(p.prompt_tokens).toFixed(1)}`).join(' ')}
+		{@const areaPath = `${linePath} L ${xOf(n-1, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
+		{@const compactionIdxs = pts.map((p, i) => (i > 0 && p.prompt_tokens < pts[i-1].prompt_tokens * 0.85 ? i : -1)).filter(i => i >= 0)}
+		{@const interruptIdxs = pts.map((p, i) => (p.interrupted ? i : -1)).filter(i => i >= 0)}
+		{@const hover = hoverIdx !== null ? pts[hoverIdx] : null}
+		<div class="section charts-grid">
+			<!-- Context Growth -->
+			<div class="chart-card">
+				<div class="chart-header">
+					<h3>Context Growth</h3>
+					<div class="chart-header-right">
+						{#if hover && hoverIdx !== null}
+							<span class="chart-hover-val">Turn {hover.turn}: {fmtTokens(hover.prompt_tokens)}</span>
+						{/if}
+						{#if compactionIdxs.length > 0}
+							<span class="trend-badge down">{compactionIdxs.length} compaction{compactionIdxs.length > 1 ? 's' : ''}</span>
+						{/if}
+						{#if interruptIdxs.length > 0}
+							<span class="trend-badge interrupt">{interruptIdxs.length} interrupt{interruptIdxs.length > 1 ? 's' : ''}</span>
+						{/if}
+					</div>
+				</div>
+				<div class="chart-desc">Prompt tokens per turn</div>
+				<svg viewBox="0 0 {W} {H}" class="trend-svg"
+					onmousemove={(e) => chartMove(e, n, v => hoverIdx = v)}
+					onmouseleave={() => hoverIdx = null}>
+					<defs>
+						<linearGradient id="ctxG" x1="0" y1="0" x2="0" y2="1">
+							<stop offset="0%" stop-color="#6366f1" stop-opacity="0.25" />
+							<stop offset="100%" stop-color="#6366f1" stop-opacity="0" />
+						</linearGradient>
+					</defs>
+					{#each [0, 0.5, 1] as frac}
+						{@const gy = PAD.t + iH * (1 - frac)}
+						<line x1={PAD.l} x2={W - PAD.r} y1={gy} y2={gy} stroke="#f1f5f9" stroke-width="1" />
+						<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtTokens(Math.round(maxY * frac))}</text>
+					{/each}
+					<path d={areaPath} fill="url(#ctxG)" />
+					<path d={linePath} fill="none" stroke="#6366f1" stroke-width="1.5" stroke-linejoin="round" />
+					{#each compactionIdxs as i}
+						<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#f59e0b" stroke="white" stroke-width="1" />
+					{/each}
+					{#each interruptIdxs as i}
+						<line x1={xOf(i, n)} x2={xOf(i, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#ef4444" stroke-width="1" stroke-opacity="0.4" />
+						<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#ef4444" stroke="white" stroke-width="1" />
+					{/each}
+					{#if hoverIdx !== null}
+						<line x1={xOf(hoverIdx, n)} x2={xOf(hoverIdx, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
+						<circle cx={xOf(hoverIdx, n)} cy={yOf(pts[hoverIdx].prompt_tokens)} r="3.5" fill="#6366f1" stroke="white" stroke-width="1.5" />
+					{/if}
+					<rect x={PAD.l} y={PAD.t} width={iW} height={iH} fill="transparent" />
+				</svg>
+			</div>
+
+			<!-- Turn Duration -->
+			{#if session?.context_growth?.some(p => p.duration_ms != null)}
+				{@const dPts = session!.context_growth!.filter(p => p.duration_ms != null)}
+				{@const dn = dPts.length}
+				{#if dn > 1}
+					{@const durations = dPts.map(p => p.duration_ms!)}
+					{@const maxD = Math.max(...durations, 1)}
+					{@const sortedD = [...durations].sort((a, b) => a - b)}
+					{@const median = sortedD[Math.floor(sortedD.length / 2)]}
+					{@const dyOf = (v: number) => PAD.t + iH - (v / maxD) * iH}
+					{@const dLine = dPts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, dn).toFixed(1)} ${dyOf(p.duration_ms!).toFixed(1)}`).join(' ')}
+					{@const dArea = `${dLine} L ${xOf(dn-1, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
+					{@const slowIdxs = dPts.map((p, i) => (p.duration_ms! > median * 2 ? i : -1)).filter(i => i >= 0)}
+					{@const dHover = durHoverIdx !== null ? dPts[durHoverIdx] : null}
 					<div class="chart-card">
 						<div class="chart-header">
-							<h3>Context Growth</h3>
+							<h3>Turn Duration</h3>
 							<div class="chart-header-right">
-								{#if hover && hoverIdx !== null}
-									<span class="chart-hover-val">Turn {hover.turn}: {fmtTokens(hover.prompt_tokens)}</span>
+								{#if dHover && durHoverIdx !== null}
+									<span class="chart-hover-val">Turn {dHover.turn}: {fmtSecs(dHover.duration_ms!)}</span>
 								{/if}
-								{#if compactionIdxs.length > 0}
-									<span class="trend-badge down">{compactionIdxs.length} compaction{compactionIdxs.length > 1 ? 's' : ''}</span>
-								{/if}
-								{#if interruptIdxs.length > 0}
-									<span class="trend-badge interrupt">{interruptIdxs.length} interrupt{interruptIdxs.length > 1 ? 's' : ''}</span>
-								{/if}
+								<span class="chart-total">median {fmtSecs(median)}</span>
 							</div>
 						</div>
-						<div class="chart-desc">Prompt tokens per turn</div>
+						<div class="chart-desc">Time per turn (slow turns highlighted)</div>
 						<svg viewBox="0 0 {W} {H}" class="trend-svg"
-							onmousemove={(e) => chartMove(e, n, v => hoverIdx = v)}
-							onmouseleave={() => hoverIdx = null}>
+							onmousemove={(e) => chartMove(e, dn, v => durHoverIdx = v)}
+							onmouseleave={() => durHoverIdx = null}>
 							<defs>
-								<linearGradient id="ctxG" x1="0" y1="0" x2="0" y2="1">
-									<stop offset="0%" stop-color="#6366f1" stop-opacity="0.25" />
-									<stop offset="100%" stop-color="#6366f1" stop-opacity="0" />
+								<linearGradient id="durG" x1="0" y1="0" x2="0" y2="1">
+									<stop offset="0%" stop-color="#10b981" stop-opacity="0.25" />
+									<stop offset="100%" stop-color="#10b981" stop-opacity="0" />
 								</linearGradient>
 							</defs>
 							{#each [0, 0.5, 1] as frac}
 								{@const gy = PAD.t + iH * (1 - frac)}
 								<line x1={PAD.l} x2={W - PAD.r} y1={gy} y2={gy} stroke="#f1f5f9" stroke-width="1" />
-								<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtTokens(Math.round(maxY * frac))}</text>
+								<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtSecs(maxD * frac)}</text>
 							{/each}
-							<path d={areaPath} fill="url(#ctxG)" />
-							<path d={linePath} fill="none" stroke="#6366f1" stroke-width="1.5" stroke-linejoin="round" />
-							{#each compactionIdxs as i}
-								<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#f59e0b" stroke="white" stroke-width="1" />
+							<path d={dArea} fill="url(#durG)" />
+							<path d={dLine} fill="none" stroke="#10b981" stroke-width="1.5" stroke-linejoin="round" />
+							<line x1={PAD.l} x2={W - PAD.r} y1={dyOf(median)} y2={dyOf(median)} stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3" />
+							{#each slowIdxs as i}
+								<circle cx={xOf(i, dn)} cy={dyOf(dPts[i].duration_ms!)} r="3" fill="#ef4444" stroke="white" stroke-width="1" />
 							{/each}
-							{#each interruptIdxs as i}
-								<line x1={xOf(i, n)} x2={xOf(i, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#ef4444" stroke-width="1" stroke-opacity="0.4" />
-								<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#ef4444" stroke="white" stroke-width="1" />
-							{/each}
-							{#if hoverIdx !== null}
-								<line x1={xOf(hoverIdx, n)} x2={xOf(hoverIdx, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
-								<circle cx={xOf(hoverIdx, n)} cy={yOf(pts[hoverIdx].prompt_tokens)} r="3.5" fill="#6366f1" stroke="white" stroke-width="1.5" />
+							{#if durHoverIdx !== null}
+								<line x1={xOf(durHoverIdx, dn)} x2={xOf(durHoverIdx, dn)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
+								<circle cx={xOf(durHoverIdx, dn)} cy={dyOf(dPts[durHoverIdx].duration_ms!)} r="3.5" fill="#10b981" stroke="white" stroke-width="1.5" />
 							{/if}
 							<rect x={PAD.l} y={PAD.t} width={iW} height={iH} fill="transparent" />
 						</svg>
 					</div>
-
-					<!-- Turn Duration -->
-					{#if session?.context_growth?.some(p => p.duration_ms != null)}
-						{@const dPts = session!.context_growth!.filter(p => p.duration_ms != null)}
-						{@const dn = dPts.length}
-						{#if dn > 1}
-							{@const durations = dPts.map(p => p.duration_ms!)}
-							{@const maxD = Math.max(...durations, 1)}
-							{@const sortedD = [...durations].sort((a, b) => a - b)}
-							{@const median = sortedD[Math.floor(sortedD.length / 2)]}
-							{@const dyOf = (v: number) => PAD.t + iH - (v / maxD) * iH}
-							{@const dLine = dPts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, dn).toFixed(1)} ${dyOf(p.duration_ms!).toFixed(1)}`).join(' ')}
-							{@const dArea = `${dLine} L ${xOf(dn-1, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
-							{@const slowIdxs = dPts.map((p, i) => (p.duration_ms! > median * 2 ? i : -1)).filter(i => i >= 0)}
-							{@const dHover = durHoverIdx !== null ? dPts[durHoverIdx] : null}
-							<div class="chart-card">
-								<div class="chart-header">
-									<h3>Turn Duration</h3>
-									<div class="chart-header-right">
-										{#if dHover && durHoverIdx !== null}
-											<span class="chart-hover-val">Turn {dHover.turn}: {fmtSecs(dHover.duration_ms!)}</span>
-										{/if}
-										<span class="chart-total">median {fmtSecs(median)}</span>
-									</div>
-								</div>
-								<div class="chart-desc">Time per turn (slow turns highlighted)</div>
-								<svg viewBox="0 0 {W} {H}" class="trend-svg"
-									onmousemove={(e) => chartMove(e, dn, v => durHoverIdx = v)}
-									onmouseleave={() => durHoverIdx = null}>
-									<defs>
-										<linearGradient id="durG" x1="0" y1="0" x2="0" y2="1">
-											<stop offset="0%" stop-color="#10b981" stop-opacity="0.25" />
-											<stop offset="100%" stop-color="#10b981" stop-opacity="0" />
-										</linearGradient>
-									</defs>
-									{#each [0, 0.5, 1] as frac}
-										{@const gy = PAD.t + iH * (1 - frac)}
-										<line x1={PAD.l} x2={W - PAD.r} y1={gy} y2={gy} stroke="#f1f5f9" stroke-width="1" />
-										<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtSecs(maxD * frac)}</text>
-									{/each}
-									<path d={dArea} fill="url(#durG)" />
-									<path d={dLine} fill="none" stroke="#10b981" stroke-width="1.5" stroke-linejoin="round" />
-									<line x1={PAD.l} x2={W - PAD.r} y1={dyOf(median)} y2={dyOf(median)} stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3" />
-									{#each slowIdxs as i}
-										<circle cx={xOf(i, dn)} cy={dyOf(dPts[i].duration_ms!)} r="3" fill="#ef4444" stroke="white" stroke-width="1" />
-									{/each}
-									{#if durHoverIdx !== null}
-										<line x1={xOf(durHoverIdx, dn)} x2={xOf(durHoverIdx, dn)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
-										<circle cx={xOf(durHoverIdx, dn)} cy={dyOf(dPts[durHoverIdx].duration_ms!)} r="3.5" fill="#10b981" stroke="white" stroke-width="1.5" />
-									{/if}
-									<rect x={PAD.l} y={PAD.t} width={iW} height={iH} fill="transparent" />
-								</svg>
-							</div>
-						{/if}
-					{/if}
 				{/if}
-			{/snippet}
-		</ActivityCharts>
-	</div>
+			{/if}
+		</div>
+	{/if}
 
-	<!-- Notable Quotes -->
+	<!-- 6. Notable Quotes -->
 	{#if session.notable_quotes && session.notable_quotes.length > 0}
 		{@const vibeEmoji = (v: string) => {
 			const map: Record<string, string> = {
-				frustration: '😤', humor: '😄', impatience: '⏳', delight: '✨',
-				sarcasm: '😏', curiosity: '🤔', rage: '🔥', relief: '😮‍💨',
-				gratitude: '🙏', confusion: '😵', determination: '💪', surprise: '😲',
-				disappointment: '😞', excitement: '🎉', apology: '🙇',
+				frustrated: '😤', humor: '😄', impatience: '⏳', delight: '✨',
+				sarcasm: '😏', curious: '🤔', rage: '🔥', relieved: '😮‍💨',
+				gratitude: '🙏', confused: '😵', determination: '💪', surprised: '😲',
+				disappointed: '😞', amused: '🎉', assertive: '💪',
+				frustration: '😤', curiosity: '🤔', relief: '😮‍💨',
+				confusion: '😵', surprise: '😲', disappointment: '😞',
+				excitement: '🎉', apology: '🙇',
 			};
 			return map[(v ?? '').toLowerCase()] || '💬';
 		}}
-		<details class="quotes-card">
+		<details class="quotes-card" open>
 			<summary class="quotes-toggle">
 				{session.notable_quotes.map(q => vibeEmoji(q.mood ?? q.vibe ?? '')).join(' ')} Things you said
 			</summary>
@@ -425,43 +444,7 @@
 		</details>
 	{/if}
 
-	<!-- Token Efficiency Signals -->
-	{@const signals = [
-		{ label: 'Error retries', value: session.error_retry_sequences, desc: 'Failed tool calls followed by same tool retry', icon: '↻', color: '#dc2626' },
-		{ label: 'Context resets', value: session.context_resets, desc: 'Turns where context dropped >40% (compaction)', icon: '⟳', color: '#f59e0b' },
-		{ label: 'Duplicate reads', value: session.duplicate_read_count, desc: 'Re-reads of files already in context', icon: '⊘', color: '#8b5cf6' },
-		{ label: 'Repeated edits', value: session.repeated_edits_count, desc: 'Consecutive edits to the same file', icon: '⇄', color: '#ea580c' },
-	].filter(s => s.value != null && s.value > 0)}
-	{#if signals.length > 0}
-		<div class="section">
-			<h2>Token Efficiency</h2>
-			<div class="efficiency-signals">
-				{#each signals as s}
-					<div class="eff-signal" title={s.desc}>
-						<span class="eff-icon" style="color: {s.color}">{s.icon}</span>
-						<span class="eff-value">{s.value}</span>
-						<span class="eff-label">{s.label}</span>
-					</div>
-				{/each}
-				{#if session.tokens_per_useful_edit}
-					<div class="eff-signal" title="Average tokens consumed per successful edit">
-						<span class="eff-icon" style="color: #0d9488">⚡</span>
-						<span class="eff-value">{fmtTokens(session.tokens_per_useful_edit)}</span>
-						<span class="eff-label">Tokens/edit</span>
-					</div>
-				{/if}
-				{#if session.context_pressure_score != null && session.context_pressure_score > 0}
-					<div class="eff-signal" title="Fraction of turns with >50% context growth">
-						<span class="eff-icon" style="color: #64748b">📈</span>
-						<span class="eff-value">{(session.context_pressure_score * 100).toFixed(0)}%</span>
-						<span class="eff-label">Context pressure</span>
-					</div>
-				{/if}
-			</div>
-		</div>
-	{/if}
-
-	<!-- Insights -->
+	<!-- 7. Insights -->
 	{#if session.insights.length > 0}
 		<div class="section">
 			<h2>Insights <span class="h2-count">{session.insights.length}</span></h2>
@@ -487,7 +470,7 @@
 		<div class="empty">No insights yet. Click "Re-analyze" to generate insights.</div>
 	{/if}
 
-	<!-- Tool Calls -->
+	<!-- 8. Tool Calls (collapsed) -->
 	{#if session.tool_calls.length > 0}
 		<div class="section">
 			<button class="collapse-btn" onclick={() => toolsExpanded = !toolsExpanded}>
@@ -555,7 +538,8 @@
 
 	.grade-badge { font-size: 18px; font-weight: 800; padding: 2px 12px; border-radius: 10px; }
 
-	.chart-card { background: white; border-radius: 16px; padding: 22px 24px; }
+	.charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; }
+	.chart-card { background: white; border-radius: 16px; padding: 22px 24px; border: 1px solid #e8e5e0; }
 	.chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1px; }
 	.chart-header h3 { font-size: 14px; font-weight: 700; color: #232326; }
 	.chart-header-right { display: flex; align-items: center; gap: 6px; }
@@ -578,15 +562,9 @@
 	.reanalyze-btn:hover { background: #1d4ed8; }
 	.reanalyze-btn:disabled { background: #94a3b8; cursor: not-allowed; }
 
-	.section { margin-bottom: 32px; }
+	.section { margin-bottom: 28px; }
 	h2 { font-size: 18px; font-weight: 600; color: #0f172a; margin-bottom: 16px; }
 	.h2-count { font-size: 13px; font-weight: 500; color: #94a3b8; }
-
-	.efficiency-signals { display: flex; flex-wrap: wrap; gap: 12px; }
-	.eff-signal { display: flex; align-items: center; gap: 8px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 16px; min-width: 150px; }
-	.eff-icon { font-size: 18px; }
-	.eff-value { font-size: 20px; font-weight: 700; color: #0f172a; font-family: 'SF Mono', 'Cascadia Code', monospace; }
-	.eff-label { font-size: 12px; color: #64748b; }
 
 	.insights-grid { display: flex; flex-direction: column; gap: 14px; }
 	.quotes-card { background: #fefce8; border: 1px solid #fde68a; border-radius: 10px; padding: 0; margin-bottom: 20px; font-size: 13px; }
