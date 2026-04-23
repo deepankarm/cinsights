@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { SessionRead } from '$lib/types';
-	import { fmtTokens, gradeColor, gradeBg } from '$lib/format';
+	import { fmtTokens, fmtDateRange, gradeColor, gradeBg } from '$lib/format';
 
 	let { sessions, compact = false, limit = 10 }: { sessions: SessionRead[]; compact?: boolean; limit?: number } = $props();
 
@@ -34,11 +34,14 @@
 
 	function formatDurationMs(ms: number): string {
 		if (ms < 1000) return '<1s';
-		const mins = Math.floor(ms / 60000);
-		const secs = Math.floor((ms % 60000) / 1000);
-		if (mins >= 60) return `${Math.floor(mins / 60)}h ${mins % 60}m`;
-		if (mins > 0) return `${mins}m ${secs}s`;
-		return `${secs}s`;
+		const secs = Math.floor(ms / 1000);
+		const mins = Math.floor(secs / 60);
+		const hrs = Math.floor(mins / 60);
+		const days = Math.floor(hrs / 24);
+		if (days > 0) return `${days}d ${hrs % 24}h`;
+		if (hrs > 0) return `${hrs}h ${mins % 60}m`;
+		if (mins > 0) return `${mins}m ${secs % 60}s`;
+		return `${secs % 60}s`;
 	}
 
 	function activeDuration(s: SessionRead): string {
@@ -125,7 +128,7 @@
 							</span>
 						</td>
 					{/if}
-					<td class="cell-dim">{formatDate(s.start_time)}</td>
+					<td class="cell-dim">{fmtDateRange(s.start_time, s.end_time)}</td>
 					{#if !compact}<td class="cell-mono">{s.model ?? '-'}</td>{/if}
 					<td class="cell-mono">{activeDuration(s)}</td>
 					<td class="cell-num">{s.tool_call_count || '-'}</td>

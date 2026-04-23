@@ -32,10 +32,26 @@ export function fmtDuration(start: string, end: string | null): string {
 	if (!end) return '-';
 	const ms = new Date(end).getTime() - new Date(start).getTime();
 	if (ms < 1000) return '<1s';
-	const mins = Math.floor(ms / 60000);
-	const secs = Math.floor((ms % 60000) / 1000);
-	if (mins > 0) return `${mins}m ${secs}s`;
-	return `${secs}s`;
+	const secs = Math.floor(ms / 1000);
+	const mins = Math.floor(secs / 60);
+	const hrs = Math.floor(mins / 60);
+	const days = Math.floor(hrs / 24);
+	if (days > 0) return `${days}d ${hrs % 24}h`;
+	if (hrs > 0) return `${hrs}h ${mins % 60}m`;
+	if (mins > 0) return `${mins}m ${secs % 60}s`;
+	return `${secs % 60}s`;
+}
+
+export function fmtDateRange(start: string, end: string | null): string {
+	const s = fmtDate(start);
+	if (!end) return s;
+	const ts1 = start.endsWith('Z') || start.includes('+') ? start : start + 'Z';
+	const ts2 = end.endsWith('Z') || end.includes('+') ? end : end + 'Z';
+	const d1 = new Date(ts1);
+	const d2 = new Date(ts2);
+	// Same calendar day — just show start
+	if (d1.toDateString() === d2.toDateString()) return s;
+	return `${s} → ${fmtDate(end)}`;
 }
 
 export function fmtMinutes(m: number): string {

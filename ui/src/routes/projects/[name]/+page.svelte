@@ -3,7 +3,7 @@
 	import { onMount } from 'svelte';
 	import { getProjects, getDigests, getDigest, getProjectStats, type ProjectRead } from '$lib/api';
 	import type { SessionRead, DigestDetail, DigestStatsData } from '$lib/types';
-	import { fmtTokens, fmtDate, fmtDuration } from '$lib/format';
+	import { fmtTokens, fmtDate, fmtDateRange, fmtDuration } from '$lib/format';
 	import DashboardView from '$lib/components/DashboardView.svelte';
 	import InsightsPanel from '$lib/components/InsightsPanel.svelte';
 	import ActivityCharts from '$lib/components/ActivityCharts.svelte';
@@ -126,7 +126,7 @@
 										{#each userSessions as s}
 											<a href="/sessions/{s.id}" class="session-row">
 												<span class="sr-id">{displayId(s.id)}</span>
-												<span class="sr-time">{fmtDate(s.start_time)}</span>
+												<span class="sr-time">{fmtDateRange(s.start_time, s.end_time)}</span>
 												<span class="sr-dur">{fmtDuration(s.start_time, s.end_time)}</span>
 												<span class="sr-tools">{s.tool_call_count || '-'} tools</span>
 												<span class="sr-tokens">{fmtTokens(s.total_tokens)}</span>
