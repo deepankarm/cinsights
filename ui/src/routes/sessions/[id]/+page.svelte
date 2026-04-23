@@ -317,13 +317,6 @@
 			<div class="hero-label">Tool Calls</div>
 			<div class="hero-sub">{errorCount} errors ({errorRate.toFixed(0)}%)</div>
 		</div>
-		{#if firstEditMs != null}
-			<div class="hero-metric">
-				<div class="hero-value" style="color: #0d9488">{fmtSecs(firstEditMs)}</div>
-				<div class="hero-label">First Edit</div>
-				<div class="hero-sub">time to first mutation</div>
-			</div>
-		{/if}
 		<div class="hero-metric">
 			<div class="hero-value" style="color: #64748b">{session.model ?? '-'}</div>
 			<div class="hero-label">Model</div>
