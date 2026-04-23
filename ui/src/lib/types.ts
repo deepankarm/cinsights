@@ -65,7 +65,9 @@ export interface SessionDetail {
 	// Quality metrics
 	read_edit_ratio: number | null;
 	edits_without_read_pct: number | null;
+	research_mutation_ratio: number | null;
 	error_rate: number | null;
+	write_vs_edit_pct: number | null;
 	repeated_edits_count: number | null;
 	tokens_per_useful_edit: number | null;
 	context_pressure_score: number | null;

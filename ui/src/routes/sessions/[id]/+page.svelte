@@ -198,7 +198,9 @@
 
 		add('Read:Edit', session.read_edit_ratio, '', 'avg_read_edit_ratio', 'better');
 		add('Blind edits', session.edits_without_read_pct, '%', 'avg_edits_without_read_pct', 'worse');
+		add('Research:Mut', session.research_mutation_ratio, '', 'avg_research_mutation_ratio', 'better');
 		add('Error rate', session.error_rate, '%', 'avg_error_rate', 'worse');
+		add('Write vs Edit', session.write_vs_edit_pct, '%', 'avg_write_vs_edit_pct', 'worse');
 		add('Thrashing', session.repeated_edits_count, '', 'avg_repeated_edits_count', 'worse');
 		add('Ctx pressure', session.context_pressure_score, '', 'avg_context_pressure_score', 'worse',
 			(n) => fmtNum(n * 100, '%'));

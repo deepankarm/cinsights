@@ -87,7 +87,9 @@ class SessionDetail(BaseModel):
     # Quality metrics
     read_edit_ratio: float | None = None
     edits_without_read_pct: float | None = None
+    research_mutation_ratio: float | None = None
     error_rate: float | None = None
+    write_vs_edit_pct: float | None = None
     repeated_edits_count: int | None = None
     tokens_per_useful_edit: float | None = None
     context_pressure_score: float | None = None
@@ -301,7 +303,9 @@ async def get_session_detail(
                 func.count(),
                 func.avg(CodingSession.read_edit_ratio),
                 func.avg(CodingSession.edits_without_read_pct),
+                func.avg(CodingSession.research_mutation_ratio),
                 func.avg(CodingSession.error_rate),
+                func.avg(CodingSession.write_vs_edit_pct),
                 func.avg(CodingSession.repeated_edits_count),
                 func.avg(CodingSession.context_pressure_score),
                 func.avg(CodingSession.tokens_per_useful_edit),
@@ -318,13 +322,15 @@ async def get_session_detail(
             baseline_data = {
                 "avg_read_edit_ratio": round(row[1], 2) if row[1] else None,
                 "avg_edits_without_read_pct": round(row[2], 1) if row[2] else None,
-                "avg_error_rate": round(row[3], 1) if row[3] else None,
-                "avg_repeated_edits_count": round(row[4], 1) if row[4] else None,
-                "avg_context_pressure_score": round(row[5], 2) if row[5] else None,
-                "avg_tokens_per_useful_edit": round(row[6], 0) if row[6] else None,
-                "avg_error_retry_sequences": round(row[7], 1) if row[7] else None,
-                "avg_context_resets": round(row[8], 1) if row[8] else None,
-                "avg_duplicate_read_count": round(row[9], 1) if row[9] else None,
+                "avg_research_mutation_ratio": round(row[3], 2) if row[3] else None,
+                "avg_error_rate": round(row[4], 1) if row[4] else None,
+                "avg_write_vs_edit_pct": round(row[5], 1) if row[5] else None,
+                "avg_repeated_edits_count": round(row[6], 1) if row[6] else None,
+                "avg_context_pressure_score": round(row[7], 2) if row[7] else None,
+                "avg_tokens_per_useful_edit": round(row[8], 0) if row[8] else None,
+                "avg_error_retry_sequences": round(row[9], 1) if row[9] else None,
+                "avg_context_resets": round(row[10], 1) if row[10] else None,
+                "avg_duplicate_read_count": round(row[11], 1) if row[11] else None,
             }
 
     return SessionDetail(
@@ -374,7 +380,9 @@ async def get_session_detail(
         adaptive_thinking_disabled=session.adaptive_thinking_disabled,
         read_edit_ratio=session.read_edit_ratio,
         edits_without_read_pct=session.edits_without_read_pct,
+        research_mutation_ratio=session.research_mutation_ratio,
         error_rate=session.error_rate,
+        write_vs_edit_pct=session.write_vs_edit_pct,
         repeated_edits_count=session.repeated_edits_count,
         tokens_per_useful_edit=session.tokens_per_useful_edit,
         context_pressure_score=session.context_pressure_score,
