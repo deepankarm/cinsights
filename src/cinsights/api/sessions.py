@@ -14,6 +14,7 @@ from cinsights.db.models import (
     Insight,
     InsightCategory,
     InsightSeverity,
+    SessionBaseline,
     SessionStatus,
     ToolCall,
 )
@@ -96,6 +97,9 @@ class SessionDetail(BaseModel):
     error_retry_sequences: int | None = None
     context_resets: int | None = None
     duplicate_read_count: int | None = None
+
+    # Baseline averages for comparison
+    baseline: dict | None = None
 
 
 class StatsResponse(BaseModel):
@@ -290,6 +294,18 @@ async def get_session_detail(
     )
     insights = ins_result.all()
 
+    # Fetch baseline for comparison
+    baseline_data = None
+    if session.user_id:
+        baseline_id = f"{session.user_id}:{session.project_name or ''}"
+        baseline = await db.get(SessionBaseline, baseline_id)
+        if baseline and baseline.session_count >= 3:
+            baseline_data = {
+                "avg_read_edit_ratio": baseline.avg_read_edit_ratio,
+                "avg_edits_without_read_pct": baseline.avg_edits_without_read_pct,
+                "avg_error_rate": baseline.avg_error_rate,
+            }
+
     return SessionDetail(
         id=session.id,
         session_id=session.session_id,
@@ -344,6 +360,7 @@ async def get_session_detail(
         error_retry_sequences=session.error_retry_sequences,
         context_resets=session.context_resets,
         duplicate_read_count=session.duplicate_read_count,
+        baseline=baseline_data,
     )
 
 

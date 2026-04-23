@@ -15,6 +15,7 @@
 	let error: string | null = $state(null);
 	let analyzing = $state(false);
 	let toolsExpanded = $state(false);
+	let errorsExpanded = $state(false);
 	let hoverIdx: number | null = $state(null);
 	let durHoverIdx: number | null = $state(null);
 	let copied = $state(false);
@@ -168,15 +169,33 @@
 
 	const qualityMetrics = $derived.by((): QualityMetric[] => {
 		if (!session) return [];
+		const bl = session.baseline;
 		const items: QualityMetric[] = [];
-		const add = (label: string, v: number | null, suffix = '') => {
-			if (v != null) items.push({ label, value: fmtNum(v, suffix) });
-		};
-		add('Read:Edit', session.read_edit_ratio);
-		add('Blind edits', session.edits_without_read_pct, '%');
-		add('Error rate', session.error_rate, '%');
-		add('Thrashing', session.repeated_edits_count);
-		add('Ctx pressure', session.context_pressure_score != null ? session.context_pressure_score * 100 : null, '%');
+
+		function add(label: string, v: number | null, suffix: string, baselineKey?: string, higherIs?: 'better' | 'worse') {
+			if (v == null) return;
+			const m: QualityMetric = { label, value: fmtNum(v, suffix) };
+			if (bl && baselineKey && (bl as Record<string, number>)[baselineKey] != null) {
+				const avg = (bl as Record<string, number>)[baselineKey];
+				m.teamAvg = fmtNum(avg, suffix);
+				if (higherIs) {
+					const pct = Math.abs((v - avg) / (avg || 1)) * 100;
+					if (pct > 15) {
+						const above = v > avg;
+						const isGood = higherIs === 'better' ? above : !above;
+						m.deltaColor = isGood ? '#16a34a' : '#dc2626';
+						m.deltaAbove = above;
+					}
+				}
+			}
+			items.push(m);
+		}
+
+		add('Read:Edit', session.read_edit_ratio, '', 'avg_read_edit_ratio', 'better');
+		add('Blind edits', session.edits_without_read_pct, '%', 'avg_edits_without_read_pct', 'worse');
+		add('Error rate', session.error_rate, '%', 'avg_error_rate', 'worse');
+		add('Thrashing', session.repeated_edits_count, '', undefined, undefined);
+		add('Ctx pressure', session.context_pressure_score != null ? session.context_pressure_score * 100 : null, '%', undefined, undefined);
 		if (session.tokens_per_useful_edit) items.push({ label: 'Tokens/edit', value: fmtTokens(session.tokens_per_useful_edit) });
 		if (session.error_retry_sequences) items.push({ label: 'Error retries', value: `${session.error_retry_sequences}` });
 		if (session.context_resets) items.push({ label: 'Ctx resets', value: `${session.context_resets}` });
@@ -296,129 +315,128 @@
 		<QualityBar metrics={qualityMetrics} />
 	{/if}
 
-	<!-- 4. Activity Charts -->
+	<!-- 4. Activity Charts (includes Context Growth + Turn Duration in bento grid) -->
 	<div class="section">
-		<ActivityCharts {toolDistribution} {languageDistribution} {timeOfDay} {errorTypes} {errorDetails} />
-	</div>
-
-	<!-- 5. Context Growth + Turn Duration -->
-	{#if session?.context_growth && session.context_growth.length > 1}
-		{@const pts = session.context_growth}
-		{@const n = pts.length}
-		{@const maxY = Math.max(...pts.map(p => p.prompt_tokens), 1)}
-		{@const yOf = (v: number) => PAD.t + iH - (v / maxY) * iH}
-		{@const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, n).toFixed(1)} ${yOf(p.prompt_tokens).toFixed(1)}`).join(' ')}
-		{@const areaPath = `${linePath} L ${xOf(n-1, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
-		{@const compactionIdxs = pts.map((p, i) => (i > 0 && p.prompt_tokens < pts[i-1].prompt_tokens * 0.85 ? i : -1)).filter(i => i >= 0)}
-		{@const interruptIdxs = pts.map((p, i) => (p.interrupted ? i : -1)).filter(i => i >= 0)}
-		{@const hover = hoverIdx !== null ? pts[hoverIdx] : null}
-		<div class="section charts-grid">
-			<!-- Context Growth -->
-			<div class="chart-card">
-				<div class="chart-header">
-					<h3>Context Growth</h3>
-					<div class="chart-header-right">
-						{#if hover && hoverIdx !== null}
-							<span class="chart-hover-val">Turn {hover.turn}: {fmtTokens(hover.prompt_tokens)}</span>
-						{/if}
-						{#if compactionIdxs.length > 0}
-							<span class="trend-badge down">{compactionIdxs.length} compaction{compactionIdxs.length > 1 ? 's' : ''}</span>
-						{/if}
-						{#if interruptIdxs.length > 0}
-							<span class="trend-badge interrupt">{interruptIdxs.length} interrupt{interruptIdxs.length > 1 ? 's' : ''}</span>
-						{/if}
-					</div>
-				</div>
-				<div class="chart-desc">Prompt tokens per turn</div>
-				<svg viewBox="0 0 {W} {H}" class="trend-svg"
-					onmousemove={(e) => chartMove(e, n, v => hoverIdx = v)}
-					onmouseleave={() => hoverIdx = null}>
-					<defs>
-						<linearGradient id="ctxG" x1="0" y1="0" x2="0" y2="1">
-							<stop offset="0%" stop-color="#6366f1" stop-opacity="0.25" />
-							<stop offset="100%" stop-color="#6366f1" stop-opacity="0" />
-						</linearGradient>
-					</defs>
-					{#each [0, 0.5, 1] as frac}
-						{@const gy = PAD.t + iH * (1 - frac)}
-						<line x1={PAD.l} x2={W - PAD.r} y1={gy} y2={gy} stroke="#f1f5f9" stroke-width="1" />
-						<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtTokens(Math.round(maxY * frac))}</text>
-					{/each}
-					<path d={areaPath} fill="url(#ctxG)" />
-					<path d={linePath} fill="none" stroke="#6366f1" stroke-width="1.5" stroke-linejoin="round" />
-					{#each compactionIdxs as i}
-						<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#f59e0b" stroke="white" stroke-width="1" />
-					{/each}
-					{#each interruptIdxs as i}
-						<line x1={xOf(i, n)} x2={xOf(i, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#ef4444" stroke-width="1" stroke-opacity="0.4" />
-						<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#ef4444" stroke="white" stroke-width="1" />
-					{/each}
-					{#if hoverIdx !== null}
-						<line x1={xOf(hoverIdx, n)} x2={xOf(hoverIdx, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
-						<circle cx={xOf(hoverIdx, n)} cy={yOf(pts[hoverIdx].prompt_tokens)} r="3.5" fill="#6366f1" stroke="white" stroke-width="1.5" />
-					{/if}
-					<rect x={PAD.l} y={PAD.t} width={iW} height={iH} fill="transparent" />
-				</svg>
-			</div>
-
-			<!-- Turn Duration -->
-			{#if session?.context_growth?.some(p => p.duration_ms != null)}
-				{@const dPts = session!.context_growth!.filter(p => p.duration_ms != null)}
-				{@const dn = dPts.length}
-				{#if dn > 1}
-					{@const durations = dPts.map(p => p.duration_ms!)}
-					{@const maxD = Math.max(...durations, 1)}
-					{@const sortedD = [...durations].sort((a, b) => a - b)}
-					{@const median = sortedD[Math.floor(sortedD.length / 2)]}
-					{@const dyOf = (v: number) => PAD.t + iH - (v / maxD) * iH}
-					{@const dLine = dPts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, dn).toFixed(1)} ${dyOf(p.duration_ms!).toFixed(1)}`).join(' ')}
-					{@const dArea = `${dLine} L ${xOf(dn-1, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
-					{@const slowIdxs = dPts.map((p, i) => (p.duration_ms! > median * 2 ? i : -1)).filter(i => i >= 0)}
-					{@const dHover = durHoverIdx !== null ? dPts[durHoverIdx] : null}
+		<ActivityCharts {toolDistribution} {languageDistribution} {timeOfDay} {errorTypes} errorDetails={[]}>
+			{#snippet extra()}
+				{#if session?.context_growth && session.context_growth.length > 1}
+					{@const pts = session.context_growth}
+					{@const n = pts.length}
+					{@const maxY = Math.max(...pts.map(p => p.prompt_tokens), 1)}
+					{@const yOf = (v: number) => PAD.t + iH - (v / maxY) * iH}
+					{@const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, n).toFixed(1)} ${yOf(p.prompt_tokens).toFixed(1)}`).join(' ')}
+					{@const areaPath = `${linePath} L ${xOf(n-1, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
+					{@const compactionIdxs = pts.map((p, i) => (i > 0 && p.prompt_tokens < pts[i-1].prompt_tokens * 0.85 ? i : -1)).filter(i => i >= 0)}
+					{@const interruptIdxs = pts.map((p, i) => (p.interrupted ? i : -1)).filter(i => i >= 0)}
+					{@const hover = hoverIdx !== null ? pts[hoverIdx] : null}
+					<!-- Context Growth -->
 					<div class="chart-card">
 						<div class="chart-header">
-							<h3>Turn Duration</h3>
+							<h3>Context Growth</h3>
 							<div class="chart-header-right">
-								{#if dHover && durHoverIdx !== null}
-									<span class="chart-hover-val">Turn {dHover.turn}: {fmtSecs(dHover.duration_ms!)}</span>
+								{#if hover && hoverIdx !== null}
+									<span class="chart-hover-val">Turn {hover.turn}: {fmtTokens(hover.prompt_tokens)}</span>
 								{/if}
-								<span class="chart-total">median {fmtSecs(median)}</span>
+								{#if compactionIdxs.length > 0}
+									<span class="trend-badge down">{compactionIdxs.length} compaction{compactionIdxs.length > 1 ? 's' : ''}</span>
+								{/if}
+								{#if interruptIdxs.length > 0}
+									<span class="trend-badge interrupt">{interruptIdxs.length} interrupt{interruptIdxs.length > 1 ? 's' : ''}</span>
+								{/if}
 							</div>
 						</div>
-						<div class="chart-desc">Time per turn (slow turns highlighted)</div>
+						<div class="chart-desc">Prompt tokens per turn</div>
 						<svg viewBox="0 0 {W} {H}" class="trend-svg"
-							onmousemove={(e) => chartMove(e, dn, v => durHoverIdx = v)}
-							onmouseleave={() => durHoverIdx = null}>
+							onmousemove={(e) => chartMove(e, n, v => hoverIdx = v)}
+							onmouseleave={() => hoverIdx = null}>
 							<defs>
-								<linearGradient id="durG" x1="0" y1="0" x2="0" y2="1">
-									<stop offset="0%" stop-color="#10b981" stop-opacity="0.25" />
-									<stop offset="100%" stop-color="#10b981" stop-opacity="0" />
+								<linearGradient id="ctxG" x1="0" y1="0" x2="0" y2="1">
+									<stop offset="0%" stop-color="#6366f1" stop-opacity="0.25" />
+									<stop offset="100%" stop-color="#6366f1" stop-opacity="0" />
 								</linearGradient>
 							</defs>
 							{#each [0, 0.5, 1] as frac}
 								{@const gy = PAD.t + iH * (1 - frac)}
 								<line x1={PAD.l} x2={W - PAD.r} y1={gy} y2={gy} stroke="#f1f5f9" stroke-width="1" />
-								<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtSecs(maxD * frac)}</text>
+								<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtTokens(Math.round(maxY * frac))}</text>
 							{/each}
-							<path d={dArea} fill="url(#durG)" />
-							<path d={dLine} fill="none" stroke="#10b981" stroke-width="1.5" stroke-linejoin="round" />
-							<line x1={PAD.l} x2={W - PAD.r} y1={dyOf(median)} y2={dyOf(median)} stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3" />
-							{#each slowIdxs as i}
-								<circle cx={xOf(i, dn)} cy={dyOf(dPts[i].duration_ms!)} r="3" fill="#ef4444" stroke="white" stroke-width="1" />
+							<path d={areaPath} fill="url(#ctxG)" />
+							<path d={linePath} fill="none" stroke="#6366f1" stroke-width="1.5" stroke-linejoin="round" />
+							{#each compactionIdxs as i}
+								<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#f59e0b" stroke="white" stroke-width="1" />
 							{/each}
-							{#if durHoverIdx !== null}
-								<line x1={xOf(durHoverIdx, dn)} x2={xOf(durHoverIdx, dn)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
-								<circle cx={xOf(durHoverIdx, dn)} cy={dyOf(dPts[durHoverIdx].duration_ms!)} r="3.5" fill="#10b981" stroke="white" stroke-width="1.5" />
+							{#each interruptIdxs as i}
+								<line x1={xOf(i, n)} x2={xOf(i, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#ef4444" stroke-width="1" stroke-opacity="0.4" />
+								<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#ef4444" stroke="white" stroke-width="1" />
+							{/each}
+							{#if hoverIdx !== null}
+								<line x1={xOf(hoverIdx, n)} x2={xOf(hoverIdx, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
+								<circle cx={xOf(hoverIdx, n)} cy={yOf(pts[hoverIdx].prompt_tokens)} r="3.5" fill="#6366f1" stroke="white" stroke-width="1.5" />
 							{/if}
 							<rect x={PAD.l} y={PAD.t} width={iW} height={iH} fill="transparent" />
 						</svg>
 					</div>
-				{/if}
-			{/if}
-		</div>
-	{/if}
 
-	<!-- 6. Notable Quotes -->
+					<!-- Turn Duration -->
+					{#if session?.context_growth?.some(p => p.duration_ms != null)}
+						{@const dPts = session!.context_growth!.filter(p => p.duration_ms != null)}
+						{@const dn = dPts.length}
+						{#if dn > 1}
+							{@const durations = dPts.map(p => p.duration_ms!)}
+							{@const maxD = Math.max(...durations, 1)}
+							{@const sortedD = [...durations].sort((a, b) => a - b)}
+							{@const median = sortedD[Math.floor(sortedD.length / 2)]}
+							{@const dyOf = (v: number) => PAD.t + iH - (v / maxD) * iH}
+							{@const dLine = dPts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, dn).toFixed(1)} ${dyOf(p.duration_ms!).toFixed(1)}`).join(' ')}
+							{@const dArea = `${dLine} L ${xOf(dn-1, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
+							{@const slowIdxs = dPts.map((p, i) => (p.duration_ms! > median * 2 ? i : -1)).filter(i => i >= 0)}
+							{@const dHover = durHoverIdx !== null ? dPts[durHoverIdx] : null}
+							<div class="chart-card">
+								<div class="chart-header">
+									<h3>Turn Duration</h3>
+									<div class="chart-header-right">
+										{#if dHover && durHoverIdx !== null}
+											<span class="chart-hover-val">Turn {dHover.turn}: {fmtSecs(dHover.duration_ms!)}</span>
+										{/if}
+										<span class="chart-total">median {fmtSecs(median)}</span>
+									</div>
+								</div>
+								<div class="chart-desc">Time per turn (slow turns highlighted)</div>
+								<svg viewBox="0 0 {W} {H}" class="trend-svg"
+									onmousemove={(e) => chartMove(e, dn, v => durHoverIdx = v)}
+									onmouseleave={() => durHoverIdx = null}>
+									<defs>
+										<linearGradient id="durG" x1="0" y1="0" x2="0" y2="1">
+											<stop offset="0%" stop-color="#10b981" stop-opacity="0.25" />
+											<stop offset="100%" stop-color="#10b981" stop-opacity="0" />
+										</linearGradient>
+									</defs>
+									{#each [0, 0.5, 1] as frac}
+										{@const gy = PAD.t + iH * (1 - frac)}
+										<line x1={PAD.l} x2={W - PAD.r} y1={gy} y2={gy} stroke="#f1f5f9" stroke-width="1" />
+										<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtSecs(maxD * frac)}</text>
+									{/each}
+									<path d={dArea} fill="url(#durG)" />
+									<path d={dLine} fill="none" stroke="#10b981" stroke-width="1.5" stroke-linejoin="round" />
+									<line x1={PAD.l} x2={W - PAD.r} y1={dyOf(median)} y2={dyOf(median)} stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3" />
+									{#each slowIdxs as i}
+										<circle cx={xOf(i, dn)} cy={dyOf(dPts[i].duration_ms!)} r="3" fill="#ef4444" stroke="white" stroke-width="1" />
+									{/each}
+									{#if durHoverIdx !== null}
+										<line x1={xOf(durHoverIdx, dn)} x2={xOf(durHoverIdx, dn)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
+										<circle cx={xOf(durHoverIdx, dn)} cy={dyOf(dPts[durHoverIdx].duration_ms!)} r="3.5" fill="#10b981" stroke="white" stroke-width="1.5" />
+									{/if}
+									<rect x={PAD.l} y={PAD.t} width={iW} height={iH} fill="transparent" />
+								</svg>
+							</div>
+						{/if}
+					{/if}
+				{/if}
+			{/snippet}
+		</ActivityCharts>
+	</div>
+
+	<!-- 5. Notable Quotes -->
 	{#if session.notable_quotes && session.notable_quotes.length > 0}
 		{@const vibeEmoji = (v: string) => {
 			const map: Record<string, string> = {
@@ -444,7 +462,7 @@
 		</details>
 	{/if}
 
-	<!-- 7. Insights -->
+	<!-- 6. Insights -->
 	{#if session.insights.length > 0}
 		<div class="section">
 			<h2>Insights <span class="h2-count">{session.insights.length}</span></h2>
@@ -468,6 +486,27 @@
 		</div>
 	{:else}
 		<div class="empty">No insights yet. Click "Re-analyze" to generate insights.</div>
+	{/if}
+
+	<!-- 7. Errors (collapsed) -->
+	{#if errorDetails.length > 0}
+		<div class="section">
+			<button class="collapse-btn" onclick={() => errorsExpanded = !errorsExpanded}>
+				<span class="collapse-arrow" class:open={errorsExpanded}>&#9654;</span>
+				<h2 style="display:inline; margin-bottom:0">Errors <span class="h2-count">{errorCount}</span></h2>
+			</button>
+			{#if errorsExpanded}
+				<div class="error-list">
+					{#each errorDetails as err}
+						<div class="error-item">
+							<span class="error-tool-name">{err.tool}</span>
+							<span class="error-count">{err.count}x</span>
+							<span class="error-msg">{err.message}</span>
+						</div>
+					{/each}
+				</div>
+			{/if}
+		</div>
 	{/if}
 
 	<!-- 8. Tool Calls (collapsed) -->
@@ -538,8 +577,7 @@
 
 	.grade-badge { font-size: 18px; font-weight: 800; padding: 2px 12px; border-radius: 10px; }
 
-	.charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; }
-	.chart-card { background: white; border-radius: 16px; padding: 22px 24px; border: 1px solid #e8e5e0; }
+	.chart-card { background: white; border-radius: 16px; padding: 22px 24px; }
 	.chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1px; }
 	.chart-header h3 { font-size: 14px; font-weight: 700; color: #232326; }
 	.chart-header-right { display: flex; align-items: center; gap: 6px; }
@@ -592,6 +630,12 @@
 	.insight-content :global(blockquote) { margin: 10px 0; padding: 8px 16px; border-left: 3px solid #cbd5e1; color: #64748b; background: rgba(0,0,0,0.02); border-radius: 0 4px 4px 0; }
 	.insight-content :global(a) { color: #2563eb; text-decoration: none; }
 	.insight-content :global(a:hover) { text-decoration: underline; }
+
+	.error-list { display: flex; flex-direction: column; gap: 6px; }
+	.error-item { display: flex; align-items: baseline; gap: 8px; padding: 8px 12px; background: #fff5f5; border: 1px solid #fecaca; border-radius: 8px; font-size: 13px; }
+	.error-tool-name { font-weight: 600; font-family: monospace; color: #dc2626; min-width: 80px; }
+	.error-count { font-weight: 700; font-size: 11px; color: #92400e; background: #fef3c7; padding: 1px 5px; border-radius: 3px; }
+	.error-msg { color: #71717a; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 500px; }
 
 	.collapse-btn { background: none; border: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 0; margin-bottom: 12px; }
 	.collapse-arrow { font-size: 10px; color: #94a3b8; transition: transform 0.15s; }

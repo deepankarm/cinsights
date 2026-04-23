@@ -74,6 +74,13 @@ export interface SessionDetail {
 	error_retry_sequences: number | null;
 	context_resets: number | null;
 	duplicate_read_count: number | null;
+
+	// Baseline averages for comparison
+	baseline: {
+		avg_read_edit_ratio: number;
+		avg_edits_without_read_pct: number;
+		avg_error_rate: number;
+	} | null;
 }
 
 export interface StatsResponse {
