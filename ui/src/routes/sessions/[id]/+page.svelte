@@ -23,11 +23,13 @@
 
 	const id = $derived(page.params.id ?? '');
 
-	const W = 720, H = 180;
+	const W = 720;
+	const H_SMALL = 180, H_LARGE = 500;
 	const PAD = { l: 52, r: 16, t: 16, b: 28 };
-	const iW = W - PAD.l - PAD.r;
-	const iH = H - PAD.t - PAD.b;
 
+	const iW = W - PAD.l - PAD.r;
+	function H(chart?: string): number { return expandedChart === chart ? H_LARGE : H_SMALL; }
+	function iH(chart?: string): number { return H(chart) - PAD.t - PAD.b; }
 	function xOf(i: number, n: number): number { return PAD.l + (i / Math.max(n - 1, 1)) * iW; }
 
 	function chartMove(e: MouseEvent, n: number, setter: (v: number) => void) {
@@ -331,10 +333,11 @@
 				{#if session?.context_growth && session.context_growth.length > 1}
 					{@const pts = session.context_growth}
 					{@const n = pts.length}
+					{@const ch = iH('ctx')}
 					{@const maxY = Math.max(...pts.map(p => p.prompt_tokens), 1)}
-					{@const yOf = (v: number) => PAD.t + iH - (v / maxY) * iH}
+					{@const yOf = (v: number) => PAD.t + ch - (v / maxY) * ch}
 					{@const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, n).toFixed(1)} ${yOf(p.prompt_tokens).toFixed(1)}`).join(' ')}
-					{@const areaPath = `${linePath} L ${xOf(n-1, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
+					{@const areaPath = `${linePath} L ${xOf(n-1, n).toFixed(1)} ${(PAD.t + ch).toFixed(1)} L ${xOf(0, n).toFixed(1)} ${(PAD.t + ch).toFixed(1)} Z`}
 					{@const compactionIdxs = pts.map((p, i) => (i > 0 && p.prompt_tokens < pts[i-1].prompt_tokens * 0.85 ? i : -1)).filter(i => i >= 0)}
 					{@const interruptIdxs = pts.map((p, i) => (p.interrupted ? i : -1)).filter(i => i >= 0)}
 					{@const hover = hoverIdx !== null ? pts[hoverIdx] : null}
@@ -356,7 +359,7 @@
 							</div>
 						</div>
 						<div class="chart-desc">Prompt tokens per turn</div>
-						<svg viewBox="0 0 {W} {H}" class="trend-svg"
+						<svg viewBox="0 0 {W} {H('ctx')}" class="trend-svg"
 							onmousemove={(e) => chartMove(e, n, v => hoverIdx = v)}
 							onmouseleave={() => hoverIdx = null}>
 							<defs>
@@ -366,7 +369,7 @@
 								</linearGradient>
 							</defs>
 							{#each [0, 0.5, 1] as frac}
-								{@const gy = PAD.t + iH * (1 - frac)}
+								{@const gy = PAD.t + ch * (1 - frac)}
 								<line x1={PAD.l} x2={W - PAD.r} y1={gy} y2={gy} stroke="#f1f5f9" stroke-width="1" />
 								<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtTokens(Math.round(maxY * frac))}</text>
 							{/each}
@@ -376,14 +379,14 @@
 								<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#f59e0b" stroke="white" stroke-width="1" />
 							{/each}
 							{#each interruptIdxs as i}
-								<line x1={xOf(i, n)} x2={xOf(i, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#ef4444" stroke-width="1" stroke-opacity="0.4" />
+								<line x1={xOf(i, n)} x2={xOf(i, n)} y1={PAD.t} y2={PAD.t + ch} stroke="#ef4444" stroke-width="1" stroke-opacity="0.4" />
 								<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#ef4444" stroke="white" stroke-width="1" />
 							{/each}
 							{#if hoverIdx !== null}
-								<line x1={xOf(hoverIdx, n)} x2={xOf(hoverIdx, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
+								<line x1={xOf(hoverIdx, n)} x2={xOf(hoverIdx, n)} y1={PAD.t} y2={PAD.t + ch} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
 								<circle cx={xOf(hoverIdx, n)} cy={yOf(pts[hoverIdx].prompt_tokens)} r="3.5" fill="#6366f1" stroke="white" stroke-width="1.5" />
 							{/if}
-							<rect x={PAD.l} y={PAD.t} width={iW} height={iH} fill="transparent" />
+							<rect x={PAD.l} y={PAD.t} width={iW} height={ch} fill="transparent" />
 						</svg>
 					</div>
 
@@ -396,9 +399,10 @@
 							{@const maxD = Math.max(...durations, 1)}
 							{@const sortedD = [...durations].sort((a, b) => a - b)}
 							{@const median = sortedD[Math.floor(sortedD.length / 2)]}
-							{@const dyOf = (v: number) => PAD.t + iH - (v / maxD) * iH}
+							{@const dh = iH('dur')}
+							{@const dyOf = (v: number) => PAD.t + dh - (v / maxD) * dh}
 							{@const dLine = dPts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, dn).toFixed(1)} ${dyOf(p.duration_ms!).toFixed(1)}`).join(' ')}
-							{@const dArea = `${dLine} L ${xOf(dn-1, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
+							{@const dArea = `${dLine} L ${xOf(dn-1, dn).toFixed(1)} ${(PAD.t + dh).toFixed(1)} L ${xOf(0, dn).toFixed(1)} ${(PAD.t + dh).toFixed(1)} Z`}
 							{@const slowIdxs = dPts.map((p, i) => (p.duration_ms! > median * 2 ? i : -1)).filter(i => i >= 0)}
 							{@const dHover = durHoverIdx !== null ? dPts[durHoverIdx] : null}
 							<div class="chart-card" class:chart-expanded={expandedChart === 'dur'}>
@@ -413,7 +417,7 @@
 									</div>
 								</div>
 								<div class="chart-desc">Time per turn (slow turns highlighted)</div>
-								<svg viewBox="0 0 {W} {H}" class="trend-svg"
+								<svg viewBox="0 0 {W} {H('dur')}" class="trend-svg"
 									onmousemove={(e) => chartMove(e, dn, v => durHoverIdx = v)}
 									onmouseleave={() => durHoverIdx = null}>
 									<defs>
@@ -423,7 +427,7 @@
 										</linearGradient>
 									</defs>
 									{#each [0, 0.5, 1] as frac}
-										{@const gy = PAD.t + iH * (1 - frac)}
+										{@const gy = PAD.t + dh * (1 - frac)}
 										<line x1={PAD.l} x2={W - PAD.r} y1={gy} y2={gy} stroke="#f1f5f9" stroke-width="1" />
 										<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtSecs(maxD * frac)}</text>
 									{/each}
@@ -434,10 +438,10 @@
 										<circle cx={xOf(i, dn)} cy={dyOf(dPts[i].duration_ms!)} r="3" fill="#ef4444" stroke="white" stroke-width="1" />
 									{/each}
 									{#if durHoverIdx !== null}
-										<line x1={xOf(durHoverIdx, dn)} x2={xOf(durHoverIdx, dn)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
+										<line x1={xOf(durHoverIdx, dn)} x2={xOf(durHoverIdx, dn)} y1={PAD.t} y2={PAD.t + dh} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
 										<circle cx={xOf(durHoverIdx, dn)} cy={dyOf(dPts[durHoverIdx].duration_ms!)} r="3.5" fill="#10b981" stroke="white" stroke-width="1.5" />
 									{/if}
-									<rect x={PAD.l} y={PAD.t} width={iW} height={iH} fill="transparent" />
+									<rect x={PAD.l} y={PAD.t} width={iW} height={dh} fill="transparent" />
 								</svg>
 							</div>
 						{/if}
@@ -595,12 +599,11 @@
 
 	.chart-card { background: white; border-radius: 16px; padding: 22px 24px; position: relative; transition: all 0.2s; }
 	.chart-expanded {
-		position: fixed; top: 5vh; left: 5vw; width: 90vw; height: 90vh;
+		position: fixed; top: 5vh; left: 5vw; width: 90vw;
 		z-index: 1000; padding: 32px 40px;
 		box-shadow: 0 25px 60px rgba(0,0,0,0.3);
-		overflow-x: auto; overflow-y: hidden; border: 1px solid #e8e5e0;
+		border: 1px solid #e8e5e0;
 	}
-	.chart-expanded .trend-svg { width: 200%; height: calc(90vh - 120px); }
 	.chart-overlay-backdrop {
 		position: fixed; inset: 0; background: rgba(0,0,0,0.5);
 		z-index: 999; cursor: pointer;
