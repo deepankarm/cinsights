@@ -411,15 +411,15 @@
 				gratitude: '🙏', confusion: '😵', determination: '💪', surprise: '😲',
 				disappointment: '😞', excitement: '🎉', apology: '🙇',
 			};
-			return map[v.toLowerCase()] || '💬';
+			return map[(v ?? '').toLowerCase()] || '💬';
 		}}
 		<details class="quotes-card">
 			<summary class="quotes-toggle">
-				{session.notable_quotes.map(q => vibeEmoji(q.vibe)).join(' ')} Things you said
+				{session.notable_quotes.map(q => vibeEmoji(q.mood ?? q.vibe ?? '')).join(' ')} Things you said
 			</summary>
 			<div class="quotes-list">
 				{#each session.notable_quotes as q}
-					<p class="quote-line">{vibeEmoji(q.vibe)} <em>"{q.quote}"</em></p>
+					<p class="quote-line">{vibeEmoji(q.mood ?? q.vibe ?? '')} <em>"{q.quote}"</em></p>
 				{/each}
 			</div>
 		</details>

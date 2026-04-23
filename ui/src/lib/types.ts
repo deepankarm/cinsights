@@ -56,7 +56,7 @@ export interface SessionDetail {
 	tool_calls: ToolCallRead[];
 	total_tool_calls: number;
 	insights: InsightRead[];
-	notable_quotes: Array<{ quote: string; vibe: string }> | null;
+	notable_quotes: Array<{ quote: string; mood?: string; vibe?: string }> | null;
 	interrupt_count: number | null;
 	agent_version: string | null;
 	effort_level: string | null;
