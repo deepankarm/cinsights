@@ -294,11 +294,20 @@ async def get_session_detail(
     )
     insights = ins_result.all()
 
-    # Fetch baseline for comparison
+    # Fetch baseline for comparison — project-specific, or largest for this user
     baseline_data = None
     if session.user_id:
         baseline_id = f"{session.user_id}:{session.project_name or ''}"
         baseline = await db.get(SessionBaseline, baseline_id)
+        if not baseline or baseline.session_count < 3:
+            # Fall back to user's largest baseline (most representative)
+            fallback = await db.exec(
+                select(SessionBaseline)
+                .where(SessionBaseline.user_id == session.user_id)
+                .order_by(col(SessionBaseline.session_count).desc())
+                .limit(1)
+            )
+            baseline = fallback.first()
         if baseline and baseline.session_count >= 3:
             baseline_data = {
                 "avg_read_edit_ratio": baseline.avg_read_edit_ratio,
