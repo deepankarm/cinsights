@@ -3,16 +3,21 @@
 	import { page } from '$app/state';
 	import { getSession, triggerAnalysis } from '$lib/api';
 	import { renderMarkdown } from '$lib/markdown';
-	import { fmtTokens, fmtDateRange, gradeColor, gradeBg } from '$lib/format';
+	import { fmtTokens, fmtDateRange, fmtNum, gradeColor, gradeBg } from '$lib/format';
+	import type { QualityMetric } from '$lib/format';
 	import type { SessionDetail } from '$lib/types';
 	import ActivityCharts, { type ErrorDetail } from '$lib/components/ActivityCharts.svelte';
+	import QualityBar from '$lib/components/QualityBar.svelte';
 	import InsightLabel from '$lib/components/BehavioralTag.svelte';
+	import MoodQuotes from '$lib/components/MoodQuotes.svelte';
+	import type { MoodGroup } from '$lib/api';
 
 	let session: SessionDetail | null = $state(null);
 	let loading = $state(true);
 	let error: string | null = $state(null);
 	let analyzing = $state(false);
 	let toolsExpanded = $state(false);
+	let errorsExpanded = $state(false);
 	let hoverIdx: number | null = $state(null);
 	let durHoverIdx: number | null = $state(null);
 	let copied = $state(false);
@@ -61,15 +66,6 @@
 		return `${s.toFixed(1)}s`;
 	}
 
-	function fmtDate(iso: string): string {
-		const d = new Date(iso);
-		const day = d.getDate().toString().padStart(2, '0');
-		const mon = d.toLocaleString('en', { month: 'short' });
-		const h = d.getHours().toString().padStart(2, '0');
-		const m = d.getMinutes().toString().padStart(2, '0');
-		return `${day} ${mon} ${h}:${m}`;
-	}
-
 	function wallMs(): number {
 		if (!session?.end_time) return 0;
 		return new Date(session.end_time).getTime() - new Date(session.start_time).getTime();
@@ -81,11 +77,15 @@
 	});
 
 	const turnCount = $derived.by(() => session?.context_growth?.length ?? 0);
-	const errorCount = $derived.by(() => session?.tool_calls?.filter(tc => !tc.success).length ?? 0);
-	const errorRate = $derived.by(() => {
-		const len = session?.tool_calls?.length ?? 0;
-		return len > 0 ? (errorCount / len) * 100 : 0;
+	const errorCount = $derived.by(() => {
+		if (!session) return 0;
+		// Use DB error_rate * total tool calls for accurate count (tool_calls array is capped)
+		if (session.error_rate != null && session.total_tool_calls) {
+			return Math.round(session.error_rate / 100 * session.total_tool_calls);
+		}
+		return session.tool_calls.filter(tc => !tc.success).length;
 	});
+	const errorRate = $derived.by(() => session?.error_rate ?? 0);
 
 	const grade = $derived.by(() => {
 		const rate = errorRate / 100;
@@ -173,6 +173,56 @@
 
 	const toolsPerTurn = $derived.by(() => turnCount > 0 ? (session?.tool_calls?.length ?? 0) / turnCount : 0);
 
+	const moodGroups = $derived.by((): MoodGroup[] => {
+		if (!session?.notable_quotes) return [];
+		const groups: Record<string, MoodGroup> = {};
+		for (const q of session.notable_quotes) {
+			const mood = (q.mood ?? q.vibe ?? 'unknown').toLowerCase();
+			if (!groups[mood]) groups[mood] = { mood, quotes: [] };
+			groups[mood].quotes.push({ quote: q.quote, mood, project: session.project_name, session_id: session.id });
+		}
+		return Object.values(groups);
+	});
+
+	const qualityMetrics = $derived.by((): QualityMetric[] => {
+		if (!session) return [];
+		const bl = session.baseline;
+		const items: QualityMetric[] = [];
+
+		function add(label: string, v: number | null, suffix: string, baselineKey?: string, higherIs?: 'better' | 'worse', fmt?: (n: number) => string) {
+			if (v == null) return;
+			const format = fmt ?? ((n: number) => fmtNum(n, suffix));
+			const m: QualityMetric = { label, value: format(v) };
+			if (bl && baselineKey && (bl as Record<string, number>)[baselineKey] != null) {
+				const avg = (bl as Record<string, number>)[baselineKey];
+				m.teamAvg = format(avg);
+				if (higherIs) {
+					const pct = Math.abs((v - avg) / (avg || 1)) * 100;
+					if (pct > 15) {
+						const above = v > avg;
+						const isGood = higherIs === 'better' ? above : !above;
+						m.deltaColor = isGood ? '#16a34a' : '#dc2626';
+						m.deltaAbove = above;
+					}
+				}
+			}
+			items.push(m);
+		}
+
+		add('Read:Edit', session.read_edit_ratio, '', 'avg_read_edit_ratio', 'better');
+		add('Blind edits', session.edits_without_read_pct, '%', 'avg_edits_without_read_pct', 'worse');
+		add('Research:Mut', session.research_mutation_ratio, '', 'avg_research_mutation_ratio', 'better');
+		add('Error rate', session.error_rate, '%', 'avg_error_rate', 'worse');
+		add('Write vs Edit', session.write_vs_edit_pct, '%', 'avg_write_vs_edit_pct', 'worse');
+		add('Thrashing', session.repeated_edits_count, '', 'avg_repeated_edits_count', 'worse');
+		add('Ctx pressure', session.context_pressure_score, '', 'avg_context_pressure_score', 'worse');
+		add('Tokens/edit', session.tokens_per_useful_edit, '', 'avg_tokens_per_useful_edit', 'worse', fmtTokens);
+		const fmtInt = (n: number) => Math.round(n).toString();
+		add('Error retries', session.error_retry_sequences, '', 'avg_error_retry_sequences', 'worse', fmtInt);
+		add('Ctx resets', session.context_resets, '', 'avg_context_resets', 'worse', fmtInt);
+		add('Dup reads', session.duplicate_read_count, '', 'avg_duplicate_read_count', 'worse', fmtInt);
+		return items;
+	});
 
 	function categoryColor(cat: string): string {
 		const m: Record<string, string> = { friction: '#dc2626', win: '#16a34a', recommendation: '#2563eb', pattern: '#7c3aed', skill_proposal: '#0891b2', summary: '#0f172a' };
@@ -216,7 +266,7 @@
 {:else if error}
 	<div class="error">{error}</div>
 {:else if session}
-	<!-- Session ID + tags row -->
+	<!-- 1. Header -->
 	<div class="session-header">
 		<div class="sh-left">
 			<button class="session-id-btn" onclick={copyId} title="Copy full session ID">
@@ -245,7 +295,7 @@
 		</div>
 	</div>
 
-	<!-- Hero Metrics -->
+	<!-- 2. Hero Metrics -->
 	<div class="hero">
 		<div class="hero-metric">
 			<div class="hero-value" style="color: #6366f1">{activeMs ? fmtSecs(activeMs) : fmtSecs(wallMs())}</div>
@@ -263,17 +313,10 @@
 			<div class="hero-sub">{fmtTokens(session.prompt_tokens)} in / {fmtTokens(session.completion_tokens)} out</div>
 		</div>
 		<div class="hero-metric">
-			<div class="hero-value" style="color: {errorRate > 15 ? '#dc2626' : errorRate > 5 ? '#f59e0b' : '#10b981'}">{session.tool_calls.length}</div>
+			<div class="hero-value" style="color: {errorRate > 15 ? '#dc2626' : errorRate > 5 ? '#f59e0b' : '#10b981'}">{session.total_tool_calls || session.tool_calls.length}</div>
 			<div class="hero-label">Tool Calls</div>
 			<div class="hero-sub">{errorCount} errors ({errorRate.toFixed(0)}%)</div>
 		</div>
-		{#if firstEditMs != null}
-			<div class="hero-metric">
-				<div class="hero-value" style="color: #0d9488">{fmtSecs(firstEditMs)}</div>
-				<div class="hero-label">First Edit</div>
-				<div class="hero-sub">time to first mutation</div>
-			</div>
-		{/if}
 		<div class="hero-metric">
 			<div class="hero-value" style="color: #64748b">{session.model ?? '-'}</div>
 			<div class="hero-label">Model</div>
@@ -281,9 +324,14 @@
 		</div>
 	</div>
 
-	<!-- Activity Charts -->
+	<!-- 3. Quality Bar -->
+	{#if qualityMetrics.length > 0}
+		<QualityBar metrics={qualityMetrics} />
+	{/if}
+
+	<!-- 4. Activity Charts (includes Context Growth + Turn Duration in bento grid) -->
 	<div class="section">
-		<ActivityCharts {toolDistribution} {languageDistribution} {timeOfDay} {errorTypes} {errorDetails}>
+		<ActivityCharts {toolDistribution} {languageDistribution} {timeOfDay} {errorTypes} errorDetails={[]}>
 			{#snippet extra()}
 				{#if session?.context_growth && session.context_growth.length > 1}
 					{@const pts = session.context_growth}
@@ -402,30 +450,12 @@
 		</ActivityCharts>
 	</div>
 
-	<!-- Notable Quotes -->
-	{#if session.notable_quotes && session.notable_quotes.length > 0}
-		{@const vibeEmoji = (v: string) => {
-			const map: Record<string, string> = {
-				frustration: '😤', humor: '😄', impatience: '⏳', delight: '✨',
-				sarcasm: '😏', curiosity: '🤔', rage: '🔥', relief: '😮‍💨',
-				gratitude: '🙏', confusion: '😵', determination: '💪', surprise: '😲',
-				disappointment: '😞', excitement: '🎉', apology: '🙇',
-			};
-			return map[v.toLowerCase()] || '💬';
-		}}
-		<details class="quotes-card">
-			<summary class="quotes-toggle">
-				{session.notable_quotes.map(q => vibeEmoji(q.vibe)).join(' ')} Things you said
-			</summary>
-			<div class="quotes-list">
-				{#each session.notable_quotes as q}
-					<p class="quote-line">{vibeEmoji(q.vibe)} <em>"{q.quote}"</em></p>
-				{/each}
-			</div>
-		</details>
+	<!-- 5. Notable Quotes -->
+	{#if moodGroups.length > 0}
+		<MoodQuotes {moodGroups} />
 	{/if}
 
-	<!-- Insights -->
+	<!-- 6. Insights -->
 	{#if session.insights.length > 0}
 		<div class="section">
 			<h2>Insights <span class="h2-count">{session.insights.length}</span></h2>
@@ -451,12 +481,33 @@
 		<div class="empty">No insights yet. Click "Re-analyze" to generate insights.</div>
 	{/if}
 
-	<!-- Tool Calls -->
+	<!-- 7. Errors (collapsed) -->
+	{#if errorDetails.length > 0}
+		<div class="section">
+			<button class="collapse-btn" onclick={() => errorsExpanded = !errorsExpanded}>
+				<span class="collapse-arrow" class:open={errorsExpanded}>&#9654;</span>
+				<h2 style="display:inline; margin-bottom:0">Errors <span class="h2-count">{errorCount}</span></h2>
+			</button>
+			{#if errorsExpanded}
+				<div class="error-list">
+					{#each errorDetails as err}
+						<div class="error-item">
+							<span class="error-tool-name">{err.tool}</span>
+							<span class="error-count">{err.count}x</span>
+							<span class="error-msg">{err.message}</span>
+						</div>
+					{/each}
+				</div>
+			{/if}
+		</div>
+	{/if}
+
+	<!-- 8. Tool Calls (collapsed) -->
 	{#if session.tool_calls.length > 0}
 		<div class="section">
 			<button class="collapse-btn" onclick={() => toolsExpanded = !toolsExpanded}>
 				<span class="collapse-arrow" class:open={toolsExpanded}>&#9654;</span>
-				<h2 style="display:inline; margin-bottom:0">Tool Calls <span class="h2-count">{session.tool_calls.length}</span></h2>
+				<h2 style="display:inline; margin-bottom:0">Tool Calls <span class="h2-count">{session.tool_calls.length}{#if session.total_tool_calls > session.tool_calls.length} of {session.total_tool_calls}{/if}</span></h2>
 			</button>
 			{#if toolsExpanded}
 				<div class="tool-list">
@@ -542,17 +593,11 @@
 	.reanalyze-btn:hover { background: #1d4ed8; }
 	.reanalyze-btn:disabled { background: #94a3b8; cursor: not-allowed; }
 
-	.section { margin-bottom: 32px; }
+	.section { margin-bottom: 28px; }
 	h2 { font-size: 18px; font-weight: 600; color: #0f172a; margin-bottom: 16px; }
 	.h2-count { font-size: 13px; font-weight: 500; color: #94a3b8; }
 
 	.insights-grid { display: flex; flex-direction: column; gap: 14px; }
-	.quotes-card { background: #fefce8; border: 1px solid #fde68a; border-radius: 10px; padding: 0; margin-bottom: 20px; font-size: 13px; }
-	.quotes-toggle { padding: 10px 14px; cursor: pointer; color: #92400e; font-weight: 500; list-style: none; }
-	.quotes-toggle::-webkit-details-marker { display: none; }
-	.quotes-toggle::marker { display: none; content: ''; }
-	.quotes-list { padding: 0 14px 12px; }
-	.quote-line { margin: 6px 0; color: #334155; line-height: 1.5; }
 	.insight-card { border: 1px solid; border-radius: 12px; padding: 20px; }
 	.insight-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 	.insight-category { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
@@ -572,6 +617,12 @@
 	.insight-content :global(blockquote) { margin: 10px 0; padding: 8px 16px; border-left: 3px solid #cbd5e1; color: #64748b; background: rgba(0,0,0,0.02); border-radius: 0 4px 4px 0; }
 	.insight-content :global(a) { color: #2563eb; text-decoration: none; }
 	.insight-content :global(a:hover) { text-decoration: underline; }
+
+	.error-list { display: flex; flex-direction: column; gap: 6px; }
+	.error-item { display: flex; align-items: baseline; gap: 8px; padding: 8px 12px; background: #fff5f5; border: 1px solid #fecaca; border-radius: 8px; font-size: 13px; }
+	.error-tool-name { font-weight: 600; font-family: monospace; color: #dc2626; min-width: 80px; }
+	.error-count { font-weight: 700; font-size: 11px; color: #92400e; background: #fef3c7; padding: 1px 5px; border-radius: 3px; }
+	.error-msg { color: #71717a; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 500px; }
 
 	.collapse-btn { background: none; border: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 0; margin-bottom: 12px; }
 	.collapse-arrow { font-size: 10px; color: #94a3b8; transition: transform 0.15s; }

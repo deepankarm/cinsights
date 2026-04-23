@@ -54,12 +54,35 @@ export interface SessionDetail {
 	context_growth: Array<{ turn: number; prompt_tokens: number; completion_tokens: number; duration_ms?: number; interrupted?: boolean }> | null;
 	status: string;
 	tool_calls: ToolCallRead[];
+	total_tool_calls: number;
 	insights: InsightRead[];
-	notable_quotes: Array<{ quote: string; vibe: string }> | null;
+	notable_quotes: Array<{ quote: string; mood?: string; vibe?: string }> | null;
 	interrupt_count: number | null;
 	agent_version: string | null;
 	effort_level: string | null;
 	adaptive_thinking_disabled: boolean | null;
+
+	// Quality metrics
+	read_edit_ratio: number | null;
+	edits_without_read_pct: number | null;
+	research_mutation_ratio: number | null;
+	error_rate: number | null;
+	write_vs_edit_pct: number | null;
+	repeated_edits_count: number | null;
+	tokens_per_useful_edit: number | null;
+	context_pressure_score: number | null;
+
+	// Token efficiency signals
+	error_retry_sequences: number | null;
+	context_resets: number | null;
+	duplicate_read_count: number | null;
+
+	// Baseline averages for comparison
+	baseline: {
+		avg_read_edit_ratio: number;
+		avg_edits_without_read_pct: number;
+		avg_error_rate: number;
+	} | null;
 }
 
 export interface StatsResponse {

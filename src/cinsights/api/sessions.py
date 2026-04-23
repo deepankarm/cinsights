@@ -76,12 +76,31 @@ class SessionDetail(BaseModel):
     context_growth: list[dict] | None = None
     status: SessionStatus
     tool_calls: list[ToolCallRead]
+    total_tool_calls: int = 0
     insights: list[InsightRead]
     notable_quotes: list[dict] | None = None
     interrupt_count: int | None = None
     agent_version: str | None = None
     effort_level: str | None = None
     adaptive_thinking_disabled: bool | None = None
+
+    # Quality metrics
+    read_edit_ratio: float | None = None
+    edits_without_read_pct: float | None = None
+    research_mutation_ratio: float | None = None
+    error_rate: float | None = None
+    write_vs_edit_pct: float | None = None
+    repeated_edits_count: int | None = None
+    tokens_per_useful_edit: float | None = None
+    context_pressure_score: float | None = None
+
+    # Token efficiency signals
+    error_retry_sequences: int | None = None
+    context_resets: int | None = None
+    duplicate_read_count: int | None = None
+
+    # Baseline averages for comparison
+    baseline: dict | None = None
 
 
 class StatsResponse(BaseModel):
@@ -251,21 +270,68 @@ def _parse_metadata(ins, key: str):
 
 
 @router.get("/{session_id}", response_model=SessionDetail)
-async def get_session_detail(session_id: str, db: AsyncSession = Depends(get_db)) -> SessionDetail:
+async def get_session_detail(
+    session_id: str,
+    tool_limit: int = 500,
+    db: AsyncSession = Depends(get_db),
+) -> SessionDetail:
     """Get session detail with tool calls and insights."""
     session = await db.get(CodingSession, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    tc_result = await db.exec(
+    tc_query = (
         select(ToolCall).where(ToolCall.session_id == session_id).order_by(ToolCall.timestamp)
     )
+    if tool_limit > 0:
+        tc_query = tc_query.limit(tool_limit)
+    tc_result = await db.exec(tc_query)
     tool_calls = tc_result.all()
+
+    total_tc = (await db.exec(select(func.count()).where(ToolCall.session_id == session_id))).one()
 
     ins_result = await db.exec(
         select(Insight).where(Insight.session_id == session_id).order_by(Insight.created_at)
     )
     insights = ins_result.all()
+
+    # Compute baseline averages on the fly from this user's sessions
+    baseline_data = None
+    if session.user_id:
+        avg_result = await db.exec(
+            select(
+                func.count(),
+                func.avg(CodingSession.read_edit_ratio),
+                func.avg(CodingSession.edits_without_read_pct),
+                func.avg(CodingSession.research_mutation_ratio),
+                func.avg(CodingSession.error_rate),
+                func.avg(CodingSession.write_vs_edit_pct),
+                func.avg(CodingSession.repeated_edits_count),
+                func.avg(CodingSession.context_pressure_score),
+                func.avg(CodingSession.tokens_per_useful_edit),
+                func.avg(CodingSession.error_retry_sequences),
+                func.avg(CodingSession.context_resets),
+                func.avg(CodingSession.duplicate_read_count),
+            ).where(
+                CodingSession.user_id == session.user_id,
+                CodingSession.id != session.id,
+            )
+        )
+        row = avg_result.one()
+        if row[0] >= 3:
+            baseline_data = {
+                "avg_read_edit_ratio": round(row[1], 2) if row[1] else None,
+                "avg_edits_without_read_pct": round(row[2], 1) if row[2] else None,
+                "avg_research_mutation_ratio": round(row[3], 2) if row[3] else None,
+                "avg_error_rate": round(row[4], 1) if row[4] else None,
+                "avg_write_vs_edit_pct": round(row[5], 1) if row[5] else None,
+                "avg_repeated_edits_count": round(row[6], 1) if row[6] else None,
+                "avg_context_pressure_score": round(row[7], 2) if row[7] else None,
+                "avg_tokens_per_useful_edit": round(row[8], 0) if row[8] else None,
+                "avg_error_retry_sequences": round(row[9], 1) if row[9] else None,
+                "avg_context_resets": round(row[10], 1) if row[10] else None,
+                "avg_duplicate_read_count": round(row[11], 1) if row[11] else None,
+            }
 
     return SessionDetail(
         id=session.id,
@@ -294,6 +360,7 @@ async def get_session_detail(session_id: str, db: AsyncSession = Depends(get_db)
             )
             for tc in tool_calls
         ],
+        total_tool_calls=total_tc,
         insights=[
             InsightRead(
                 id=ins.id,
@@ -311,6 +378,18 @@ async def get_session_detail(session_id: str, db: AsyncSession = Depends(get_db)
         agent_version=session.agent_version,
         effort_level=session.effort_level,
         adaptive_thinking_disabled=session.adaptive_thinking_disabled,
+        read_edit_ratio=session.read_edit_ratio,
+        edits_without_read_pct=session.edits_without_read_pct,
+        research_mutation_ratio=session.research_mutation_ratio,
+        error_rate=session.error_rate,
+        write_vs_edit_pct=session.write_vs_edit_pct,
+        repeated_edits_count=session.repeated_edits_count,
+        tokens_per_useful_edit=session.tokens_per_useful_edit,
+        context_pressure_score=session.context_pressure_score,
+        error_retry_sequences=session.error_retry_sequences,
+        context_resets=session.context_resets,
+        duplicate_read_count=session.duplicate_read_count,
+        baseline=baseline_data,
     )
 
 

@@ -264,6 +264,9 @@ def test_compute_all_returns_all_keys():
         "context_pressure_score",
         "turn_count",
         "tool_calls_per_turn",
+        "error_retry_sequences",
+        "context_resets",
+        "duplicate_read_count",
     }
     assert set(result.keys()) == expected_keys
 
