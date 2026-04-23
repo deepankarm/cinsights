@@ -111,18 +111,17 @@ def test_package_includes_alembic_files():
 
 
 def test_static_files_findable():
-    """Static UI files must be findable — either ui/build (dev) or package/static (pip).
-
-    Skipped on CI where ui/build hasn't been built yet.
-    """
+    """Static UI files must be findable — either ui/build (dev) or package/static (pip)."""
     import cinsights
 
     pkg_dir = Path(cinsights.__file__).parent
     dev_static = pkg_dir.parent.parent / "ui" / "build"
     pip_static = pkg_dir / "static"
 
-    if not dev_static.is_dir() and not pip_static.is_dir():
-        pytest.skip("UI not built (run 'cd ui && npm run build' or install via pip)")
+    assert dev_static.is_dir() or pip_static.is_dir(), (
+        f"Static files not found at {dev_static} or {pip_static}. "
+        "Run 'cd ui && npm run build' first."
+    )
 
     static = dev_static if dev_static.is_dir() else pip_static
     assert (static / "index.html").exists(), "index.html missing from static dir"
