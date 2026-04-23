@@ -119,7 +119,7 @@ def analyze(
             run.extra["min_score"] = min_score
             run.extra["limit"] = limit
             await _analyze_async(
-                hours=4380,
+                hours=4380,  # only used when trace_ids are passed
                 limit=limit,
                 force=force,
                 concurrency=concurrency,
