@@ -392,14 +392,13 @@
 		<!-- Context Growth chart (tall, full-width) -->
 		{#if session?.context_growth && session.context_growth.length > 1}
 			{@const hasDuration = ctxPts.some(p => p.duration_ms != null && p.duration_ms > 0)}
-			{@const ctxDatasets = [
-				{ label: 'Context Window', data: ctxData, color: '#6366f1', fill: true },
-				...(hasDuration ? [{ label: 'Turn Duration', data: ctxPts.map(p => p.duration_ms ?? 0), color: '#10b981', fill: false, xAxisID: 'x1' as const }] : []),
-			]}
 			{#snippet ctxChart(chartHeight: number)}
 				<LineChart
 					labels={ctxLabels}
-					datasets={ctxDatasets}
+					datasets={[
+						{ label: 'Context Window', data: ctxData, color: '#6366f1', fill: true },
+						...(hasDuration ? [{ label: 'Turn Duration', data: ctxPts.map(p => p.duration_ms ?? 0), color: '#10b981', fill: false, xAxisID: 'x1' as const, barMode: true as const }] : []),
+					]}
 					markers={ctxMarkers}
 					taskBands={ctxTaskBands}
 					height={chartHeight}
@@ -408,7 +407,7 @@
 					secondaryXFormat={fmtSecs}
 					tooltipFormat={(di, i, v) => {
 						const turn = ctxLabels[i];
-						if (di === 1) return `Turn ${turn}: ${fmtSecs(v)}`;
+						if (di === 1) return `Duration: ${fmtSecs(v)}`;
 						return `Turn ${turn}: ${fmtTokens(v)}`;
 					}}
 				/>
@@ -427,7 +426,7 @@
 						<button class="expand-btn" onclick={() => chartExpanded = true} title="Expand chart">⛶</button>
 					</div>
 				</div>
-				<div class="chart-desc">Context window size {hasDuration ? '& turn duration' : ''} per turn</div>
+				<div class="chart-desc">Context window per turn, bars show turn duration</div>
 				{@render ctxChart(Math.min(800, Math.max(300, ctxPts.length * 22 + 60)))}
 			</div>
 
@@ -450,7 +449,7 @@
 								<button class="expand-btn" onclick={() => chartExpanded = false} title="Close">✕</button>
 							</div>
 						</div>
-						<div class="chart-desc">Context window size {hasDuration ? '& turn duration' : ''} per turn</div>
+						<div class="chart-desc">Context window per turn, bars show turn duration</div>
 						{@render ctxChart(Math.round(window.innerHeight * 0.7))}
 					</div>
 				</div>

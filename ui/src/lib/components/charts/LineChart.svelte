@@ -10,6 +10,8 @@
 		fill?: boolean;
 		yAxisID?: string;
 		xAxisID?: string;
+		/** Render as low-opacity bars instead of a line (horizontal mode only) */
+		barMode?: boolean;
 	}
 
 	export interface MarkerPoint {
@@ -171,7 +173,7 @@
 		};
 	}
 
-	function buildHorizontalConfig(annotations: Record<string, unknown>): ChartConfiguration<'line'> {
+	function buildHorizontalConfig(annotations: Record<string, unknown>): ChartConfiguration {
 		// Horizontal line chart: turns on y-axis (top→bottom), tokens on x-axis
 		// Reads like a timeline — turn 1 at top, last turn at bottom
 
@@ -236,12 +238,29 @@
 
 		const hasSecondaryX = datasets.some(d => d.xAxisID === 'x1');
 
+		const hasBars = datasets.some(d => d.barMode);
+
 		return {
-			type: 'line',
+			type: hasBars ? 'bar' as const : 'line' as const,
 			data: {
 				labels,
 				datasets: datasets.map((ds, di) => {
-					// Markers on first dataset only
+					if (ds.barMode) {
+						// Low-opacity bars behind the line
+						return {
+							type: 'bar' as const,
+							label: ds.label,
+							data: ds.data,
+							backgroundColor: ds.color + '18',
+							borderColor: ds.color + '40',
+							borderWidth: 1,
+							borderRadius: 2,
+							borderSkipped: false,
+							xAxisID: ds.xAxisID ?? 'x',
+							order: 1, // draw bars behind line
+						};
+					}
+					// Line dataset
 					const pointBg = new Array(labels.length).fill('transparent');
 					const pointBorder = new Array(labels.length).fill('transparent');
 					const pointRadii = new Array(labels.length).fill(0);
@@ -253,6 +272,7 @@
 						}
 					}
 					return {
+						type: 'line' as const,
 						label: ds.label,
 						data: ds.data,
 						borderColor: ds.color,
@@ -269,6 +289,7 @@
 						pointHoverBorderColor: 'white',
 						pointHoverBorderWidth: 2,
 						xAxisID: ds.xAxisID ?? 'x',
+						order: 0, // draw line on top
 					};
 				}),
 			},
