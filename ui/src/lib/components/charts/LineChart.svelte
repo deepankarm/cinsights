@@ -93,7 +93,7 @@
 					content: band.name,
 					position: { x: 'start', y: 'start' },
 					color: bandColor,
-					font: { size: 10, weight: '600' },
+					font: { size: 10, weight: 'bold' },
 					padding: { top: 4, left: 6 },
 				},
 			};
@@ -303,11 +303,13 @@
 						position: 'top',
 						grid: { color: '#f1f5f9' },
 						ticks: { font: { size: 10 }, callback: (v) => yFormat(v as number) },
+						title: hasSecondaryX ? { display: true, text: 'Context Window', font: { size: 11, weight: 'bold' }, color: '#6366f1', padding: { bottom: 4 } } : undefined,
 					},
 					...(hasSecondaryX ? {
 						x1: {
 							position: 'bottom' as const,
 							grid: { display: false },
+							title: { display: true, text: 'Turn Duration', font: { size: 11, weight: 'bold' }, color: '#10b981', padding: { top: 4 } },
 							ticks: {
 								font: { size: 10 },
 								color: '#10b981',
@@ -327,11 +329,7 @@
 					},
 				},
 				plugins: {
-					legend: hasSecondaryX ? {
-						display: true,
-						position: 'bottom' as const,
-						labels: { font: { size: 11 }, usePointStyle: true, pointStyle: 'line', padding: 16 },
-					} : { display: false },
+					legend: { display: false },
 					tooltip: { callbacks: { label: (ctx) => {
 						const val = ctx.parsed.x as number;
 						if (tooltipFormat) return tooltipFormat(ctx.datasetIndex, ctx.dataIndex, val);
