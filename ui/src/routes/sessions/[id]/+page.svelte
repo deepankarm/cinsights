@@ -24,7 +24,7 @@
 
 	const id = $derived(page.params.id ?? '');
 
-	const W = 720, H = 180;
+	const W = 720, H = 280;
 	const PAD = { l: 52, r: 16, t: 16, b: 28 };
 	const iW = W - PAD.l - PAD.r;
 	const iH = H - PAD.t - PAD.b;
@@ -338,15 +338,149 @@
 		<QualityBar metrics={qualityMetrics} />
 	{/if}
 
-	<!-- Tasks -->
-	{#if session.tasks && session.tasks.length > 0}
-		{@const totalTaskTokens = session.tasks.reduce((s, t) => s + t.prompt_tokens_total, 0) || 1}
-		<div class="section">
-			<h2>Tasks <span class="h2-count">{session.tasks.length}</span>
+	<!-- Tasks & Turns -->
+	<div class="section">
+		<h2>Tasks & Turns</h2>
+
+		<!-- Context Growth chart (tall, full-width) -->
+		{#if session?.context_growth && session.context_growth.length > 1}
+			{@const pts = session.context_growth}
+			{@const n = pts.length}
+			{@const maxY = Math.max(...pts.map(p => p.prompt_tokens), 1)}
+			{@const yOf = (v: number) => PAD.t + iH - (v / maxY) * iH}
+			{@const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, n).toFixed(1)} ${yOf(p.prompt_tokens).toFixed(1)}`).join(' ')}
+			{@const areaPath = `${linePath} L ${xOf(n-1, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
+			{@const compactionIdxs = pts.map((p, i) => (i > 0 && p.prompt_tokens < pts[i-1].prompt_tokens * 0.85 ? i : -1)).filter(i => i >= 0)}
+			{@const interruptIdxs = pts.map((p, i) => (p.interrupted ? i : -1)).filter(i => i >= 0)}
+			{@const hover = hoverIdx !== null ? pts[hoverIdx] : null}
+			<div class="chart-card">
+				<div class="chart-header">
+					<h3>Context Growth</h3>
+					<div class="chart-header-right">
+						{#if hover && hoverIdx !== null}
+							<span class="chart-hover-val">Turn {hover.turn}: {fmtTokens(hover.prompt_tokens)}</span>
+						{/if}
+						{#if compactionIdxs.length > 0}
+							<span class="trend-badge down">{compactionIdxs.length} compaction{compactionIdxs.length > 1 ? 's' : ''}</span>
+						{/if}
+						{#if interruptIdxs.length > 0}
+							<span class="trend-badge interrupt">{interruptIdxs.length} interrupt{interruptIdxs.length > 1 ? 's' : ''}</span>
+						{/if}
+					</div>
+				</div>
+				<div class="chart-desc">Prompt tokens per turn (context window size)</div>
+				<svg viewBox="0 0 {W} {H}" class="trend-svg"
+					onmousemove={(e) => chartMove(e, n, v => hoverIdx = v)}
+					onmouseleave={() => hoverIdx = null}>
+					<defs>
+						<linearGradient id="ctxG" x1="0" y1="0" x2="0" y2="1">
+							<stop offset="0%" stop-color="#6366f1" stop-opacity="0.25" />
+							<stop offset="100%" stop-color="#6366f1" stop-opacity="0" />
+						</linearGradient>
+					</defs>
+					{#each [0, 0.25, 0.5, 0.75, 1] as frac}
+						{@const gy = PAD.t + iH * (1 - frac)}
+						<line x1={PAD.l} x2={W - PAD.r} y1={gy} y2={gy} stroke="#f1f5f9" stroke-width="1" />
+						<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtTokens(Math.round(maxY * frac))}</text>
+					{/each}
+					<!-- Task bands -->
+					{#if session?.tasks && session.tasks.length > 0}
+						{@const taskColors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#3b82f6', '#84cc16']}
+						{#each session.tasks as task, ti}
+							{@const startIdx = pts.findIndex(p => p.turn >= task.start_turn)}
+							{@const endIdx = pts.findIndex(p => p.turn > task.end_turn)}
+							{@const si = startIdx >= 0 ? startIdx : 0}
+							{@const ei = endIdx >= 0 ? endIdx : n}
+							{@const x1 = xOf(si, n)}
+							{@const x2 = xOf(Math.min(ei, n - 1), n)}
+							<rect x={x1} y={PAD.t} width={Math.max(x2 - x1, 2)} height={iH} fill={taskColors[ti % taskColors.length]} opacity="0.08" />
+							{#if x2 - x1 > 40}
+								<text x={(x1 + x2) / 2} y={PAD.t + 10} text-anchor="middle" class="ax" fill={taskColors[ti % taskColors.length]} font-size="8" opacity="0.7">{task.name.slice(0, 20)}</text>
+							{/if}
+						{/each}
+					{/if}
+					<path d={areaPath} fill="url(#ctxG)" />
+					<path d={linePath} fill="none" stroke="#6366f1" stroke-width="1.5" stroke-linejoin="round" />
+					{#each compactionIdxs as i}
+						<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#f59e0b" stroke="white" stroke-width="1" />
+					{/each}
+					{#each interruptIdxs as i}
+						<line x1={xOf(i, n)} x2={xOf(i, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#ef4444" stroke-width="1" stroke-opacity="0.4" />
+						<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#ef4444" stroke="white" stroke-width="1" />
+					{/each}
+					{#if hoverIdx !== null}
+						<line x1={xOf(hoverIdx, n)} x2={xOf(hoverIdx, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
+						<circle cx={xOf(hoverIdx, n)} cy={yOf(pts[hoverIdx].prompt_tokens)} r="3.5" fill="#6366f1" stroke="white" stroke-width="1.5" />
+					{/if}
+					<rect x={PAD.l} y={PAD.t} width={iW} height={iH} fill="transparent" />
+				</svg>
+			</div>
+
+			<!-- Turn Duration chart (tall, full-width) -->
+			{#if session?.context_growth?.some(p => p.duration_ms != null)}
+				{@const dPts = session!.context_growth!.filter(p => p.duration_ms != null)}
+				{@const dn = dPts.length}
+				{#if dn > 1}
+					{@const durations = dPts.map(p => p.duration_ms!)}
+					{@const maxD = Math.max(...durations, 1)}
+					{@const sortedD = [...durations].sort((a, b) => a - b)}
+					{@const median = sortedD[Math.floor(sortedD.length / 2)]}
+					{@const dyOf = (v: number) => PAD.t + iH - (v / maxD) * iH}
+					{@const dLine = dPts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, dn).toFixed(1)} ${dyOf(p.duration_ms!).toFixed(1)}`).join(' ')}
+					{@const dArea = `${dLine} L ${xOf(dn-1, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
+					{@const slowIdxs = dPts.map((p, i) => (p.duration_ms! > median * 2 ? i : -1)).filter(i => i >= 0)}
+					{@const dHover = durHoverIdx !== null ? dPts[durHoverIdx] : null}
+					<div class="chart-card" style="margin-top: 14px">
+						<div class="chart-header">
+							<h3>Turn Duration</h3>
+							<div class="chart-header-right">
+								{#if dHover && durHoverIdx !== null}
+									<span class="chart-hover-val">Turn {dHover.turn}: {fmtSecs(dHover.duration_ms!)}</span>
+								{/if}
+								<span class="chart-total">median {fmtSecs(median)}</span>
+							</div>
+						</div>
+						<div class="chart-desc">Time per turn (slow turns highlighted)</div>
+						<svg viewBox="0 0 {W} {H}" class="trend-svg"
+							onmousemove={(e) => chartMove(e, dn, v => durHoverIdx = v)}
+							onmouseleave={() => durHoverIdx = null}>
+							<defs>
+								<linearGradient id="durG" x1="0" y1="0" x2="0" y2="1">
+									<stop offset="0%" stop-color="#10b981" stop-opacity="0.25" />
+									<stop offset="100%" stop-color="#10b981" stop-opacity="0" />
+								</linearGradient>
+							</defs>
+							{#each [0, 0.25, 0.5, 0.75, 1] as frac}
+								{@const gy = PAD.t + iH * (1 - frac)}
+								<line x1={PAD.l} x2={W - PAD.r} y1={gy} y2={gy} stroke="#f1f5f9" stroke-width="1" />
+								<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtSecs(maxD * frac)}</text>
+							{/each}
+							<path d={dArea} fill="url(#durG)" />
+							<path d={dLine} fill="none" stroke="#10b981" stroke-width="1.5" stroke-linejoin="round" />
+							<line x1={PAD.l} x2={W - PAD.r} y1={dyOf(median)} y2={dyOf(median)} stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3" />
+							{#each slowIdxs as i}
+								<circle cx={xOf(i, dn)} cy={dyOf(dPts[i].duration_ms!)} r="3" fill="#ef4444" stroke="white" stroke-width="1" />
+							{/each}
+							{#if durHoverIdx !== null}
+								<line x1={xOf(durHoverIdx, dn)} x2={xOf(durHoverIdx, dn)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
+								<circle cx={xOf(durHoverIdx, dn)} cy={dyOf(dPts[durHoverIdx].duration_ms!)} r="3.5" fill="#10b981" stroke="white" stroke-width="1.5" />
+							{/if}
+							<rect x={PAD.l} y={PAD.t} width={iW} height={iH} fill="transparent" />
+						</svg>
+					</div>
+				{/if}
+			{/if}
+		{/if}
+
+		<!-- Task list -->
+		{#if session.tasks && session.tasks.length > 0}
+			{@const totalTaskTokens = session.tasks.reduce((s, t) => s + t.prompt_tokens_total, 0) || 1}
+			<div class="task-section-header">
+				<span class="task-section-label">{session.tasks.length} tasks detected</span>
 				{#if session.estimated_task_waste_tokens}
 					<span class="waste-badge">{Math.round((session.estimated_task_waste_tokens / session.total_tokens) * 100)}% saveable</span>
 				{/if}
-			</h2>
+			</div>
 			<div class="task-list">
 				{#each session.tasks as task}
 					{@const pct = Math.max(3, (task.prompt_tokens_total / totalTaskTokens) * 100)}
@@ -367,185 +501,54 @@
 					</div>
 				{/each}
 			</div>
-		</div>
-	{/if}
+		{/if}
 
-	<!-- Token Efficiency -->
-	{#if session.efficiency_score != null}
-		{@const wasteItems = [
-			{ label: 'Compaction cycles', value: session.compaction_cycle_waste, color: '#f59e0b' },
-			{ label: 'Interrupted turns', value: session.interrupted_turn_waste, color: '#ef4444' },
-			{ label: 'Repeated edits', value: session.repeated_edit_waste, color: '#8b5cf6' },
-			{ label: 'Failed retries', value: session.failed_retry_waste, color: '#dc2626' },
-			{ label: 'Task boundaries', value: session.estimated_task_waste_tokens, color: '#3b82f6' },
-		].filter(w => w.value && w.value > 0)}
-		{@const totalWaste = wasteItems.reduce((s, w) => s + (w.value ?? 0), 0)}
-		<div class="section">
-			<h2>Token Efficiency</h2>
+		<!-- Token efficiency (waste breakdown inside Tasks section) -->
+		{#if session.efficiency_score != null}
+			{@const wasteItems = [
+				{ label: 'Compaction cycles', value: session.compaction_cycle_waste, color: '#f59e0b' },
+				{ label: 'Interrupted turns', value: session.interrupted_turn_waste, color: '#ef4444' },
+				{ label: 'Repeated edits', value: session.repeated_edit_waste, color: '#8b5cf6' },
+				{ label: 'Failed retries', value: session.failed_retry_waste, color: '#dc2626' },
+				{ label: 'Task boundaries', value: session.estimated_task_waste_tokens, color: '#3b82f6' },
+			].filter(w => w.value && w.value > 0)}
+			{@const totalWaste = wasteItems.reduce((s, w) => s + (w.value ?? 0), 0)}
 			{#if wasteItems.length > 0}
-				<div class="efficiency-grid">
-					{#each wasteItems as w}
-						{@const wpct = Math.round((w.value! / session.total_tokens) * 100)}
-						<div class="waste-card">
-							<div class="waste-dot" style="background: {w.color}"></div>
+				<div class="efficiency-subsection">
+					<h3 class="efficiency-subtitle">Token Efficiency</h3>
+					<div class="efficiency-grid">
+						{#each wasteItems as w}
+							{@const wpct = Math.round((w.value! / session.total_tokens) * 100)}
+							<div class="waste-card">
+								<div class="waste-dot" style="background: {w.color}"></div>
+								<div class="waste-info">
+									<div class="waste-label">{w.label}</div>
+									<div class="waste-value">{fmtTokens(w.value!)} <span class="waste-pct">({wpct}%)</span></div>
+								</div>
+							</div>
+						{/each}
+						<div class="waste-card waste-total">
 							<div class="waste-info">
-								<div class="waste-label">{w.label}</div>
-								<div class="waste-value">{fmtTokens(w.value!)} <span class="waste-pct">({wpct}%)</span></div>
+								<div class="waste-label">Total saveable</div>
+								<div class="waste-value">{fmtTokens(totalWaste)} <span class="waste-pct">({Math.round((totalWaste / session.total_tokens) * 100)}%)</span></div>
 							</div>
 						</div>
-					{/each}
-					<div class="waste-card waste-total">
-						<div class="waste-info">
-							<div class="waste-label">Total saveable</div>
-							<div class="waste-value">{fmtTokens(totalWaste)} <span class="waste-pct">({Math.round((totalWaste / session.total_tokens) * 100)}%)</span></div>
-						</div>
 					</div>
+					{#if session.floor_drift_score != null && session.floor_drift_score > 0.3}
+						<div class="efficiency-rec">Post-compaction floor is growing — stale context is accumulating across compactions.</div>
+					{/if}
+					{#if session.task_count && session.task_count > 5 && session.estimated_task_waste_tokens && session.estimated_task_waste_tokens > 0}
+						<div class="efficiency-rec">This session had {session.task_count} tasks. Starting new sessions per task could save ~{fmtTokens(session.estimated_task_waste_tokens)} tokens.</div>
+					{/if}
 				</div>
 			{/if}
-			{#if session.floor_drift_score != null && session.floor_drift_score > 0.3}
-				<div class="efficiency-rec">Post-compaction floor is growing — stale context is accumulating across compactions.</div>
-			{/if}
-			{#if session.task_count && session.task_count > 5 && session.estimated_task_waste_tokens && session.estimated_task_waste_tokens > 0}
-				<div class="efficiency-rec">This session had {session.task_count} tasks. Starting new sessions per task could save ~{fmtTokens(session.estimated_task_waste_tokens)} tokens.</div>
-			{/if}
-		</div>
-	{/if}
+		{/if}
+	</div>
 
-	<!-- 4. Activity Charts (includes Context Growth + Turn Duration in bento grid) -->
+	<!-- Activity -->
 	<div class="section">
-		<ActivityCharts {toolDistribution} {languageDistribution} {timeOfDay} {errorTypes} errorDetails={[]}>
-			{#snippet extra()}
-				{#if session?.context_growth && session.context_growth.length > 1}
-					{@const pts = session.context_growth}
-					{@const n = pts.length}
-					{@const maxY = Math.max(...pts.map(p => p.prompt_tokens), 1)}
-					{@const yOf = (v: number) => PAD.t + iH - (v / maxY) * iH}
-					{@const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, n).toFixed(1)} ${yOf(p.prompt_tokens).toFixed(1)}`).join(' ')}
-					{@const areaPath = `${linePath} L ${xOf(n-1, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
-					{@const compactionIdxs = pts.map((p, i) => (i > 0 && p.prompt_tokens < pts[i-1].prompt_tokens * 0.85 ? i : -1)).filter(i => i >= 0)}
-					{@const interruptIdxs = pts.map((p, i) => (p.interrupted ? i : -1)).filter(i => i >= 0)}
-					{@const hover = hoverIdx !== null ? pts[hoverIdx] : null}
-					<!-- Context Growth -->
-					<div class="chart-card">
-						<div class="chart-header">
-							<h3>Context Growth</h3>
-							<div class="chart-header-right">
-								{#if hover && hoverIdx !== null}
-									<span class="chart-hover-val">Turn {hover.turn}: {fmtTokens(hover.prompt_tokens)}</span>
-								{/if}
-								{#if compactionIdxs.length > 0}
-									<span class="trend-badge down">{compactionIdxs.length} compaction{compactionIdxs.length > 1 ? 's' : ''}</span>
-								{/if}
-								{#if interruptIdxs.length > 0}
-									<span class="trend-badge interrupt">{interruptIdxs.length} interrupt{interruptIdxs.length > 1 ? 's' : ''}</span>
-								{/if}
-							</div>
-						</div>
-						<div class="chart-desc">Prompt tokens per turn</div>
-						<svg viewBox="0 0 {W} {H}" class="trend-svg"
-							onmousemove={(e) => chartMove(e, n, v => hoverIdx = v)}
-							onmouseleave={() => hoverIdx = null}>
-							<defs>
-								<linearGradient id="ctxG" x1="0" y1="0" x2="0" y2="1">
-									<stop offset="0%" stop-color="#6366f1" stop-opacity="0.25" />
-									<stop offset="100%" stop-color="#6366f1" stop-opacity="0" />
-								</linearGradient>
-							</defs>
-							{#each [0, 0.5, 1] as frac}
-								{@const gy = PAD.t + iH * (1 - frac)}
-								<line x1={PAD.l} x2={W - PAD.r} y1={gy} y2={gy} stroke="#f1f5f9" stroke-width="1" />
-								<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtTokens(Math.round(maxY * frac))}</text>
-							{/each}
-							<!-- Task bands -->
-							{#if session?.tasks && session.tasks.length > 0}
-								{@const taskColors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#3b82f6', '#84cc16']}
-								{#each session.tasks as task, ti}
-									{@const startIdx = pts.findIndex(p => p.turn >= task.start_turn)}
-									{@const endIdx = pts.findIndex(p => p.turn > task.end_turn)}
-									{@const si = startIdx >= 0 ? startIdx : 0}
-									{@const ei = endIdx >= 0 ? endIdx : n}
-									{@const x1 = xOf(si, n)}
-									{@const x2 = xOf(Math.min(ei, n - 1), n)}
-									<rect x={x1} y={PAD.t} width={Math.max(x2 - x1, 2)} height={iH} fill={taskColors[ti % taskColors.length]} opacity="0.08" />
-									{#if x2 - x1 > 40}
-										<text x={(x1 + x2) / 2} y={PAD.t + 10} text-anchor="middle" class="ax" fill={taskColors[ti % taskColors.length]} font-size="8" opacity="0.7">{task.name.slice(0, 20)}</text>
-									{/if}
-								{/each}
-							{/if}
-							<path d={areaPath} fill="url(#ctxG)" />
-							<path d={linePath} fill="none" stroke="#6366f1" stroke-width="1.5" stroke-linejoin="round" />
-							{#each compactionIdxs as i}
-								<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#f59e0b" stroke="white" stroke-width="1" />
-							{/each}
-							{#each interruptIdxs as i}
-								<line x1={xOf(i, n)} x2={xOf(i, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#ef4444" stroke-width="1" stroke-opacity="0.4" />
-								<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#ef4444" stroke="white" stroke-width="1" />
-							{/each}
-							{#if hoverIdx !== null}
-								<line x1={xOf(hoverIdx, n)} x2={xOf(hoverIdx, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
-								<circle cx={xOf(hoverIdx, n)} cy={yOf(pts[hoverIdx].prompt_tokens)} r="3.5" fill="#6366f1" stroke="white" stroke-width="1.5" />
-							{/if}
-							<rect x={PAD.l} y={PAD.t} width={iW} height={iH} fill="transparent" />
-						</svg>
-					</div>
-
-					<!-- Turn Duration -->
-					{#if session?.context_growth?.some(p => p.duration_ms != null)}
-						{@const dPts = session!.context_growth!.filter(p => p.duration_ms != null)}
-						{@const dn = dPts.length}
-						{#if dn > 1}
-							{@const durations = dPts.map(p => p.duration_ms!)}
-							{@const maxD = Math.max(...durations, 1)}
-							{@const sortedD = [...durations].sort((a, b) => a - b)}
-							{@const median = sortedD[Math.floor(sortedD.length / 2)]}
-							{@const dyOf = (v: number) => PAD.t + iH - (v / maxD) * iH}
-							{@const dLine = dPts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, dn).toFixed(1)} ${dyOf(p.duration_ms!).toFixed(1)}`).join(' ')}
-							{@const dArea = `${dLine} L ${xOf(dn-1, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
-							{@const slowIdxs = dPts.map((p, i) => (p.duration_ms! > median * 2 ? i : -1)).filter(i => i >= 0)}
-							{@const dHover = durHoverIdx !== null ? dPts[durHoverIdx] : null}
-							<div class="chart-card">
-								<div class="chart-header">
-									<h3>Turn Duration</h3>
-									<div class="chart-header-right">
-										{#if dHover && durHoverIdx !== null}
-											<span class="chart-hover-val">Turn {dHover.turn}: {fmtSecs(dHover.duration_ms!)}</span>
-										{/if}
-										<span class="chart-total">median {fmtSecs(median)}</span>
-									</div>
-								</div>
-								<div class="chart-desc">Time per turn (slow turns highlighted)</div>
-								<svg viewBox="0 0 {W} {H}" class="trend-svg"
-									onmousemove={(e) => chartMove(e, dn, v => durHoverIdx = v)}
-									onmouseleave={() => durHoverIdx = null}>
-									<defs>
-										<linearGradient id="durG" x1="0" y1="0" x2="0" y2="1">
-											<stop offset="0%" stop-color="#10b981" stop-opacity="0.25" />
-											<stop offset="100%" stop-color="#10b981" stop-opacity="0" />
-										</linearGradient>
-									</defs>
-									{#each [0, 0.5, 1] as frac}
-										{@const gy = PAD.t + iH * (1 - frac)}
-										<line x1={PAD.l} x2={W - PAD.r} y1={gy} y2={gy} stroke="#f1f5f9" stroke-width="1" />
-										<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtSecs(maxD * frac)}</text>
-									{/each}
-									<path d={dArea} fill="url(#durG)" />
-									<path d={dLine} fill="none" stroke="#10b981" stroke-width="1.5" stroke-linejoin="round" />
-									<line x1={PAD.l} x2={W - PAD.r} y1={dyOf(median)} y2={dyOf(median)} stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3" />
-									{#each slowIdxs as i}
-										<circle cx={xOf(i, dn)} cy={dyOf(dPts[i].duration_ms!)} r="3" fill="#ef4444" stroke="white" stroke-width="1" />
-									{/each}
-									{#if durHoverIdx !== null}
-										<line x1={xOf(durHoverIdx, dn)} x2={xOf(durHoverIdx, dn)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
-										<circle cx={xOf(durHoverIdx, dn)} cy={dyOf(dPts[durHoverIdx].duration_ms!)} r="3.5" fill="#10b981" stroke="white" stroke-width="1.5" />
-									{/if}
-									<rect x={PAD.l} y={PAD.t} width={iW} height={iH} fill="transparent" />
-								</svg>
-							</div>
-						{/if}
-					{/if}
-				{/if}
-			{/snippet}
-		</ActivityCharts>
+		<h2>Activity</h2>
+		<ActivityCharts {toolDistribution} {languageDistribution} {timeOfDay} {errorTypes} errorDetails={[]} />
 	</div>
 
 	<!-- 5. Notable Quotes -->
@@ -737,7 +740,9 @@
 	.tool-io pre { margin-top: 4px; padding: 8px; background: #f8fafc; border-radius: 4px; font-size: 11px; overflow-x: auto; max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
 	.empty { padding: 32px; text-align: center; color: #64748b; background: white; border: 1px solid #e2e8f0; border-radius: 12px; }
 
-	/* Tasks */
+	/* Tasks & Turns */
+	.task-section-header { display: flex; align-items: center; gap: 10px; margin: 20px 0 10px; }
+	.task-section-label { font-size: 13px; font-weight: 600; color: #64748b; }
 	.task-list { display: flex; flex-direction: column; gap: 10px; }
 	.task-card { background: white; border: 1px solid #e8e5e0; border-radius: 12px; padding: 14px 18px; }
 	.task-header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
@@ -749,9 +754,11 @@
 	.task-bar { height: 4px; background: #6366f1; border-radius: 2px; min-width: 4px; }
 	.task-meta { font-size: 11px; color: #94a3b8; }
 	.task-waste { font-size: 11px; color: #dc2626; font-weight: 600; margin-left: auto; }
-	.waste-badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 5px; background: #fef2f2; color: #dc2626; margin-left: 8px; }
+	.waste-badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 5px; background: #fef2f2; color: #dc2626; }
 
-	/* Token Efficiency */
+	/* Token Efficiency (inside Tasks section) */
+	.efficiency-subsection { margin-top: 20px; }
+	.efficiency-subtitle { font-size: 14px; font-weight: 700; color: #232326; margin-bottom: 10px; }
 	.efficiency-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-bottom: 12px; }
 	.waste-card { display: flex; align-items: center; gap: 10px; background: white; border: 1px solid #e8e5e0; border-radius: 10px; padding: 12px 14px; }
 	.waste-card.waste-total { background: #f8fafc; border-color: #cbd5e1; }
