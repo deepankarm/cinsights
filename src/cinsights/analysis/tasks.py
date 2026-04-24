@@ -143,7 +143,7 @@ def compute_task_waste(
         completion_total = 0
         for turn_num in range(task.start_turn, task.end_turn + 1):
             entry = growth_by_turn.get(turn_num, {})
-            prompt_total += entry.get("prompt_tokens", 0)
+            prompt_total += entry.get("total_billed_prompt", 0) or entry.get("prompt_tokens", 0)
             completion_total += entry.get("completion_tokens", 0)
 
         # Context at task start = prompt_tokens at first turn

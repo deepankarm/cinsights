@@ -369,15 +369,6 @@
 			<div class="hero-label">Model</div>
 			<div class="hero-sub">{session.insights.length} insights</div>
 		</div>
-		{#if session.efficiency_score != null}
-			{@const eff = session.efficiency_score}
-			{@const effColor = eff > 80 ? '#10b981' : eff > 50 ? '#f59e0b' : '#dc2626'}
-			<div class="hero-metric">
-				<div class="hero-value" style="color: {effColor}">{Math.round(eff)}</div>
-				<div class="hero-label">Efficiency</div>
-				<div class="hero-sub">token efficiency score</div>
-			</div>
-		{/if}
 	</div>
 
 	<!-- 3. Quality Bar -->
