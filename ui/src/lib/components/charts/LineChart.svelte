@@ -252,10 +252,10 @@
 							label: ds.label,
 							data: ds.data,
 							backgroundColor: ds.color + '18',
-							borderColor: ds.color + '40',
-							borderWidth: 1,
-							borderRadius: 2,
+							borderWidth: 0,
 							borderSkipped: false,
+							barPercentage: 1.0,
+							categoryPercentage: 1.0,
 							xAxisID: ds.xAxisID ?? 'x',
 							order: 1, // draw bars behind line
 						};
