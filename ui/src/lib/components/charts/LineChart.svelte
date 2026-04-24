@@ -178,38 +178,30 @@
 		for (let i = 0; i < taskBands.length; i++) {
 			const band = taskBands[i];
 			const bandColor = TASK_COLORS[band.colorIndex % TASK_COLORS.length];
+			// Background band
 			annotations[`band${i}`] = {
 				type: 'box',
 				yMin: band.startIndex - 0.5,
 				yMax: band.endIndex + 0.5,
-				backgroundColor: bandColor + '14',
-				borderWidth: 0,
+				backgroundColor: bandColor + '18',
+				borderColor: bandColor + '30',
+				borderWidth: 1,
 			};
-			// Separator line at band start
-			if (band.startIndex > 0) {
-				annotations[`bandBorder${i}`] = {
-					type: 'line',
-					yMin: band.startIndex - 0.5,
-					yMax: band.startIndex - 0.5,
-					borderColor: bandColor + '44',
-					borderWidth: 1,
-					borderDash: [3, 3],
-				};
-			}
-			// Task name label at start of band
+			// Task name label centered vertically in the band
+			const midIdx = Math.round((band.startIndex + band.endIndex) / 2);
 			annotations[`bandLabel${i}`] = {
 				type: 'label',
 				xValue: 0,
-				yValue: band.startIndex,
+				yValue: midIdx,
 				xAdjust: 6,
 				position: { x: 'start' },
 				content: band.name.slice(0, 40),
 				color: bandColor,
 				font: { size: 10, weight: 'bold' },
 				backgroundColor: 'white',
-				backgroundShadowColor: 'rgba(0,0,0,0.05)',
-				shadowBlur: 3,
-				padding: { top: 2, bottom: 2, left: 4, right: 4 },
+				backgroundShadowColor: 'rgba(0,0,0,0.08)',
+				shadowBlur: 4,
+				padding: { top: 2, bottom: 2, left: 6, right: 6 },
 				borderRadius: 3,
 			};
 		}
