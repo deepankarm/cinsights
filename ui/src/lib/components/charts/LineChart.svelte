@@ -178,14 +178,21 @@
 		for (let i = 0; i < taskBands.length; i++) {
 			const band = taskBands[i];
 			const bandColor = TASK_COLORS[band.colorIndex % TASK_COLORS.length];
-			// Background band — exact indices, no half-row offset
+			// Background band
 			annotations[`band${i}`] = {
 				type: 'box',
 				yMin: band.startIndex,
 				yMax: band.endIndex,
 				backgroundColor: bandColor + '18',
-				borderColor: bandColor + '30',
-				borderWidth: 1,
+				borderWidth: 0,
+			};
+			// Separator line at band start
+			annotations[`bandSep${i}`] = {
+				type: 'line',
+				yMin: band.startIndex - 0.5,
+				yMax: band.startIndex - 0.5,
+				borderColor: bandColor + '66',
+				borderWidth: 1.5,
 			};
 			// Task name label centered vertically in the band
 			const midIdx = Math.round((band.startIndex + band.endIndex) / 2);
