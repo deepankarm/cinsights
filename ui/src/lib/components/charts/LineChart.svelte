@@ -178,11 +178,11 @@
 		for (let i = 0; i < taskBands.length; i++) {
 			const band = taskBands[i];
 			const bandColor = TASK_COLORS[band.colorIndex % TASK_COLORS.length];
-			// Background band
+			// Background band — exact indices, no half-row offset
 			annotations[`band${i}`] = {
 				type: 'box',
-				yMin: band.startIndex - 0.5,
-				yMax: band.endIndex + 0.5,
+				yMin: band.startIndex,
+				yMax: band.endIndex,
 				backgroundColor: bandColor + '18',
 				borderColor: bandColor + '30',
 				borderWidth: 1,
