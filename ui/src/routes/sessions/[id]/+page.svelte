@@ -391,16 +391,26 @@
 
 		<!-- Context Growth chart (tall, full-width) -->
 		{#if session?.context_growth && session.context_growth.length > 1}
+			{@const hasDuration = ctxPts.some(p => p.duration_ms != null && p.duration_ms > 0)}
+			{@const ctxDatasets = [
+				{ label: 'Context Window', data: ctxData, color: '#6366f1', fill: true },
+				...(hasDuration ? [{ label: 'Turn Duration', data: ctxPts.map(p => p.duration_ms ?? 0), color: '#10b981', fill: false, xAxisID: 'x1' as const }] : []),
+			]}
 			{#snippet ctxChart(chartHeight: number)}
 				<LineChart
 					labels={ctxLabels}
-					datasets={[{ label: 'Prompt Tokens', data: ctxData, color: '#6366f1', fill: true }]}
+					datasets={ctxDatasets}
 					markers={ctxMarkers}
 					taskBands={ctxTaskBands}
 					height={chartHeight}
 					horizontal={true}
 					yFormat={fmtTokens}
-					tooltipFormat={(_, i, v) => `Turn ${ctxLabels[i]}: ${fmtTokens(v)}`}
+					secondaryXFormat={fmtSecs}
+					tooltipFormat={(di, i, v) => {
+						const turn = ctxLabels[i];
+						if (di === 1) return `Turn ${turn}: ${fmtSecs(v)}`;
+						return `Turn ${turn}: ${fmtTokens(v)}`;
+					}}
 				/>
 			{/snippet}
 
@@ -417,7 +427,7 @@
 						<button class="expand-btn" onclick={() => chartExpanded = true} title="Expand chart">⛶</button>
 					</div>
 				</div>
-				<div class="chart-desc">Prompt tokens per turn (context window size)</div>
+				<div class="chart-desc">Context window size {hasDuration ? '& turn duration' : ''} per turn</div>
 				{@render ctxChart(Math.min(800, Math.max(300, ctxPts.length * 22 + 60)))}
 			</div>
 
@@ -440,33 +450,12 @@
 								<button class="expand-btn" onclick={() => chartExpanded = false} title="Close">✕</button>
 							</div>
 						</div>
-						<div class="chart-desc">Prompt tokens per turn (context window size)</div>
+						<div class="chart-desc">Context window size {hasDuration ? '& turn duration' : ''} per turn</div>
 						{@render ctxChart(Math.round(window.innerHeight * 0.7))}
 					</div>
 				</div>
 			{/if}
 
-			<!-- Turn Duration chart (tall, full-width) -->
-			{#if durPts.length > 1}
-				<div class="chart-card" style="margin-top: 14px">
-					<div class="chart-header">
-						<h3>Turn Duration</h3>
-						<div class="chart-header-right">
-							<span class="chart-total">median {fmtSecs(durMedian)}</span>
-						</div>
-					</div>
-					<div class="chart-desc">Time per turn (slow turns highlighted)</div>
-					<LineChart
-						labels={durLabels}
-						datasets={[{ label: 'Duration', data: durData, color: '#10b981', fill: true }]}
-						markers={durMarkers}
-						referenceLines={durRefLines}
-						height={360}
-						yFormat={(v) => fmtSecs(v)}
-						tooltipFormat={(_, i, v) => `Turn ${durLabels[i]}: ${fmtSecs(v)}`}
-					/>
-				</div>
-			{/if}
 		{/if}
 
 

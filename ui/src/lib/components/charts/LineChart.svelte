@@ -9,6 +9,7 @@
 		color: string;
 		fill?: boolean;
 		yAxisID?: string;
+		xAxisID?: string;
 	}
 
 	export interface MarkerPoint {
@@ -45,6 +46,7 @@
 		yFormat = (v: number) => String(v),
 		tooltipFormat = undefined,
 		secondaryYFormat = undefined,
+		secondaryXFormat = undefined,
 	}: {
 		labels: string[];
 		datasets: LineDataset[];
@@ -56,6 +58,7 @@
 		yFormat?: (v: number) => string;
 		tooltipFormat?: (datasetIndex: number, index: number, value: number) => string;
 		secondaryYFormat?: (v: number) => string;
+		secondaryXFormat?: (v: number) => string;
 	} = $props();
 
 	let canvas: HTMLCanvasElement;
@@ -222,41 +225,52 @@
 			annotations[`ref${i}`] = {
 				type: 'line',
 				xMin: rl.value, xMax: rl.value,
+				xScaleID: rl.yAxisID ?? 'x',
 				borderColor: rl.color, borderWidth: 1, borderDash: [4, 3],
+				label: rl.label ? {
+					display: true, content: rl.label, position: 'start',
+					backgroundColor: 'transparent', color: rl.color, font: { size: 9 },
+				} : undefined,
 			};
 		}
 
-		// Marker points
-		const pointBg = new Array(labels.length).fill('transparent');
-		const pointBorder = new Array(labels.length).fill('transparent');
-		const pointRadii = new Array(labels.length).fill(0);
-		for (const m of markers) {
-			pointBg[m.index] = m.color;
-			pointBorder[m.index] = 'white';
-			pointRadii[m.index] = 3.5;
-		}
+		const hasSecondaryX = datasets.some(d => d.xAxisID === 'x1');
 
 		return {
 			type: 'line',
 			data: {
 				labels,
-				datasets: [{
-					label: ds.label,
-					data: ds.data,
-					borderColor: ds.color,
-					borderWidth: 1.5,
-					backgroundColor: ds.fill ? createGradientHorizontal(ds.color) : 'transparent',
-					fill: ds.fill ?? false,
-					tension: 0.15,
-					pointRadius: pointRadii,
-					pointBackgroundColor: pointBg,
-					pointBorderColor: pointBorder,
-					pointBorderWidth: 1.5,
-					pointHoverRadius: 4,
-					pointHoverBackgroundColor: ds.color,
-					pointHoverBorderColor: 'white',
-					pointHoverBorderWidth: 2,
-				}],
+				datasets: datasets.map((ds, di) => {
+					// Markers on first dataset only
+					const pointBg = new Array(labels.length).fill('transparent');
+					const pointBorder = new Array(labels.length).fill('transparent');
+					const pointRadii = new Array(labels.length).fill(0);
+					if (di === 0) {
+						for (const m of markers) {
+							pointBg[m.index] = m.color;
+							pointBorder[m.index] = 'white';
+							pointRadii[m.index] = 3.5;
+						}
+					}
+					return {
+						label: ds.label,
+						data: ds.data,
+						borderColor: ds.color,
+						borderWidth: 1.5,
+						backgroundColor: ds.fill ? createGradientHorizontal(ds.color) : 'transparent',
+						fill: ds.fill ?? false,
+						tension: 0.15,
+						pointRadius: pointRadii,
+						pointBackgroundColor: pointBg,
+						pointBorderColor: pointBorder,
+						pointBorderWidth: 1.5,
+						pointHoverRadius: 4,
+						pointHoverBackgroundColor: ds.color,
+						pointHoverBorderColor: 'white',
+						pointHoverBorderWidth: 2,
+						xAxisID: ds.xAxisID ?? 'x',
+					};
+				}),
 			},
 			options: {
 				responsive: true, maintainAspectRatio: false,
@@ -269,6 +283,17 @@
 						grid: { color: '#f1f5f9' },
 						ticks: { font: { size: 10 }, callback: (v) => yFormat(v as number) },
 					},
+					...(hasSecondaryX ? {
+						x1: {
+							position: 'bottom' as const,
+							grid: { display: false },
+							ticks: {
+								font: { size: 10 },
+								color: '#10b981',
+								callback: (v) => secondaryXFormat ? secondaryXFormat(v as number) : String(v),
+							},
+						},
+					} : {}),
 					y: {
 						reverse: false,
 						grid: { display: false },
@@ -281,10 +306,16 @@
 					},
 				},
 				plugins: {
+					legend: hasSecondaryX ? {
+						display: true,
+						position: 'bottom' as const,
+						labels: { font: { size: 11 }, usePointStyle: true, pointStyle: 'line', padding: 16 },
+					} : { display: false },
 					tooltip: { callbacks: { label: (ctx) => {
 						const val = ctx.parsed.x as number;
 						if (tooltipFormat) return tooltipFormat(ctx.datasetIndex, ctx.dataIndex, val);
-						return `${ds.label}: ${yFormat(val)}`;
+						const fmt = ctx.dataset.xAxisID === 'x1' && secondaryXFormat ? secondaryXFormat : yFormat;
+						return `${datasets[ctx.datasetIndex].label}: ${fmt(val)}`;
 					} } },
 					annotation: { clip: false, annotations: annotations as never },
 				},
