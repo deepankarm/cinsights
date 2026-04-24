@@ -211,18 +211,15 @@
 		return items;
 	});
 
-	// Chart data for context growth
-	const ctxLabels = $derived.by(() => {
+	// Chart data for context growth — filter out turns with 0 tokens (tool-result-only turns)
+	const ctxPts = $derived.by(() => {
 		if (!session?.context_growth) return [];
-		return session.context_growth.map(p => String(p.turn));
+		return session.context_growth.filter(p => p.prompt_tokens > 0);
 	});
-	const ctxData = $derived.by(() => {
-		if (!session?.context_growth) return [];
-		return session.context_growth.map(p => p.prompt_tokens);
-	});
+	const ctxLabels = $derived.by(() => ctxPts.map(p => String(p.turn)));
+	const ctxData = $derived.by(() => ctxPts.map(p => p.prompt_tokens));
 	const ctxMarkers = $derived.by((): MarkerPoint[] => {
-		if (!session?.context_growth) return [];
-		const pts = session.context_growth;
+		const pts = ctxPts;
 		const result: MarkerPoint[] = [];
 		for (let i = 1; i < pts.length; i++) {
 			if (pts[i].prompt_tokens < pts[i-1].prompt_tokens * 0.85) {
@@ -237,8 +234,8 @@
 		return result;
 	});
 	const ctxTaskBands = $derived.by((): TaskBand[] => {
-		if (!session?.context_growth || !session?.tasks) return [];
-		const pts = session.context_growth;
+		if (!ctxPts.length || !session?.tasks) return [];
+		const pts = ctxPts;
 		return session.tasks.map((task, ti) => {
 			const startIdx = pts.findIndex(p => p.turn >= task.start_turn);
 			const endIdx = pts.findIndex(p => p.turn > task.end_turn);
