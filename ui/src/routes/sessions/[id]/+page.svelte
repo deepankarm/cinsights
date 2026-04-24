@@ -24,7 +24,7 @@
 
 	const id = $derived(page.params.id ?? '');
 
-	const W = 720, H = 280;
+	const W = 720, H = 360;
 	const PAD = { l: 52, r: 16, t: 16, b: 28 };
 	const iW = W - PAD.l - PAD.r;
 	const iH = H - PAD.t - PAD.b;
@@ -394,9 +394,7 @@
 							{@const x1 = xOf(si, n)}
 							{@const x2 = xOf(Math.min(ei, n - 1), n)}
 							<rect x={x1} y={PAD.t} width={Math.max(x2 - x1, 2)} height={iH} fill={taskColors[ti % taskColors.length]} opacity="0.08" />
-							{#if x2 - x1 > 40}
-								<text x={(x1 + x2) / 2} y={PAD.t + 10} text-anchor="middle" class="ax" fill={taskColors[ti % taskColors.length]} font-size="8" opacity="0.7">{task.name.slice(0, 20)}</text>
-							{/if}
+							<text x={x1 + 4} y={PAD.t + iH - 4} transform="rotate(-90, {x1 + 4}, {PAD.t + iH - 4})" class="ax" fill={taskColors[ti % taskColors.length]} font-size="9" opacity="0.6" dominant-baseline="hanging">{task.name.slice(0, 30)}</text>
 						{/each}
 					{/if}
 					<path d={areaPath} fill="url(#ctxG)" />
