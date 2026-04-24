@@ -417,7 +417,7 @@
 					</div>
 				</div>
 				<div class="chart-desc">Prompt tokens per turn (context window size)</div>
-				{@render ctxChart(Math.max(360, ctxPts.length * 40 + 100))}
+				{@render ctxChart(Math.min(800, Math.max(300, ctxPts.length * 22 + 60)))}
 			</div>
 
 			<!-- Expanded overlay -->
