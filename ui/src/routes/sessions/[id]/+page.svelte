@@ -239,14 +239,10 @@
 		return session.tasks.map((task, ti) => {
 			const startIdx = pts.findIndex(p => p.turn >= task.start_turn);
 			const endIdx = pts.findIndex(p => p.turn > task.end_turn);
-			return {
-				startIndex: startIdx >= 0 ? startIdx : 0,
-				endIndex: endIdx >= 0 ? endIdx : pts.length - 1,
-				name: task.name,
-				description: task.description,
-				colorIndex: ti,
-			};
-		});
+			const si = startIdx >= 0 ? startIdx : 0;
+			const ei = endIdx >= 0 ? endIdx - 1 : pts.length - 1;
+			return { startIndex: si, endIndex: ei, name: task.name, description: task.description, colorIndex: ti };
+		}).filter(b => b.endIndex >= b.startIndex);
 	});
 	const compactionCount = $derived.by(() => ctxMarkers.filter(m => m.color === '#f59e0b').length);
 	const interruptCount2 = $derived.by(() => ctxMarkers.filter(m => m.color === '#ef4444').length);
