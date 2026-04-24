@@ -239,10 +239,11 @@
 		return session.tasks.map((task, ti) => {
 			const startIdx = pts.findIndex(p => p.turn >= task.start_turn);
 			const endIdx = pts.findIndex(p => p.turn > task.end_turn);
-			const si = startIdx >= 0 ? startIdx : 0;
+			if (startIdx < 0) return null; // task beyond data range
 			const ei = endIdx >= 0 ? endIdx - 1 : pts.length - 1;
-			return { startIndex: si, endIndex: ei, name: task.name, description: task.description, colorIndex: ti };
-		}).filter(b => b.endIndex >= b.startIndex);
+			if (ei < startIdx) return null; // no data points in this task
+			return { startIndex: startIdx, endIndex: ei, name: task.name, description: task.description, colorIndex: ti };
+		}).filter((b): b is NonNullable<typeof b> => b !== null);
 	});
 	const compactionCount = $derived.by(() => ctxMarkers.filter(m => m.color === '#f59e0b').length);
 	const interruptCount2 = $derived.by(() => ctxMarkers.filter(m => m.color === '#ef4444').length);
