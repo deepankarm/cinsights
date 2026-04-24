@@ -186,14 +186,17 @@
 				backgroundColor: bandColor + '18',
 				borderWidth: 0,
 			};
-			// Separator line at band start
-			annotations[`bandSep${i}`] = {
-				type: 'line',
-				yMin: band.startIndex - 0.5,
-				yMax: band.startIndex - 0.5,
-				borderColor: bandColor + '66',
-				borderWidth: 1.5,
-			};
+			// Separator line at band start (skip first band)
+			if (band.startIndex > 0) {
+				annotations[`bandSep${i}`] = {
+					type: 'line',
+					yMin: band.startIndex - 0.5,
+					yMax: band.startIndex - 0.5,
+					borderColor: '#64748b',
+					borderWidth: 1,
+					borderDash: [4, 3],
+				};
+			}
 			// Task name label centered vertically in the band
 			const midIdx = Math.round((band.startIndex + band.endIndex) / 2);
 			annotations[`bandLabel${i}`] = {
