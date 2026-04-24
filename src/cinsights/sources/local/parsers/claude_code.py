@@ -193,6 +193,24 @@ def parse_claude_code(
                 )
                 all_spans.append(tool_span)
 
+    # Deduplicate turns created by session continuations replaying earlier messages.
+    # Continuations re-serialize the same user/assistant exchanges, producing turns
+    # with identical (start_time, end_time, prompt_tokens).  Keep only the first.
+    seen_turn_keys: set[tuple] = set()
+    skip_span_ids: set[str] = set()
+    deduped_spans: list[SpanData] = []
+    for span in all_spans:
+        if span.name.startswith("Turn "):
+            key = (span.start_time, span.end_time, span.attributes.get("llm.token_count.prompt", 0))
+            if key in seen_turn_keys:
+                skip_span_ids.add(span.span_id)
+                continue
+            seen_turn_keys.add(key)
+        elif span.parent_id in skip_span_ids:
+            continue  # drop tool spans belonging to duplicate turns
+        deduped_spans.append(span)
+    all_spans = deduped_spans
+
     # Root span
     root_span = SpanData(
         span_id=root_id,

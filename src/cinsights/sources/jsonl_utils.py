@@ -71,6 +71,23 @@ def parse_lines(data: bytes) -> list[dict]:
     return lines
 
 
+def _is_image_source_line(msg: dict) -> bool:
+    """Check if a user line is an image-source reference (not a real user message)."""
+    text = extract_user_content(msg)
+    return text.startswith("[Image source:") or text.startswith("[Image: source:")
+
+
+def _is_meta_message(msg: dict) -> bool:
+    """Check if a user line is a meta/system message that shouldn't create a turn."""
+    text = extract_user_content(msg)
+    return (
+        text.startswith("<command-name>/compact")
+        or text.startswith("<local-command-caveat>")
+        or text.startswith("<local-command-stdout>")
+        or "being continued from a previous conversation" in text[:200]
+    )
+
+
 def group_into_turns(lines: list[dict]) -> list[dict]:
     """Group conversation lines into turns (user -> assistant exchanges).
 
@@ -95,6 +112,12 @@ def group_into_turns(lines: list[dict]) -> list[dict]:
                 ts = line.get("timestamp", "")
                 for tid in tool_results:
                     current_turn["tool_result_timestamps"][tid] = ts
+            elif _is_image_source_line(msg) and current_turn:
+                # Image source lines follow the [Image #N] text — merge, don't split
+                pass
+            elif _is_meta_message(msg):
+                # /compact, local-command, continuation summaries aren't real turns
+                pass
             else:
                 if current_turn:
                     turns.append(current_turn)
