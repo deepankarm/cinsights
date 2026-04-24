@@ -220,4 +220,11 @@ export interface DigestStatsData {
 		duration_min: number;
 		summary: string;
 	}>;
+
+	// Token efficiency & task analytics
+	total_tasks?: number;
+	avg_tasks_per_session?: number;
+	avg_efficiency_score?: number | null;
+	total_estimated_waste?: number;
+	waste_breakdown?: Record<string, number> | null;
 }

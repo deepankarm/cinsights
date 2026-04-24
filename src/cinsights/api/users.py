@@ -38,6 +38,11 @@ class UserSummary(BaseModel):
     agents: list[str]
     sources: list[str]
 
+    # Token efficiency
+    avg_efficiency_score: float | None = None
+    avg_tasks_per_session: float | None = None
+    total_tasks: int = 0
+
 
 @router.get("/", response_model=list[UserSummary])
 async def list_users(
@@ -106,6 +111,9 @@ async def list_users(
                 projects=projects,
                 agents=agents,
                 sources=sources,
+                avg_efficiency_score=_avg(s.efficiency_score for s in user_sessions),
+                avg_tasks_per_session=_avg(s.task_count for s in user_sessions),
+                total_tasks=sum(s.task_count or 0 for s in user_sessions),
             )
         )
 

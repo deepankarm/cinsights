@@ -18,6 +18,14 @@ Use these numbers as anchors for impact estimates. All cost calculations are app
 {% endfor %}
 {% endif %}
 
+{% if total_tasks > 0 %}
+## Token Efficiency Context
+- {{ total_tasks }} tasks detected, {{ avg_tasks_per_session }} avg/session
+{% if avg_efficiency_score is not none %}- Avg efficiency: {{ avg_efficiency_score }}/100{% endif %}
+{% if total_estimated_waste > 0 %}- {{ total_estimated_waste }} tokens estimated waste{% endif %}
+Consider recommending: splitting long multi-task sessions, using /compact proactively, starting fresh sessions for new tasks.
+{% endif %}
+
 ## Tool Distribution
 {% for name, count in tool_distribution.items() %}
 - {{ name }}: {{ count }}

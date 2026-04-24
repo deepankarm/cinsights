@@ -160,6 +160,11 @@ export interface UserSummary {
 	projects: string[];
 	agents: string[];
 	sources: string[];
+
+	// Token efficiency
+	avg_efficiency_score: number | null;
+	avg_tasks_per_session: number | null;
+	total_tasks: number;
 }
 
 // Doctor API
