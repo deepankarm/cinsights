@@ -12,6 +12,7 @@ from cinsights.api.doctor import router as doctor_router
 from cinsights.api.projects import router as projects_router
 from cinsights.api.sessions import router as sessions_router
 from cinsights.api.stats import router as stats_router
+from cinsights.api.tasks import router as tasks_router
 from cinsights.api.trends import router as trends_router
 from cinsights.api.users import router as users_router
 
@@ -43,6 +44,7 @@ app.add_middleware(
 )
 
 app.include_router(sessions_router)
+app.include_router(tasks_router)
 app.include_router(digest_router)
 app.include_router(doctor_router)
 app.include_router(stats_router)

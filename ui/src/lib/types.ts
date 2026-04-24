@@ -40,6 +40,20 @@ export interface InsightRead {
 }
 
 
+export interface TaskRead {
+	id: string;
+	task_number: number;
+	name: string;
+	description: string;
+	start_turn: number;
+	end_turn: number;
+	turn_count: number;
+	prompt_tokens_total: number;
+	completion_tokens_total: number;
+	context_at_start: number | null;
+	estimated_waste_tokens: number | null;
+}
+
 export interface SessionDetail {
 	id: string;
 	session_id: string | null;
@@ -56,6 +70,7 @@ export interface SessionDetail {
 	tool_calls: ToolCallRead[];
 	total_tool_calls: number;
 	insights: InsightRead[];
+	tasks: TaskRead[];
 	notable_quotes: Array<{ quote: string; mood?: string; vibe?: string }> | null;
 	interrupt_count: number | null;
 	agent_version: string | null;
@@ -76,6 +91,16 @@ export interface SessionDetail {
 	error_retry_sequences: number | null;
 	context_resets: number | null;
 	duplicate_read_count: number | null;
+
+	// Token efficiency — waste metrics
+	compaction_cycle_waste: number | null;
+	floor_drift_score: number | null;
+	interrupted_turn_waste: number | null;
+	repeated_edit_waste: number | null;
+	failed_retry_waste: number | null;
+	efficiency_score: number | null;
+	task_count: number | null;
+	estimated_task_waste_tokens: number | null;
 
 	// Baseline averages for comparison
 	baseline: {

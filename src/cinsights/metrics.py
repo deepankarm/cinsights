@@ -32,6 +32,13 @@ def compute_all(
     turn_count = len(context_growth) if context_growth else None
     tc_count = len(tool_calls)
 
+    # Token efficiency waste metrics
+    _compaction_waste = compaction_cycle_waste(context_growth)
+    _floor_drift = floor_drift_score(context_growth)
+    _interrupt_waste = interrupted_turn_waste(context_growth)
+    _repeat_waste = repeated_edit_waste(tool_calls, context_growth)
+    _retry_waste = failed_retry_waste(tool_calls, context_growth)
+
     return {
         "read_edit_ratio": read_edit_ratio(tool_calls),
         "edits_without_read_pct": edits_without_read_pct(tool_calls),
@@ -49,6 +56,20 @@ def compute_all(
         "error_retry_sequences": error_retry_sequences(tool_calls),
         "context_resets": context_resets(context_growth),
         "duplicate_read_count": duplicate_read_count(tool_calls),
+        # Token efficiency
+        "compaction_cycle_waste": _compaction_waste,
+        "floor_drift_score": _floor_drift,
+        "interrupted_turn_waste": _interrupt_waste,
+        "repeated_edit_waste": _repeat_waste,
+        "failed_retry_waste": _retry_waste,
+        "efficiency_score": efficiency_score(
+            total_tokens,
+            _compaction_waste,
+            _interrupt_waste,
+            _repeat_waste,
+            _retry_waste,
+            _floor_drift,
+        ),
     }
 
 
@@ -230,6 +251,156 @@ def duplicate_read_count(tool_calls: list[ToolCall]) -> int:
             duplicates += 1
         read_files[file_path] = read_files.get(file_path, 0) + 1
     return duplicates
+
+
+# --- Token efficiency metrics (zero LLM cost) ---
+
+
+def _find_compaction_events(context_growth: list[dict]) -> list[tuple[int, int, int]]:
+    """Find compaction events in context growth data.
+
+    Returns list of (index, pre_tokens, post_tokens) tuples.
+    A compaction is a >40% drop in prompt_tokens between consecutive turns.
+    """
+    events = []
+    for i in range(1, len(context_growth)):
+        prev = context_growth[i - 1].get("prompt_tokens", 0)
+        curr = context_growth[i].get("prompt_tokens", 0)
+        if prev > 1000 and curr < prev * 0.6:
+            events.append((i, prev, curr))
+    return events
+
+
+def compaction_cycle_waste(context_growth: list[dict] | None) -> int:
+    """Tokens wasted in growth-reset cycles between compaction events.
+
+    For each cycle (turns between two compactions), waste is the total
+    prompt tokens above the post-compaction floor that the agent carried.
+    """
+    if not context_growth or len(context_growth) < 2:
+        return 0
+
+    events = _find_compaction_events(context_growth)
+    if not events:
+        return 0
+
+    total_waste = 0
+    for idx, (event_idx, _pre, post) in enumerate(events):
+        # Cycle runs from this compaction to the next (or end of session)
+        end_idx = events[idx + 1][0] if idx + 1 < len(events) else len(context_growth)
+        for j in range(event_idx, end_idx):
+            tokens = context_growth[j].get("prompt_tokens", 0)
+            if tokens > post:
+                total_waste += tokens - post
+    return total_waste
+
+
+def floor_drift_score(context_growth: list[dict] | None) -> float | None:
+    """Score 0-1 measuring whether the post-compaction floor grows over time.
+
+    A growing floor means stale context is accumulating that compaction
+    cannot remove. Returns None if fewer than 2 compaction events.
+    """
+    if not context_growth or len(context_growth) < 2:
+        return None
+
+    events = _find_compaction_events(context_growth)
+    if len(events) < 2:
+        return None
+
+    floors = [post for _, _, post in events]
+
+    # Count how many consecutive floors increased
+    increases = sum(1 for i in range(1, len(floors)) if floors[i] > floors[i - 1])
+    return round(increases / (len(floors) - 1), 2)
+
+
+def interrupted_turn_waste(context_growth: list[dict] | None) -> int:
+    """Sum of prompt tokens for turns where the user interrupted the agent.
+
+    These tokens were consumed but the work was discarded.
+    """
+    if not context_growth:
+        return 0
+    return sum(
+        turn.get("prompt_tokens", 0) for turn in context_growth if turn.get("interrupted", False)
+    )
+
+
+def repeated_edit_waste(tool_calls: list[ToolCall], context_growth: list[dict] | None) -> int:
+    """Estimated tokens wasted on repeated edits (thrashing).
+
+    Each repeated edit to the same file means the prior edit's context was
+    wasted. Cost = repeated_edits x avg_prompt_per_turn.
+    """
+    repeats = repeated_edits_to_same_file(tool_calls)
+    if repeats == 0 or not context_growth:
+        return 0
+    avg_prompt = sum(t.get("prompt_tokens", 0) for t in context_growth) / len(context_growth)
+    return int(repeats * avg_prompt)
+
+
+def failed_retry_waste(tool_calls: list[ToolCall], context_growth: list[dict] | None) -> int:
+    """Estimated tokens wasted on error→retry sequences.
+
+    Each failed attempt consumed full context for a wrong result.
+    Cost = error_retry_count x avg_prompt_per_turn.
+    """
+    retries = error_retry_sequences(tool_calls)
+    if retries == 0 or not context_growth:
+        return 0
+    avg_prompt = sum(t.get("prompt_tokens", 0) for t in context_growth) / len(context_growth)
+    return int(retries * avg_prompt)
+
+
+def efficiency_score(
+    total_tokens: int,
+    compaction_waste: int = 0,
+    interrupt_waste: int = 0,
+    repeat_waste: int = 0,
+    retry_waste: int = 0,
+    floor_drift: float | None = None,
+) -> float | None:
+    """Composite token efficiency score (0-100, higher = better).
+
+    Combines all waste signals into a single score. Returns None for
+    sessions with fewer than 500 tokens (too small to be meaningful).
+    """
+    if total_tokens < 500:
+        return None
+
+    total_waste = compaction_waste + interrupt_waste + repeat_waste + retry_waste
+    waste_ratio = min(total_waste / total_tokens, 1.0)
+    score = 100 * (1 - waste_ratio)
+
+    # Penalize rising compaction floors (context pollution)
+    if floor_drift is not None:
+        score *= 1 - 0.3 * floor_drift
+
+    return round(max(0, score), 1)
+
+
+def compute_compact_ratio(sessions_context_growth: list[list[dict]]) -> float:
+    """Compute per-user compaction ratio from historical session data.
+
+    Returns the median of post/pre ratios across all compaction events.
+    Default 0.15 if no compaction events found.
+    """
+    ratios = []
+    for growth in sessions_context_growth:
+        events = _find_compaction_events(growth)
+        for _, pre, post in events:
+            if pre > 0:
+                ratios.append(post / pre)
+
+    if not ratios:
+        return 0.15
+
+    ratios.sort()
+    mid = len(ratios) // 2
+    if len(ratios) % 2 == 0:
+        return (ratios[mid - 1] + ratios[mid]) / 2
+    return ratios[mid]
 
 
 def _extract_file_path(input_value: str | None) -> str | None:

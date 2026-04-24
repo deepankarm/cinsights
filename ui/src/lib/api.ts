@@ -1,4 +1,4 @@
-import type { SessionRead, SessionDetail, StatsResponse, DigestRead, DigestDetail } from './types';
+import type { SessionRead, SessionDetail, StatsResponse, DigestRead, DigestDetail, TaskRead } from './types';
 
 const BASE = '/api/sessions';
 
@@ -321,4 +321,47 @@ export interface UserMoodResponse { user_id: string; total_sessions: number; ses
 
 export async function getUserMoodQuotes(userId: string): Promise<UserMoodResponse> {
 	return fetchJSON(`/api/users/${encodeURIComponent(userId)}/mood-quotes`);
+}
+
+// --- Tasks ---
+
+export interface TaskListItem {
+	id: string;
+	session_id: string;
+	task_number: number;
+	name: string;
+	description: string;
+	start_turn: number;
+	end_turn: number;
+	turn_count: number;
+	prompt_tokens_total: number;
+	completion_tokens_total: number;
+	estimated_waste_tokens: number | null;
+	session_start_time: string | null;
+	user_id: string | null;
+	project_name: string | null;
+}
+
+export interface TaskStatsResponse {
+	total_tasks: number;
+	avg_turns_per_task: number;
+	avg_tokens_per_task: number;
+	top_task_names: Array<{ name: string; count: number }>;
+}
+
+export async function getTasks(
+	skip = 0, limit = 50, userId?: string, projectName?: string, search?: string, sort = 'date'
+): Promise<TaskListItem[]> {
+	let url = `/api/tasks/?skip=${skip}&limit=${limit}&sort=${sort}`;
+	if (userId) url += `&user_id=${encodeURIComponent(userId)}`;
+	if (projectName) url += `&project_name=${encodeURIComponent(projectName)}`;
+	if (search) url += `&search=${encodeURIComponent(search)}`;
+	return fetchJSON(url);
+}
+
+export async function getTaskStats(userId?: string, projectName?: string): Promise<TaskStatsResponse> {
+	let url = '/api/tasks/stats?';
+	if (userId) url += `user_id=${encodeURIComponent(userId)}&`;
+	if (projectName) url += `project_name=${encodeURIComponent(projectName)}&`;
+	return fetchJSON(url);
 }

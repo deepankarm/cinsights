@@ -79,7 +79,13 @@ async def _store_indexed(
         [s for s in spans if s.name.startswith("Turn ")],
         key=lambda s: s.start_time,
     )
-    total_prompt = sum(s.prompt_tokens for s in turn_spans)
+    # prompt_tokens = context window (max per message ID) — for context growth analysis
+    # total_billed_prompt = sum across message IDs — for cost tracking
+    total_billed_prompt = sum(
+        int(s.attributes.get("llm.token_count.total_billed_prompt", 0) or s.prompt_tokens)
+        for s in turn_spans
+    )
+    total_prompt = total_billed_prompt  # session-level totals use billed amount
     total_completion = sum(s.completion_tokens for s in turn_spans)
     total_tokens = total_prompt + total_completion
 
@@ -88,7 +94,10 @@ async def _store_indexed(
         [
             {
                 "turn": int(s.name.replace("Turn ", "")),
-                "prompt_tokens": s.prompt_tokens,
+                "prompt_tokens": s.prompt_tokens,  # context window (max)
+                "total_billed_prompt": int(
+                    s.attributes.get("llm.token_count.total_billed_prompt", 0) or s.prompt_tokens
+                ),
                 "completion_tokens": s.completion_tokens,
                 "duration_ms": s.duration_ms,
                 "interrupted": _INTERRUPT_MARKER in (s.attributes.get("input.value") or ""),
@@ -303,6 +312,70 @@ async def _store_insights(
     coding_session.analysis_prompt_tokens = result.usage_prompt_tokens
     coding_session.analysis_completion_tokens = result.usage_completion_tokens
     return len(result.insights)
+
+
+async def _store_tasks(
+    db: AsyncSession,
+    coding_session: CodingSession,
+    task_result: object,
+) -> int:
+    """Store task segmentation results on an already-INDEXED session.
+
+    Returns the number of tasks persisted. Gracefully handles None/errors.
+    """
+    from cinsights.analysis.tasks import TaskSegmentationResult, compute_task_waste
+    from cinsights.db.models import Task
+
+    # Handle None (skipped), BaseException (failed), or non-result types
+    if not isinstance(task_result, TaskSegmentationResult):
+        if isinstance(task_result, BaseException):
+            logger.warning("Task segmentation failed for %s: %s", coding_session.id, task_result)
+        return 0
+
+    # Clear old tasks on re-analysis
+    old_tasks = await db.exec(select_fn(Task).where(Task.session_id == coding_session.id))
+    for old in old_tasks.all():
+        await db.delete(old)
+
+    # Compute per-task waste if context_growth is available
+    import json as json_mod
+
+    context_growth = None
+    if coding_session.context_growth_json:
+        import contextlib
+
+        with contextlib.suppress(Exception):
+            context_growth = json_mod.loads(coding_session.context_growth_json)
+
+    waste_data = []
+    if context_growth and task_result.tasks:
+        # Use a default compact ratio for now (per-user would require querying other sessions)
+        compact_ratio = 0.15
+        waste_data = compute_task_waste(task_result.tasks, context_growth, compact_ratio)
+
+    total_task_waste = 0
+    for i, task_item in enumerate(task_result.tasks):
+        waste = waste_data[i] if i < len(waste_data) else {}
+        task_row = Task(
+            tenant_id=coding_session.tenant_id,
+            session_id=coding_session.id,
+            task_number=i + 1,
+            name=task_item.name,
+            description=task_item.description,
+            start_turn=task_item.start_turn,
+            end_turn=task_item.end_turn,
+            turn_count=task_item.turn_count,
+            prompt_tokens_total=waste.get("prompt_tokens_total", 0),
+            completion_tokens_total=waste.get("completion_tokens_total", 0),
+            context_at_start=waste.get("context_at_start"),
+            estimated_waste_tokens=waste.get("estimated_waste_tokens"),
+        )
+        total_task_waste += waste.get("estimated_waste_tokens", 0)
+        db.add(task_row)
+
+    coding_session.task_count = len(task_result.tasks)
+    coding_session.estimated_task_waste_tokens = total_task_waste
+    return len(task_result.tasks)
 
 
 async def _store_digest_sections(
@@ -1405,6 +1478,7 @@ async def _analyze_async(
 
     from cinsights.analysis.project_detection import ProjectDetector
     from cinsights.analysis.session import SessionAnalyzer
+    from cinsights.analysis.tasks import TaskAnalyzer
     from cinsights.db.engine import get_sessionmaker
     from cinsights.db.models import CodingSession, SessionStatus
     from cinsights.settings import get_llm_config
@@ -1415,6 +1489,7 @@ async def _analyze_async(
 
     llm = get_llm_config()
     analyzer = SessionAnalyzer(llm_config=llm)
+    task_analyzer = TaskAnalyzer(llm_config=llm)
     project_detector = ProjectDetector(llm_config=llm)
 
     async with sessionmaker() as _kp_db:
@@ -1664,14 +1739,18 @@ async def _analyze_async(
             (trace_id, previous_tags[trace_id], _filter_tool_spans(spans))
             for trace_id, _, _, spans in work_items
         ]
-        analysis_results, project_guesses = await asyncio.gather(
+        analysis_results, task_results, project_guesses = await asyncio.gather(
             analyzer.analyze_batch(analysis_input, max_concurrency=concurrency),
+            task_analyzer.segment_batch(analysis_input, max_concurrency=concurrency),
             project_detector.detect_batch(
                 detect_items_list, known_projects, max_concurrency=concurrency
             ),
         )
     else:
-        analysis_results = await analyzer.analyze_batch(analysis_input, max_concurrency=concurrency)
+        analysis_results, task_results = await asyncio.gather(
+            analyzer.analyze_batch(analysis_input, max_concurrency=concurrency),
+            task_analyzer.segment_batch(analysis_input, max_concurrency=concurrency),
+        )
         project_guesses = [
             ProjectGuess(
                 project_name=_get_project_name(settings, source, tid, previous_tags.get(tid))[0],
@@ -1687,8 +1766,8 @@ async def _analyze_async(
     analyzed = 0
     failed = 0
     async with sessionmaker() as db:
-        for (trace_id, _session_id, _trace, _spans), result, project_guess in zip(
-            work_items, analysis_results, project_guesses, strict=True
+        for (trace_id, _session_id, _trace, _spans), result, task_result, project_guess in zip(
+            work_items, analysis_results, task_results, project_guesses, strict=True
         ):
             # Skip sessions where LLM call failed (503, timeout, etc.)
             if isinstance(result, BaseException):
@@ -1710,6 +1789,7 @@ async def _analyze_async(
                 if project_guess.project_name and not coding_session.project_name:
                     coding_session.project_name = project_guess.project_name
                 n_insights = await _store_insights(db, coding_session, result)
+                await _store_tasks(db, coding_session, task_result)
                 await update_daily_trend(db, coding_session)
                 await db.commit()
                 analyzed += 1

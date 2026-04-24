@@ -66,6 +66,18 @@ class CodingSession(SQLModel, table=True):
     context_resets: int | None = None
     duplicate_read_count: int | None = None
 
+    # Token efficiency — waste metrics (computed during indexing, zero LLM cost)
+    compaction_cycle_waste: int | None = None  # tokens in growth-reset cycles
+    floor_drift_score: float | None = None  # 0-1, growing post-compaction floor
+    interrupted_turn_waste: int | None = None  # prompt tokens for interrupted turns
+    repeated_edit_waste: int | None = None  # thrashing cost
+    failed_retry_waste: int | None = None  # error retry cost
+    efficiency_score: float | None = None  # 0-100 composite score
+
+    # Task-based metrics (computed during analyze, LLM)
+    task_count: int | None = None  # number of detected tasks
+    estimated_task_waste_tokens: int | None = None  # total compact-at-boundary waste
+
     interrupt_count: int | None = None
     agent_version: str | None = None
     effort_level: str | None = None  # low / medium / high / max
@@ -83,6 +95,30 @@ class CodingSession(SQLModel, table=True):
 
     tool_calls: list["ToolCall"] = Relationship(back_populates="session")
     insights: list["Insight"] = Relationship(back_populates="session")
+    tasks: list["Task"] = Relationship(back_populates="session")
+
+
+class Task(SQLModel, table=True):
+    """A coherent unit of work within a session, detected by LLM segmentation."""
+
+    __tablename__ = "task"
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    tenant_id: str = Field(default="default", index=True)
+    session_id: str = Field(foreign_key="coding_session.id", index=True)
+    task_number: int  # 1-indexed within session
+    name: str  # 3-8 word concise name
+    description: str  # 1-2 sentences
+    start_turn: int
+    end_turn: int
+    turn_count: int
+    prompt_tokens_total: int = 0  # total prompt tokens across turns in this task
+    completion_tokens_total: int = 0
+    context_at_start: int | None = None  # context window size at first turn
+    estimated_waste_tokens: int | None = None  # compact-at-boundary waste
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    session: CodingSession = Relationship(back_populates="tasks")
 
 
 class ToolCall(SQLModel, table=True):
@@ -194,6 +230,8 @@ class DigestSectionType(StrEnum):
     WORKFLOW_PATTERNS = "workflow_patterns"
     AMBITIOUS_WORKFLOWS = "ambitious_workflows"
     STOP_HOOK_SUGGESTIONS = "stop_hook_suggestions"
+    TASK_ANALYSIS = "task_analysis"
+    EFFICIENCY_INSIGHTS = "efficiency_insights"
     # Legacy values kept for SQLite CHECK constraint compatibility.
     FUN_ENDING = "fun_ending"
 
@@ -268,6 +306,7 @@ class LLMCallKind(StrEnum):
     DIGEST_NARRATIVE = "digest_narrative"
     DIGEST_ACTIONS = "digest_actions"
     DIGEST_FORWARD = "digest_forward"
+    TASK_SEGMENTATION = "task_segmentation"
 
 
 class LLMCallScopeType(StrEnum):

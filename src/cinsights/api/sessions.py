@@ -15,6 +15,7 @@ from cinsights.db.models import (
     InsightCategory,
     InsightSeverity,
     SessionStatus,
+    Task,
     ToolCall,
 )
 
@@ -62,6 +63,20 @@ class SessionRead(BaseModel):
     effort_level: str | None = None
 
 
+class TaskRead(BaseModel):
+    id: str
+    task_number: int
+    name: str
+    description: str
+    start_turn: int
+    end_turn: int
+    turn_count: int
+    prompt_tokens_total: int
+    completion_tokens_total: int
+    context_at_start: int | None = None
+    estimated_waste_tokens: int | None = None
+
+
 class SessionDetail(BaseModel):
     id: str
     session_id: str | None
@@ -78,6 +93,7 @@ class SessionDetail(BaseModel):
     tool_calls: list[ToolCallRead]
     total_tool_calls: int = 0
     insights: list[InsightRead]
+    tasks: list[TaskRead] = []
     notable_quotes: list[dict] | None = None
     interrupt_count: int | None = None
     agent_version: str | None = None
@@ -98,6 +114,16 @@ class SessionDetail(BaseModel):
     error_retry_sequences: int | None = None
     context_resets: int | None = None
     duplicate_read_count: int | None = None
+
+    # Token efficiency — waste metrics
+    compaction_cycle_waste: int | None = None
+    floor_drift_score: float | None = None
+    interrupted_turn_waste: int | None = None
+    repeated_edit_waste: int | None = None
+    failed_retry_waste: int | None = None
+    efficiency_score: float | None = None
+    task_count: int | None = None
+    estimated_task_waste_tokens: int | None = None
 
     # Baseline averages for comparison
     baseline: dict | None = None
@@ -333,6 +359,12 @@ async def get_session_detail(
                 "avg_duplicate_read_count": round(row[11], 1) if row[11] else None,
             }
 
+    # Load tasks
+    tasks_result = await db.exec(
+        select(Task).where(Task.session_id == session.id).order_by(Task.task_number)
+    )
+    task_rows = tasks_result.all()
+
     return SessionDetail(
         id=session.id,
         session_id=session.session_id,
@@ -373,6 +405,22 @@ async def get_session_detail(
             )
             for ins in insights
         ],
+        tasks=[
+            TaskRead(
+                id=t.id,
+                task_number=t.task_number,
+                name=t.name,
+                description=t.description,
+                start_turn=t.start_turn,
+                end_turn=t.end_turn,
+                turn_count=t.turn_count,
+                prompt_tokens_total=t.prompt_tokens_total,
+                completion_tokens_total=t.completion_tokens_total,
+                context_at_start=t.context_at_start,
+                estimated_waste_tokens=t.estimated_waste_tokens,
+            )
+            for t in task_rows
+        ],
         notable_quotes=_parse_notable_quotes(session),
         interrupt_count=session.interrupt_count,
         agent_version=session.agent_version,
@@ -389,6 +437,14 @@ async def get_session_detail(
         error_retry_sequences=session.error_retry_sequences,
         context_resets=session.context_resets,
         duplicate_read_count=session.duplicate_read_count,
+        compaction_cycle_waste=session.compaction_cycle_waste,
+        floor_drift_score=session.floor_drift_score,
+        interrupted_turn_waste=session.interrupted_turn_waste,
+        repeated_edit_waste=session.repeated_edit_waste,
+        failed_retry_waste=session.failed_retry_waste,
+        efficiency_score=session.efficiency_score,
+        task_count=session.task_count,
+        estimated_task_waste_tokens=session.estimated_task_waste_tokens,
         baseline=baseline_data,
     )
 

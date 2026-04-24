@@ -322,11 +322,93 @@
 			<div class="hero-label">Model</div>
 			<div class="hero-sub">{session.insights.length} insights</div>
 		</div>
+		{#if session.efficiency_score != null}
+			{@const eff = session.efficiency_score}
+			{@const effColor = eff > 80 ? '#10b981' : eff > 50 ? '#f59e0b' : '#dc2626'}
+			<div class="hero-metric">
+				<div class="hero-value" style="color: {effColor}">{Math.round(eff)}</div>
+				<div class="hero-label">Efficiency</div>
+				<div class="hero-sub">token efficiency score</div>
+			</div>
+		{/if}
 	</div>
 
 	<!-- 3. Quality Bar -->
 	{#if qualityMetrics.length > 0}
 		<QualityBar metrics={qualityMetrics} />
+	{/if}
+
+	<!-- Tasks -->
+	{#if session.tasks && session.tasks.length > 0}
+		{@const totalTaskTokens = session.tasks.reduce((s, t) => s + t.prompt_tokens_total, 0) || 1}
+		<div class="section">
+			<h2>Tasks <span class="h2-count">{session.tasks.length}</span>
+				{#if session.estimated_task_waste_tokens}
+					<span class="waste-badge">{Math.round((session.estimated_task_waste_tokens / session.total_tokens) * 100)}% saveable</span>
+				{/if}
+			</h2>
+			<div class="task-list">
+				{#each session.tasks as task}
+					{@const pct = Math.max(3, (task.prompt_tokens_total / totalTaskTokens) * 100)}
+					<div class="task-card">
+						<div class="task-header">
+							<span class="task-num">{task.task_number}.</span>
+							<span class="task-name">{task.name}</span>
+							<span class="task-turns">t{task.start_turn}-t{task.end_turn}</span>
+						</div>
+						<div class="task-desc">{task.description}</div>
+						<div class="task-bar-row">
+							<div class="task-bar" style="width: {pct}%"></div>
+							<span class="task-meta">{fmtTokens(task.prompt_tokens_total)} tokens · {task.turn_count} turns</span>
+							{#if task.estimated_waste_tokens && task.estimated_waste_tokens > 0}
+								<span class="task-waste">~{fmtTokens(task.estimated_waste_tokens)} saveable</span>
+							{/if}
+						</div>
+					</div>
+				{/each}
+			</div>
+		</div>
+	{/if}
+
+	<!-- Token Efficiency -->
+	{#if session.efficiency_score != null}
+		{@const wasteItems = [
+			{ label: 'Compaction cycles', value: session.compaction_cycle_waste, color: '#f59e0b' },
+			{ label: 'Interrupted turns', value: session.interrupted_turn_waste, color: '#ef4444' },
+			{ label: 'Repeated edits', value: session.repeated_edit_waste, color: '#8b5cf6' },
+			{ label: 'Failed retries', value: session.failed_retry_waste, color: '#dc2626' },
+			{ label: 'Task boundaries', value: session.estimated_task_waste_tokens, color: '#3b82f6' },
+		].filter(w => w.value && w.value > 0)}
+		{@const totalWaste = wasteItems.reduce((s, w) => s + (w.value ?? 0), 0)}
+		<div class="section">
+			<h2>Token Efficiency</h2>
+			{#if wasteItems.length > 0}
+				<div class="efficiency-grid">
+					{#each wasteItems as w}
+						{@const wpct = Math.round((w.value! / session.total_tokens) * 100)}
+						<div class="waste-card">
+							<div class="waste-dot" style="background: {w.color}"></div>
+							<div class="waste-info">
+								<div class="waste-label">{w.label}</div>
+								<div class="waste-value">{fmtTokens(w.value!)} <span class="waste-pct">({wpct}%)</span></div>
+							</div>
+						</div>
+					{/each}
+					<div class="waste-card waste-total">
+						<div class="waste-info">
+							<div class="waste-label">Total saveable</div>
+							<div class="waste-value">{fmtTokens(totalWaste)} <span class="waste-pct">({Math.round((totalWaste / session.total_tokens) * 100)}%)</span></div>
+						</div>
+					</div>
+				</div>
+			{/if}
+			{#if session.floor_drift_score != null && session.floor_drift_score > 0.3}
+				<div class="efficiency-rec">Post-compaction floor is growing — stale context is accumulating across compactions.</div>
+			{/if}
+			{#if session.task_count && session.task_count > 5 && session.estimated_task_waste_tokens && session.estimated_task_waste_tokens > 0}
+				<div class="efficiency-rec">This session had {session.task_count} tasks. Starting new sessions per task could save ~{fmtTokens(session.estimated_task_waste_tokens)} tokens.</div>
+			{/if}
+		</div>
 	{/if}
 
 	<!-- 4. Activity Charts (includes Context Growth + Turn Duration in bento grid) -->
@@ -374,6 +456,22 @@
 								<line x1={PAD.l} x2={W - PAD.r} y1={gy} y2={gy} stroke="#f1f5f9" stroke-width="1" />
 								<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtTokens(Math.round(maxY * frac))}</text>
 							{/each}
+							<!-- Task bands -->
+							{#if session?.tasks && session.tasks.length > 0}
+								{@const taskColors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#3b82f6', '#84cc16']}
+								{#each session.tasks as task, ti}
+									{@const startIdx = pts.findIndex(p => p.turn >= task.start_turn)}
+									{@const endIdx = pts.findIndex(p => p.turn > task.end_turn)}
+									{@const si = startIdx >= 0 ? startIdx : 0}
+									{@const ei = endIdx >= 0 ? endIdx : n}
+									{@const x1 = xOf(si, n)}
+									{@const x2 = xOf(Math.min(ei, n - 1), n)}
+									<rect x={x1} y={PAD.t} width={Math.max(x2 - x1, 2)} height={iH} fill={taskColors[ti % taskColors.length]} opacity="0.08" />
+									{#if x2 - x1 > 40}
+										<text x={(x1 + x2) / 2} y={PAD.t + 10} text-anchor="middle" class="ax" fill={taskColors[ti % taskColors.length]} font-size="8" opacity="0.7">{task.name.slice(0, 20)}</text>
+									{/if}
+								{/each}
+							{/if}
 							<path d={areaPath} fill="url(#ctxG)" />
 							<path d={linePath} fill="none" stroke="#6366f1" stroke-width="1.5" stroke-linejoin="round" />
 							{#each compactionIdxs as i}
@@ -639,7 +737,33 @@
 	.tool-io pre { margin-top: 4px; padding: 8px; background: #f8fafc; border-radius: 4px; font-size: 11px; overflow-x: auto; max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
 	.empty { padding: 32px; text-align: center; color: #64748b; background: white; border: 1px solid #e2e8f0; border-radius: 12px; }
 
+	/* Tasks */
+	.task-list { display: flex; flex-direction: column; gap: 10px; }
+	.task-card { background: white; border: 1px solid #e8e5e0; border-radius: 12px; padding: 14px 18px; }
+	.task-header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+	.task-num { font-weight: 700; color: #94a3b8; font-size: 13px; }
+	.task-name { font-weight: 600; font-size: 14px; color: #0f172a; }
+	.task-turns { font-size: 11px; color: #94a3b8; margin-left: auto; font-family: 'SF Mono', 'Fira Code', monospace; }
+	.task-desc { font-size: 12px; color: #64748b; margin-bottom: 8px; }
+	.task-bar-row { display: flex; align-items: center; gap: 10px; }
+	.task-bar { height: 4px; background: #6366f1; border-radius: 2px; min-width: 4px; }
+	.task-meta { font-size: 11px; color: #94a3b8; }
+	.task-waste { font-size: 11px; color: #dc2626; font-weight: 600; margin-left: auto; }
+	.waste-badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 5px; background: #fef2f2; color: #dc2626; margin-left: 8px; }
+
+	/* Token Efficiency */
+	.efficiency-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-bottom: 12px; }
+	.waste-card { display: flex; align-items: center; gap: 10px; background: white; border: 1px solid #e8e5e0; border-radius: 10px; padding: 12px 14px; }
+	.waste-card.waste-total { background: #f8fafc; border-color: #cbd5e1; }
+	.waste-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+	.waste-info { display: flex; flex-direction: column; }
+	.waste-label { font-size: 11px; color: #64748b; }
+	.waste-value { font-size: 14px; font-weight: 700; color: #0f172a; }
+	.waste-pct { font-size: 11px; font-weight: 500; color: #94a3b8; }
+	.efficiency-rec { font-size: 13px; color: #64748b; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 10px 14px; margin-top: 8px; }
+
 	@media (max-width: 768px) {
 		.session-header { flex-direction: column; align-items: flex-start; }
+		.efficiency-grid { grid-template-columns: 1fr; }
 	}
 </style>

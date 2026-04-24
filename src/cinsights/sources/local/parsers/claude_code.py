@@ -102,7 +102,10 @@ def parse_claude_code(
             if m:
                 model_name = m
 
-        total_prompt = sum(p for p, _ in msg_tokens.values())
+        # Context window size = max across message IDs (what the model "sees")
+        # Total billed = sum across message IDs (what you pay for)
+        context_window_prompt = max((p for p, _ in msg_tokens.values()), default=0)
+        total_billed_prompt = sum(p for p, _ in msg_tokens.values())
         total_completion = sum(c for _, c in msg_tokens.values())
 
         user_query = ""
@@ -130,8 +133,9 @@ def parse_claude_code(
             attributes={
                 "input.value": user_query[:2000] if user_query else "",
                 "output.value": assistant_text[:2000] if assistant_text else "",
-                "llm.token_count.prompt": total_prompt,
+                "llm.token_count.prompt": context_window_prompt,
                 "llm.token_count.completion": total_completion,
+                "llm.token_count.total_billed_prompt": total_billed_prompt,
                 "llm.model_name": model_name,
             },
         )
