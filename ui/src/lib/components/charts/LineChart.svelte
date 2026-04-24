@@ -162,7 +162,7 @@
 						if (tooltipFormat) return tooltipFormat(ctx.datasetIndex, ctx.dataIndex, val);
 						return `${datasets[ctx.datasetIndex].label}: ${yFormat(val)}`;
 					} } },
-					annotation: { annotations: annotations as never },
+					annotation: { clip: false, annotations: annotations as never },
 				},
 			},
 		};
@@ -276,7 +276,7 @@
 						if (tooltipFormat) return tooltipFormat(ctx.datasetIndex, ctx.dataIndex, val);
 						return `${ds.label}: ${yFormat(val)}`;
 					} } },
-					annotation: { annotations: annotations as never },
+					annotation: { clip: false, annotations: annotations as never },
 				},
 			},
 		};
