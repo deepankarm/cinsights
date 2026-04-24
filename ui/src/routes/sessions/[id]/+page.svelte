@@ -242,7 +242,8 @@
 			if (startIdx < 0) return null; // task beyond data range
 			const ei = endIdx >= 0 ? endIdx - 1 : pts.length - 1;
 			if (ei < startIdx) return null; // no data points in this task
-			return { startIndex: startIdx, endIndex: ei, name: task.name, description: task.description, colorIndex: ti };
+			const tokenLabel = task.prompt_tokens_total > 0 ? ` (${fmtTokens(task.prompt_tokens_total)})` : '';
+			return { startIndex: startIdx, endIndex: ei, name: task.name + tokenLabel, description: task.description, colorIndex: ti };
 		}).filter((b): b is NonNullable<typeof b> => b !== null);
 	});
 	const compactionCount = $derived.by(() => ctxMarkers.filter(m => m.color === '#f59e0b').length);
@@ -468,36 +469,6 @@
 			{/if}
 		{/if}
 
-		<!-- Task list -->
-		{#if session.tasks && session.tasks.length > 0}
-			{@const totalTaskTokens = session.tasks.reduce((s, t) => s + t.prompt_tokens_total, 0) || 1}
-			<div class="task-section-header">
-				<span class="task-section-label">{session.tasks.length} tasks detected</span>
-				{#if session.estimated_task_waste_tokens}
-					<span class="waste-badge">{Math.round((session.estimated_task_waste_tokens / session.total_tokens) * 100)}% saveable</span>
-				{/if}
-			</div>
-			<div class="task-list">
-				{#each session.tasks as task}
-					{@const pct = Math.max(3, (task.prompt_tokens_total / totalTaskTokens) * 100)}
-					<div class="task-card">
-						<div class="task-header">
-							<span class="task-num">{task.task_number}.</span>
-							<span class="task-name">{task.name}</span>
-							<span class="task-turns">t{task.start_turn}-t{task.end_turn}</span>
-						</div>
-						<div class="task-desc">{task.description}</div>
-						<div class="task-bar-row">
-							<div class="task-bar" style="width: {pct}%"></div>
-							<span class="task-meta">{fmtTokens(task.prompt_tokens_total)} tokens · {task.turn_count} turns</span>
-							{#if task.estimated_waste_tokens && task.estimated_waste_tokens > 0}
-								<span class="task-waste">~{fmtTokens(task.estimated_waste_tokens)} saveable</span>
-							{/if}
-						</div>
-					</div>
-				{/each}
-			</div>
-		{/if}
 
 		<!-- Token efficiency (waste breakdown inside Tasks section) -->
 		{#if session.efficiency_score != null}
@@ -758,19 +729,6 @@
 	.empty { padding: 32px; text-align: center; color: #64748b; background: white; border: 1px solid #e2e8f0; border-radius: 12px; }
 
 	/* Tasks & Turns */
-	.task-section-header { display: flex; align-items: center; gap: 10px; margin: 20px 0 10px; }
-	.task-section-label { font-size: 13px; font-weight: 600; color: #64748b; }
-	.task-list { display: flex; flex-direction: column; gap: 10px; }
-	.task-card { background: white; border: 1px solid #e8e5e0; border-radius: 12px; padding: 14px 18px; }
-	.task-header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
-	.task-num { font-weight: 700; color: #94a3b8; font-size: 13px; }
-	.task-name { font-weight: 600; font-size: 14px; color: #0f172a; }
-	.task-turns { font-size: 11px; color: #94a3b8; margin-left: auto; font-family: 'SF Mono', 'Fira Code', monospace; }
-	.task-desc { font-size: 12px; color: #64748b; margin-bottom: 8px; }
-	.task-bar-row { display: flex; align-items: center; gap: 10px; }
-	.task-bar { height: 4px; background: #6366f1; border-radius: 2px; min-width: 4px; }
-	.task-meta { font-size: 11px; color: #94a3b8; }
-	.task-waste { font-size: 11px; color: #dc2626; font-weight: 600; margin-left: auto; }
 	.waste-badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 5px; background: #fef2f2; color: #dc2626; }
 
 	/* Token Efficiency (inside Tasks section) */
