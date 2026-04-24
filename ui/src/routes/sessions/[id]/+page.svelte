@@ -246,6 +246,7 @@
 				startIndex: startIdx >= 0 ? startIdx : 0,
 				endIndex: endIdx >= 0 ? endIdx : pts.length - 1,
 				name: task.name,
+				description: task.description,
 				colorIndex: ti,
 			};
 		});
@@ -402,6 +403,7 @@
 					markers={ctxMarkers}
 					taskBands={ctxTaskBands}
 					height={chartHeight}
+					horizontal={true}
 					yFormat={fmtTokens}
 					tooltipFormat={(_, i, v) => `Turn ${ctxLabels[i]}: ${fmtTokens(v)}`}
 				/>
@@ -421,7 +423,7 @@
 					</div>
 				</div>
 				<div class="chart-desc">Prompt tokens per turn (context window size)</div>
-				{@render ctxChart(360)}
+				{@render ctxChart(Math.max(300, turnCount * 18))}
 			</div>
 
 			<!-- Expanded overlay -->
