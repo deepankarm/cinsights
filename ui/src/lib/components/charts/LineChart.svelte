@@ -85,7 +85,7 @@
 				borderWidth: 0,
 				label: {
 					display: true,
-					content: band.name.slice(0, 40),
+					content: band.name,
 					position: { x: 'start', y: 'start' },
 					color: bandColor,
 					font: { size: 10, weight: '600' },
@@ -195,7 +195,7 @@
 				yValue: midIdx,
 				xAdjust: 6,
 				position: { x: 'start' },
-				content: band.name.slice(0, 40),
+				content: band.name,
 				color: bandColor,
 				font: { size: 10, weight: 'bold' },
 				backgroundColor: 'white',
