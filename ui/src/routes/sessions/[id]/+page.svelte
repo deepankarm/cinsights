@@ -21,6 +21,7 @@
 	let toolsExpanded = $state(false);
 	let errorsExpanded = $state(false);
 	let copied = $state(false);
+	let chartExpanded = $state(false);
 
 	const id = $derived(page.params.id ?? '');
 
@@ -394,6 +395,18 @@
 
 		<!-- Context Growth chart (tall, full-width) -->
 		{#if session?.context_growth && session.context_growth.length > 1}
+			{#snippet ctxChart(chartHeight: number)}
+				<LineChart
+					labels={ctxLabels}
+					datasets={[{ label: 'Prompt Tokens', data: ctxData, color: '#6366f1', fill: true }]}
+					markers={ctxMarkers}
+					taskBands={ctxTaskBands}
+					height={chartHeight}
+					yFormat={fmtTokens}
+					tooltipFormat={(_, i, v) => `Turn ${ctxLabels[i]}: ${fmtTokens(v)}`}
+				/>
+			{/snippet}
+
 			<div class="chart-card">
 				<div class="chart-header">
 					<h3>Context Growth</h3>
@@ -404,19 +417,37 @@
 						{#if interruptCount2 > 0}
 							<span class="trend-badge interrupt">{interruptCount2} interrupt{interruptCount2 > 1 ? 's' : ''}</span>
 						{/if}
+						<button class="expand-btn" onclick={() => chartExpanded = true} title="Expand chart">⛶</button>
 					</div>
 				</div>
 				<div class="chart-desc">Prompt tokens per turn (context window size)</div>
-				<LineChart
-					labels={ctxLabels}
-					datasets={[{ label: 'Prompt Tokens', data: ctxData, color: '#6366f1', fill: true }]}
-					markers={ctxMarkers}
-					taskBands={ctxTaskBands}
-					height={360}
-					yFormat={fmtTokens}
-					tooltipFormat={(_, i, v) => `Turn ${ctxLabels[i]}: ${fmtTokens(v)}`}
-				/>
+				{@render ctxChart(360)}
 			</div>
+
+			<!-- Expanded overlay -->
+			{#if chartExpanded}
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div class="chart-overlay" onkeydown={(e) => { if (e.key === 'Escape') chartExpanded = false; }}>
+					<!-- svelte-ignore a11y_no_static_element_interactions -->
+					<div class="chart-overlay-backdrop" onclick={() => chartExpanded = false}></div>
+					<div class="chart-overlay-content">
+						<div class="chart-header">
+							<h3>Context Growth</h3>
+							<div class="chart-header-right">
+								{#if compactionCount > 0}
+									<span class="trend-badge down">{compactionCount} compaction{compactionCount > 1 ? 's' : ''}</span>
+								{/if}
+								{#if interruptCount2 > 0}
+									<span class="trend-badge interrupt">{interruptCount2} interrupt{interruptCount2 > 1 ? 's' : ''}</span>
+								{/if}
+								<button class="expand-btn" onclick={() => chartExpanded = false} title="Close">✕</button>
+							</div>
+						</div>
+						<div class="chart-desc">Prompt tokens per turn (context window size)</div>
+						{@render ctxChart(Math.round(window.innerHeight * 0.7))}
+					</div>
+				</div>
+			{/if}
 
 			<!-- Turn Duration chart (tall, full-width) -->
 			{#if durPts.length > 1}
@@ -653,6 +684,29 @@
 	.effort-high, .effort-max { color: #16a34a; font-weight: 600; }
 	.effort-medium { color: #d97706; font-weight: 600; }
 	.effort-low { color: #94a3b8; }
+
+	.expand-btn {
+		background: none; border: 1px solid #e2e8f0; border-radius: 6px;
+		padding: 2px 7px; cursor: pointer; font-size: 14px; color: #94a3b8;
+		transition: color 0.15s, border-color 0.15s;
+	}
+	.expand-btn:hover { color: #3b82f6; border-color: #3b82f6; }
+
+	.chart-overlay {
+		position: fixed; inset: 0; z-index: 1000;
+		display: flex; align-items: center; justify-content: center;
+	}
+	.chart-overlay-backdrop {
+		position: absolute; inset: 0;
+		background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(4px);
+	}
+	.chart-overlay-content {
+		position: relative; z-index: 1;
+		background: white; border-radius: 16px; padding: 28px 32px;
+		width: 92vw; max-width: 1600px;
+		max-height: 90vh; overflow: auto;
+		box-shadow: 0 24px 48px rgba(0, 0, 0, 0.2);
+	}
 
 	.reanalyze-btn {
 		background: #2563eb; color: white; border: none; border-radius: 8px;
