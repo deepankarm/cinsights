@@ -168,52 +168,42 @@
 		};
 	}
 
-	function buildHorizontalConfig(annotations: Record<string, unknown>): ChartConfiguration {
-		// Horizontal bar chart: each turn is a row, bar width = token count
-		// Task bands are box annotations spanning turn ranges
+	function buildHorizontalConfig(annotations: Record<string, unknown>): ChartConfiguration<'line'> {
+		// Horizontal line chart: turns on y-axis (top→bottom), tokens on x-axis
+		// Reads like a timeline — turn 1 at top, last turn at bottom
 
 		const ds = datasets[0];
 
-		// Color each bar by its task band
-		const barColors = new Array(labels.length).fill(ds.color + 'cc');
-		const barBorderColors = new Array(labels.length).fill(ds.color);
-		for (const band of taskBands) {
-			const bandColor = TASK_COLORS[band.colorIndex % TASK_COLORS.length];
-			for (let j = band.startIndex; j <= band.endIndex && j < labels.length; j++) {
-				barColors[j] = bandColor + 'cc';
-				barBorderColors[j] = bandColor;
-			}
-		}
-
-		// Highlight marker turns (compactions = amber border, interrupts = red border)
-		for (const m of markers) {
-			if (m.index < labels.length) {
-				barBorderColors[m.index] = m.color;
-			}
-		}
-
-		// Task band separators + labels
+		// Task band annotations (horizontal boxes spanning turn ranges)
 		for (let i = 0; i < taskBands.length; i++) {
 			const band = taskBands[i];
 			const bandColor = TASK_COLORS[band.colorIndex % TASK_COLORS.length];
+			annotations[`band${i}`] = {
+				type: 'box',
+				yMin: band.startIndex - 0.5,
+				yMax: band.endIndex + 0.5,
+				backgroundColor: bandColor + '14',
+				borderWidth: 0,
+			};
 			// Separator line at band start
 			if (band.startIndex > 0) {
 				annotations[`bandBorder${i}`] = {
 					type: 'line',
 					yMin: band.startIndex - 0.5,
 					yMax: band.startIndex - 0.5,
-					borderColor: bandColor + '55',
-					borderWidth: 1.5,
+					borderColor: bandColor + '44',
+					borderWidth: 1,
+					borderDash: [3, 3],
 				};
 			}
-			// Task name label
+			// Task name label at start of band
 			annotations[`bandLabel${i}`] = {
 				type: 'label',
 				xValue: 0,
 				yValue: band.startIndex,
 				xAdjust: 6,
 				position: { x: 'start' },
-				content: band.name.slice(0, 45),
+				content: band.name.slice(0, 40),
 				color: bandColor,
 				font: { size: 10, weight: 'bold' },
 				backgroundColor: 'white',
@@ -224,7 +214,7 @@
 			};
 		}
 
-		// Reference lines (vertical lines on x-axis)
+		// Reference lines (vertical on x-axis)
 		for (let i = 0; i < referenceLines.length; i++) {
 			const rl = referenceLines[i];
 			annotations[`ref${i}`] = {
@@ -234,18 +224,36 @@
 			};
 		}
 
+		// Marker points
+		const pointBg = new Array(labels.length).fill('transparent');
+		const pointBorder = new Array(labels.length).fill('transparent');
+		const pointRadii = new Array(labels.length).fill(0);
+		for (const m of markers) {
+			pointBg[m.index] = m.color;
+			pointBorder[m.index] = 'white';
+			pointRadii[m.index] = 3.5;
+		}
+
 		return {
-			type: 'bar',
+			type: 'line',
 			data: {
 				labels,
 				datasets: [{
 					label: ds.label,
 					data: ds.data,
-					backgroundColor: barColors,
-					borderColor: barBorderColors,
-					borderWidth: 1,
-					borderRadius: 3,
-					borderSkipped: false,
+					borderColor: ds.color,
+					borderWidth: 1.5,
+					backgroundColor: ds.fill ? createGradientHorizontal(ds.color) : 'transparent',
+					fill: ds.fill ?? false,
+					tension: 0.15,
+					pointRadius: pointRadii,
+					pointBackgroundColor: pointBg,
+					pointBorderColor: pointBorder,
+					pointBorderWidth: 1.5,
+					pointHoverRadius: 4,
+					pointHoverBackgroundColor: ds.color,
+					pointHoverBorderColor: 'white',
+					pointHoverBorderWidth: 2,
 				}],
 			},
 			options: {
@@ -259,6 +267,7 @@
 						ticks: { font: { size: 10 }, callback: (v) => yFormat(v as number) },
 					},
 					y: {
+						reverse: false,
 						grid: { display: false },
 						ticks: {
 							font: { size: 9 },
@@ -277,7 +286,17 @@
 					annotation: { annotations: annotations as never },
 				},
 			},
-		} as ChartConfiguration;
+		};
+	}
+
+	function createGradientHorizontal(color: string): CanvasGradient | string {
+		if (!canvas) return color;
+		const ctx = canvas.getContext('2d');
+		if (!ctx) return color;
+		const gradient = ctx.createLinearGradient(0, 0, canvas.width || 800, 0);
+		gradient.addColorStop(0, color + '00');
+		gradient.addColorStop(1, color + '40');
+		return gradient;
 	}
 
 	function createGradientVertical(color: string): CanvasGradient | string {

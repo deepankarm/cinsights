@@ -403,6 +403,7 @@
 					markers={ctxMarkers}
 					taskBands={ctxTaskBands}
 					height={chartHeight}
+					horizontal={true}
 					yFormat={fmtTokens}
 					tooltipFormat={(_, i, v) => `Turn ${ctxLabels[i]}: ${fmtTokens(v)}`}
 				/>
