@@ -32,7 +32,7 @@ class CodingSession(SQLModel, table=True):
 
     id: str = Field(primary_key=True)  # source-specific session key
     tenant_id: str = Field(default="default", index=True)  # multi-tenant boundary
-    source: str = Field(default="phoenix")  # observability backend
+    source: str = Field(default="local")  # observability backend
     agent_type: str = Field(default="claude-code")  # coding agent identity
     session_id: str | None = Field(default=None, index=True)  # source-native session grouping key
     user_id: str | None = Field(default=None, index=True)  # user.id from spans
