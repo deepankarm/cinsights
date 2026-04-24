@@ -6,6 +6,8 @@
 	import { fmtTokens, fmtDateRange, fmtNum, gradeColor, gradeBg } from '$lib/format';
 	import type { QualityMetric } from '$lib/format';
 	import type { SessionDetail } from '$lib/types';
+	import LineChart from '$lib/components/charts/LineChart.svelte';
+	import type { MarkerPoint, TaskBand, ReferenceLine } from '$lib/components/charts/LineChart.svelte';
 	import ActivityCharts, { type ErrorDetail } from '$lib/components/ActivityCharts.svelte';
 	import QualityBar from '$lib/components/QualityBar.svelte';
 	import InsightLabel from '$lib/components/BehavioralTag.svelte';
@@ -18,25 +20,9 @@
 	let analyzing = $state(false);
 	let toolsExpanded = $state(false);
 	let errorsExpanded = $state(false);
-	let hoverIdx: number | null = $state(null);
-	let durHoverIdx: number | null = $state(null);
 	let copied = $state(false);
 
 	const id = $derived(page.params.id ?? '');
-
-	const W = 720, H = 360;
-	const PAD = { l: 52, r: 16, t: 16, b: 28 };
-	const iW = W - PAD.l - PAD.r;
-	const iH = H - PAD.t - PAD.b;
-
-	function xOf(i: number, n: number): number { return PAD.l + (i / Math.max(n - 1, 1)) * iW; }
-
-	function chartMove(e: MouseEvent, n: number, setter: (v: number) => void) {
-		const rect = (e.currentTarget as SVGElement).getBoundingClientRect();
-		const relX = ((e.clientX - rect.left) / rect.width) * W;
-		const idx = Math.round(((relX - PAD.l) / iW) * (n - 1));
-		setter(Math.max(0, Math.min(n - 1, idx)));
-	}
 
 	onMount(async () => {
 		try { session = await getSession(id); }
@@ -224,6 +210,70 @@
 		return items;
 	});
 
+	// Chart data for context growth
+	const ctxLabels = $derived.by(() => {
+		if (!session?.context_growth) return [];
+		return session.context_growth.map(p => String(p.turn));
+	});
+	const ctxData = $derived.by(() => {
+		if (!session?.context_growth) return [];
+		return session.context_growth.map(p => p.prompt_tokens);
+	});
+	const ctxMarkers = $derived.by((): MarkerPoint[] => {
+		if (!session?.context_growth) return [];
+		const pts = session.context_growth;
+		const result: MarkerPoint[] = [];
+		for (let i = 1; i < pts.length; i++) {
+			if (pts[i].prompt_tokens < pts[i-1].prompt_tokens * 0.85) {
+				result.push({ index: i, color: '#f59e0b' });
+			}
+		}
+		for (let i = 0; i < pts.length; i++) {
+			if (pts[i].interrupted) {
+				result.push({ index: i, color: '#ef4444', verticalLine: true });
+			}
+		}
+		return result;
+	});
+	const ctxTaskBands = $derived.by((): TaskBand[] => {
+		if (!session?.context_growth || !session?.tasks) return [];
+		const pts = session.context_growth;
+		return session.tasks.map((task, ti) => {
+			const startIdx = pts.findIndex(p => p.turn >= task.start_turn);
+			const endIdx = pts.findIndex(p => p.turn > task.end_turn);
+			return {
+				startIndex: startIdx >= 0 ? startIdx : 0,
+				endIndex: endIdx >= 0 ? endIdx : pts.length - 1,
+				name: task.name,
+				colorIndex: ti,
+			};
+		});
+	});
+	const compactionCount = $derived.by(() => ctxMarkers.filter(m => m.color === '#f59e0b').length);
+	const interruptCount2 = $derived.by(() => ctxMarkers.filter(m => m.color === '#ef4444').length);
+
+	// Duration chart data
+	const durPts = $derived.by(() => {
+		if (!session?.context_growth) return [];
+		return session.context_growth.filter(p => p.duration_ms != null);
+	});
+	const durLabels = $derived.by(() => durPts.map(p => String(p.turn)));
+	const durData = $derived.by(() => durPts.map(p => p.duration_ms!));
+	const durMedian = $derived.by(() => {
+		if (durData.length === 0) return 0;
+		const sorted = [...durData].sort((a, b) => a - b);
+		return sorted[Math.floor(sorted.length / 2)];
+	});
+	const durMarkers = $derived.by((): MarkerPoint[] => {
+		return durPts
+			.map((p, i) => p.duration_ms! > durMedian * 2 ? { index: i, color: '#ef4444' } as MarkerPoint : null)
+			.filter((m): m is MarkerPoint => m !== null);
+	});
+	const durRefLines = $derived.by((): ReferenceLine[] => {
+		if (durMedian === 0) return [];
+		return [{ value: durMedian, color: '#94a3b8', label: `median ${fmtSecs(durMedian)}` }];
+	});
+
 	function categoryColor(cat: string): string {
 		const m: Record<string, string> = { friction: '#dc2626', win: '#16a34a', recommendation: '#2563eb', pattern: '#7c3aed', skill_proposal: '#0891b2', summary: '#0f172a' };
 		return m[cat] ?? '#64748b';
@@ -344,129 +394,50 @@
 
 		<!-- Context Growth chart (tall, full-width) -->
 		{#if session?.context_growth && session.context_growth.length > 1}
-			{@const pts = session.context_growth}
-			{@const n = pts.length}
-			{@const maxY = Math.max(...pts.map(p => p.prompt_tokens), 1)}
-			{@const yOf = (v: number) => PAD.t + iH - (v / maxY) * iH}
-			{@const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, n).toFixed(1)} ${yOf(p.prompt_tokens).toFixed(1)}`).join(' ')}
-			{@const areaPath = `${linePath} L ${xOf(n-1, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
-			{@const compactionIdxs = pts.map((p, i) => (i > 0 && p.prompt_tokens < pts[i-1].prompt_tokens * 0.85 ? i : -1)).filter(i => i >= 0)}
-			{@const interruptIdxs = pts.map((p, i) => (p.interrupted ? i : -1)).filter(i => i >= 0)}
-			{@const hover = hoverIdx !== null ? pts[hoverIdx] : null}
 			<div class="chart-card">
 				<div class="chart-header">
 					<h3>Context Growth</h3>
 					<div class="chart-header-right">
-						{#if hover && hoverIdx !== null}
-							<span class="chart-hover-val">Turn {hover.turn}: {fmtTokens(hover.prompt_tokens)}</span>
+						{#if compactionCount > 0}
+							<span class="trend-badge down">{compactionCount} compaction{compactionCount > 1 ? 's' : ''}</span>
 						{/if}
-						{#if compactionIdxs.length > 0}
-							<span class="trend-badge down">{compactionIdxs.length} compaction{compactionIdxs.length > 1 ? 's' : ''}</span>
-						{/if}
-						{#if interruptIdxs.length > 0}
-							<span class="trend-badge interrupt">{interruptIdxs.length} interrupt{interruptIdxs.length > 1 ? 's' : ''}</span>
+						{#if interruptCount2 > 0}
+							<span class="trend-badge interrupt">{interruptCount2} interrupt{interruptCount2 > 1 ? 's' : ''}</span>
 						{/if}
 					</div>
 				</div>
 				<div class="chart-desc">Prompt tokens per turn (context window size)</div>
-				<svg viewBox="0 0 {W} {H}" class="trend-svg"
-					onmousemove={(e) => chartMove(e, n, v => hoverIdx = v)}
-					onmouseleave={() => hoverIdx = null}>
-					<defs>
-						<linearGradient id="ctxG" x1="0" y1="0" x2="0" y2="1">
-							<stop offset="0%" stop-color="#6366f1" stop-opacity="0.25" />
-							<stop offset="100%" stop-color="#6366f1" stop-opacity="0" />
-						</linearGradient>
-					</defs>
-					{#each [0, 0.25, 0.5, 0.75, 1] as frac}
-						{@const gy = PAD.t + iH * (1 - frac)}
-						<line x1={PAD.l} x2={W - PAD.r} y1={gy} y2={gy} stroke="#f1f5f9" stroke-width="1" />
-						<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtTokens(Math.round(maxY * frac))}</text>
-					{/each}
-					<!-- Task bands -->
-					{#if session?.tasks && session.tasks.length > 0}
-						{@const taskColors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#3b82f6', '#84cc16']}
-						{#each session.tasks as task, ti}
-							{@const startIdx = pts.findIndex(p => p.turn >= task.start_turn)}
-							{@const endIdx = pts.findIndex(p => p.turn > task.end_turn)}
-							{@const si = startIdx >= 0 ? startIdx : 0}
-							{@const ei = endIdx >= 0 ? endIdx : n}
-							{@const x1 = xOf(si, n)}
-							{@const x2 = xOf(Math.min(ei, n - 1), n)}
-							<rect x={x1} y={PAD.t} width={Math.max(x2 - x1, 2)} height={iH} fill={taskColors[ti % taskColors.length]} opacity="0.08" />
-							<text x={x1 + 4} y={PAD.t + iH - 4} transform="rotate(-90, {x1 + 4}, {PAD.t + iH - 4})" class="ax" fill={taskColors[ti % taskColors.length]} font-size="9" opacity="0.6" dominant-baseline="hanging">{task.name.slice(0, 30)}</text>
-						{/each}
-					{/if}
-					<path d={areaPath} fill="url(#ctxG)" />
-					<path d={linePath} fill="none" stroke="#6366f1" stroke-width="1.5" stroke-linejoin="round" />
-					{#each compactionIdxs as i}
-						<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#f59e0b" stroke="white" stroke-width="1" />
-					{/each}
-					{#each interruptIdxs as i}
-						<line x1={xOf(i, n)} x2={xOf(i, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#ef4444" stroke-width="1" stroke-opacity="0.4" />
-						<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#ef4444" stroke="white" stroke-width="1" />
-					{/each}
-					{#if hoverIdx !== null}
-						<line x1={xOf(hoverIdx, n)} x2={xOf(hoverIdx, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
-						<circle cx={xOf(hoverIdx, n)} cy={yOf(pts[hoverIdx].prompt_tokens)} r="3.5" fill="#6366f1" stroke="white" stroke-width="1.5" />
-					{/if}
-					<rect x={PAD.l} y={PAD.t} width={iW} height={iH} fill="transparent" />
-				</svg>
+				<LineChart
+					labels={ctxLabels}
+					datasets={[{ label: 'Prompt Tokens', data: ctxData, color: '#6366f1', fill: true }]}
+					markers={ctxMarkers}
+					taskBands={ctxTaskBands}
+					height={360}
+					yFormat={fmtTokens}
+					tooltipFormat={(_, i, v) => `Turn ${ctxLabels[i]}: ${fmtTokens(v)}`}
+				/>
 			</div>
 
 			<!-- Turn Duration chart (tall, full-width) -->
-			{#if session?.context_growth?.some(p => p.duration_ms != null)}
-				{@const dPts = session!.context_growth!.filter(p => p.duration_ms != null)}
-				{@const dn = dPts.length}
-				{#if dn > 1}
-					{@const durations = dPts.map(p => p.duration_ms!)}
-					{@const maxD = Math.max(...durations, 1)}
-					{@const sortedD = [...durations].sort((a, b) => a - b)}
-					{@const median = sortedD[Math.floor(sortedD.length / 2)]}
-					{@const dyOf = (v: number) => PAD.t + iH - (v / maxD) * iH}
-					{@const dLine = dPts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, dn).toFixed(1)} ${dyOf(p.duration_ms!).toFixed(1)}`).join(' ')}
-					{@const dArea = `${dLine} L ${xOf(dn-1, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
-					{@const slowIdxs = dPts.map((p, i) => (p.duration_ms! > median * 2 ? i : -1)).filter(i => i >= 0)}
-					{@const dHover = durHoverIdx !== null ? dPts[durHoverIdx] : null}
-					<div class="chart-card" style="margin-top: 14px">
-						<div class="chart-header">
-							<h3>Turn Duration</h3>
-							<div class="chart-header-right">
-								{#if dHover && durHoverIdx !== null}
-									<span class="chart-hover-val">Turn {dHover.turn}: {fmtSecs(dHover.duration_ms!)}</span>
-								{/if}
-								<span class="chart-total">median {fmtSecs(median)}</span>
-							</div>
+			{#if durPts.length > 1}
+				<div class="chart-card" style="margin-top: 14px">
+					<div class="chart-header">
+						<h3>Turn Duration</h3>
+						<div class="chart-header-right">
+							<span class="chart-total">median {fmtSecs(durMedian)}</span>
 						</div>
-						<div class="chart-desc">Time per turn (slow turns highlighted)</div>
-						<svg viewBox="0 0 {W} {H}" class="trend-svg"
-							onmousemove={(e) => chartMove(e, dn, v => durHoverIdx = v)}
-							onmouseleave={() => durHoverIdx = null}>
-							<defs>
-								<linearGradient id="durG" x1="0" y1="0" x2="0" y2="1">
-									<stop offset="0%" stop-color="#10b981" stop-opacity="0.25" />
-									<stop offset="100%" stop-color="#10b981" stop-opacity="0" />
-								</linearGradient>
-							</defs>
-							{#each [0, 0.25, 0.5, 0.75, 1] as frac}
-								{@const gy = PAD.t + iH * (1 - frac)}
-								<line x1={PAD.l} x2={W - PAD.r} y1={gy} y2={gy} stroke="#f1f5f9" stroke-width="1" />
-								<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtSecs(maxD * frac)}</text>
-							{/each}
-							<path d={dArea} fill="url(#durG)" />
-							<path d={dLine} fill="none" stroke="#10b981" stroke-width="1.5" stroke-linejoin="round" />
-							<line x1={PAD.l} x2={W - PAD.r} y1={dyOf(median)} y2={dyOf(median)} stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3" />
-							{#each slowIdxs as i}
-								<circle cx={xOf(i, dn)} cy={dyOf(dPts[i].duration_ms!)} r="3" fill="#ef4444" stroke="white" stroke-width="1" />
-							{/each}
-							{#if durHoverIdx !== null}
-								<line x1={xOf(durHoverIdx, dn)} x2={xOf(durHoverIdx, dn)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
-								<circle cx={xOf(durHoverIdx, dn)} cy={dyOf(dPts[durHoverIdx].duration_ms!)} r="3.5" fill="#10b981" stroke="white" stroke-width="1.5" />
-							{/if}
-							<rect x={PAD.l} y={PAD.t} width={iW} height={iH} fill="transparent" />
-						</svg>
 					</div>
-				{/if}
+					<div class="chart-desc">Time per turn (slow turns highlighted)</div>
+					<LineChart
+						labels={durLabels}
+						datasets={[{ label: 'Duration', data: durData, color: '#10b981', fill: true }]}
+						markers={durMarkers}
+						referenceLines={durRefLines}
+						height={360}
+						yFormat={(v) => fmtSecs(v)}
+						tooltipFormat={(_, i, v) => `Turn ${durLabels[i]}: ${fmtSecs(v)}`}
+					/>
+				</div>
 			{/if}
 		{/if}
 
@@ -682,8 +653,6 @@
 	.effort-high, .effort-max { color: #16a34a; font-weight: 600; }
 	.effort-medium { color: #d97706; font-weight: 600; }
 	.effort-low { color: #94a3b8; }
-	.trend-svg { width: 100%; height: auto; cursor: crosshair; }
-	.ax { font-size: 10px; fill: #94a3b8; font-family: inherit; }
 
 	.reanalyze-btn {
 		background: #2563eb; color: white; border: none; border-radius: 8px;
