@@ -250,6 +250,7 @@
 			},
 			options: {
 				responsive: true, maintainAspectRatio: false,
+				layout: { padding: { bottom: 20 } },
 				indexAxis: 'y',
 				interaction: { mode: 'index', intersect: false, axis: 'y' },
 				scales: {
@@ -264,7 +265,7 @@
 						ticks: {
 							font: { size: 9 },
 							color: '#94a3b8',
-							autoSkip: true,
+							autoSkip: false,
 							autoSkipPadding: 2,
 						},
 					},
