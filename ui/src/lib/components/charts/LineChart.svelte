@@ -250,7 +250,7 @@
 			},
 			options: {
 				responsive: true, maintainAspectRatio: false,
-				layout: { padding: { bottom: 20 } },
+				layout: { padding: { bottom: 40 } },
 				indexAxis: 'y',
 				interaction: { mode: 'index', intersect: false, axis: 'y' },
 				scales: {
