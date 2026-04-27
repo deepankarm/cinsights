@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 
 from cinsights.sources.base import SpanData, TraceData
 from cinsights.sources.jsonl_utils import (
+    extract_session_signals,
     extract_user_content,
     group_into_turns,
     parse_dt,
@@ -211,6 +212,25 @@ def parse_claude_code(
         deduped_spans.append(span)
     all_spans = deduped_spans
 
+    # Renumber turns sequentially after dedup so there are no gaps
+    # (e.g., Turn 93 → Turn 133 becomes Turn 93 → Turn 94)
+    turn_num = 0
+    old_to_new_id: dict[str, str] = {}
+    for span in all_spans:
+        if span.name.startswith("Turn "):
+            turn_num += 1
+            old_id = span.span_id
+            new_id = f"{trace_id}:turn:{turn_num}"
+            span.name = f"Turn {turn_num}"
+            span.span_id = new_id
+            old_to_new_id[old_id] = new_id
+        elif span.parent_id in old_to_new_id:
+            span.parent_id = old_to_new_id[span.parent_id]
+
+    # Slash-command / skill / interrupt signals — extracted from raw lines
+    # BEFORE noise filtering so we don't lose them.
+    session_signals = extract_session_signals(lines)
+
     # Root span
     root_span = SpanData(
         span_id=root_id,
@@ -229,6 +249,7 @@ def parse_claude_code(
             "harness.agent_version": agent_version,
             "harness.effort_level": effort_level,
             "harness.adaptive_thinking_disabled": adaptive_thinking_disabled,
+            "harness.session_signals": json.dumps(session_signals),
         },
     )
     all_spans.insert(0, root_span)

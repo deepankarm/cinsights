@@ -483,11 +483,13 @@ async def update_session(
 
 @router.post("/{session_id}/analyze", response_model=SessionDetail)
 async def trigger_analysis(session_id: str, db: AsyncSession = Depends(get_db)) -> SessionDetail:
-    """Manually trigger LLM analysis for a session."""
+    """Manually trigger LLM analysis (insights + task segmentation) for a session."""
     import asyncio
 
     from cinsights.analysis.session import SessionAnalyzer
-    from cinsights.settings import get_settings
+    from cinsights.analysis.tasks import TaskAnalyzer
+    from cinsights.pipeline import _compute_user_compact_ratio, _store_insights, _store_tasks
+    from cinsights.settings import get_llm_config, get_settings
     from cinsights.sources.base import TraceData
     from cinsights.sources.factory import create_source
 
@@ -495,9 +497,7 @@ async def trigger_analysis(session_id: str, db: AsyncSession = Depends(get_db)) 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    settings = get_settings()
-
-    source = create_source(settings)
+    source = create_source(get_settings())
     spans = await asyncio.to_thread(source.get_spans_by_session, session_id)
     if not spans:
         raise HTTPException(status_code=404, detail="No spans found for session")
@@ -509,44 +509,21 @@ async def trigger_analysis(session_id: str, db: AsyncSession = Depends(get_db)) 
         spans=spans,
     )
 
-    # Clear existing insights
-    existing_result = await db.exec(select(Insight).where(Insight.session_id == session_id))
-    for ins in existing_result.all():
-        await db.delete(ins)
-    await db.flush()
-
-    extra_headers = None
-    if settings.anthropic_extra_headers:
-        extra_headers = json.loads(settings.anthropic_extra_headers)
-
-    analyzer = SessionAnalyzer(
-        api_key=settings.anthropic_api_key,
-        model=settings.anthropic_model,
-        base_url=settings.anthropic_base_url,
-        extra_headers=extra_headers,
+    llm = get_llm_config()
+    insights_result, task_result = await asyncio.gather(
+        SessionAnalyzer(llm_config=llm).analyze(trace, spans),
+        TaskAnalyzer(llm_config=llm).segment(trace, spans),
+        return_exceptions=True,
     )
-    result = await analyzer.analyze(trace, spans)
 
-    for item in result.insights:
-        try:
-            cat = InsightCategory(item.category)
-        except ValueError:
-            cat = InsightCategory.PATTERN
-        try:
-            sev = InsightSeverity(item.severity)
-        except ValueError:
-            sev = InsightSeverity.INFO
+    if isinstance(insights_result, BaseException):
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {insights_result}")
 
-        insight = Insight(
-            session_id=session_id,
-            category=cat,
-            title=item.title,
-            content=item.content,
-            severity=sev,
-        )
-        db.add(insight)
+    await _store_insights(db, session, insights_result)
 
-    session.status = SessionStatus.ANALYZED
+    ratio = await _compute_user_compact_ratio(db, session.user_id)
+    await _store_tasks(db, session, task_result, compact_ratio=ratio)
+
     await db.commit()
     await db.refresh(session)
 

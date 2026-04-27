@@ -106,6 +106,11 @@ def analyze(
         0.0, "--min-score", help="Only analyze sessions with score >= this."
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+    tasks_only: bool = typer.Option(
+        False,
+        "--tasks-only",
+        help="Re-run task segmentation only; skip insights + project detection LLM calls.",
+    ),
     trace_ids: list[str] | None = typer.Argument(
         None, help="Specific trace/session IDs to analyze."
     ),
@@ -118,6 +123,7 @@ def analyze(
             run.extra["source"] = source
             run.extra["min_score"] = min_score
             run.extra["limit"] = limit
+            run.extra["tasks_only"] = tasks_only
             await _analyze_async(
                 hours=4380,  # only used when trace_ids are passed
                 limit=limit,
@@ -128,6 +134,7 @@ def analyze(
                 run=run,
                 min_score=min_score,
                 yes=yes,
+                tasks_only=tasks_only,
             )
 
     asyncio.run(_entry())

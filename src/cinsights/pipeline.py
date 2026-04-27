@@ -237,11 +237,36 @@ async def _store_indexed(
         if atd is not None:
             coding_session.adaptive_thinking_disabled = bool(atd)
 
-    # User-interrupt count (structural, no LLM)
-    _INTERRUPT_MARKER = "[Request interrupted by user]"
-    coding_session.interrupt_count = sum(
-        1 for s in spans if _INTERRUPT_MARKER in (s.attributes.get("input.value") or "")
-    )
+        # Slash-command / skill / interrupt signals → metadata_json
+        signals_dict: dict = {}
+        signals_raw = root.attributes.get("harness.session_signals")
+        if signals_raw:
+            import contextlib
+
+            existing_meta: dict = {}
+            if coding_session.metadata_json:
+                with contextlib.suppress(Exception):
+                    existing_meta = json_mod.loads(coding_session.metadata_json)
+            with contextlib.suppress(Exception):
+                signals_dict = json_mod.loads(signals_raw)
+                existing_meta["slash_commands"] = signals_dict.get("slash_commands", [])
+                existing_meta["skills_used"] = signals_dict.get("skills_used", [])
+                existing_meta["interrupts"] = signals_dict.get("interrupts", {})
+            coding_session.metadata_json = json_mod.dumps(existing_meta)
+
+        # Interrupt count: prefer the signals extractor (counts raw interrupt
+        # lines BEFORE noise filtering). Fall back to span-based counting only
+        # if signals are unavailable (e.g., older sessions).
+        interrupt_count_from_signals = (
+            signals_dict.get("interrupts", {}).get("total") if signals_dict else None
+        )
+        if interrupt_count_from_signals is not None:
+            coding_session.interrupt_count = interrupt_count_from_signals
+        else:
+            _INTERRUPT_MARKER = "[Request interrupted by user]"
+            coding_session.interrupt_count = sum(
+                1 for s in spans if _INTERRUPT_MARKER in (s.attributes.get("input.value") or "")
+            )
 
     from cinsights.costs import estimate_session_analysis_tokens
 
@@ -314,10 +339,41 @@ async def _store_insights(
     return len(result.insights)
 
 
+async def _compute_user_compact_ratio(db: AsyncSession, user_id: str | None) -> float:
+    """Median post/pre compaction ratio across this user's historical sessions.
+
+    Falls back to 0.15 when the user has no detected compaction events. Used by
+    `_store_tasks` so per-task waste estimation reflects the user's own /compact
+    behavior instead of a global guess.
+    """
+    import contextlib
+    import json as json_mod
+
+    from cinsights.db.models import CodingSession as CodingSessionRT
+    from cinsights.metrics import compute_compact_ratio
+
+    if user_id is None:
+        return 0.15
+
+    rows = await db.exec(
+        select_fn(CodingSessionRT.context_growth_json)
+        .where(CodingSessionRT.user_id == user_id)
+        .where(CodingSessionRT.context_growth_json.is_not(None))
+    )
+    growths: list[list[dict]] = []
+    for cg_json in rows.all():
+        if not cg_json:
+            continue
+        with contextlib.suppress(Exception):
+            growths.append(json_mod.loads(cg_json))
+    return compute_compact_ratio(growths)
+
+
 async def _store_tasks(
     db: AsyncSession,
     coding_session: CodingSession,
     task_result: object,
+    compact_ratio: float = 0.15,
 ) -> int:
     """Store task segmentation results on an already-INDEXED session.
 
@@ -349,8 +405,6 @@ async def _store_tasks(
 
     waste_data = []
     if context_growth and task_result.tasks:
-        # Use a default compact ratio for now (per-user would require querying other sessions)
-        compact_ratio = 0.15
         waste_data = compute_task_waste(task_result.tasks, context_growth, compact_ratio)
 
     total_task_waste = 0
@@ -1454,6 +1508,7 @@ async def _analyze_async(
     run: _RunHandle | None = None,
     min_score: float = 0.0,
     yes: bool = False,
+    tasks_only: bool = False,
 ) -> None:
     """LLM-analyze INDEXED sessions that meet the score threshold.
 
@@ -1734,7 +1789,21 @@ async def _analyze_async(
     from cinsights.analysis.project_detection import ProjectGuess
 
     # Project detection for phoenix source (others already have project names)
-    if settings.source not in (SourceType.ENTIREIO, SourceType.LOCAL):
+    if tasks_only:
+        console.print("  [dim]--tasks-only: skipping insight + project-detection LLM calls[/dim]")
+        task_results = await task_analyzer.segment_batch(
+            analysis_input, max_concurrency=concurrency
+        )
+        analysis_results = [None] * len(work_items)
+        project_guesses = [
+            ProjectGuess(
+                project_name=previous_tags.get(tid),
+                confidence="high",
+                reasoning="--tasks-only (kept existing project tag)",
+            )
+            for tid, _, _, _ in work_items
+        ]
+    elif settings.source not in (SourceType.ENTIREIO, SourceType.LOCAL):
         detect_items_list: list[tuple[str, str | None, list[SpanData]]] = [
             (trace_id, previous_tags[trace_id], _filter_tool_spans(spans))
             for trace_id, _, _, spans in work_items
@@ -1766,6 +1835,9 @@ async def _analyze_async(
     analyzed = 0
     failed = 0
     async with sessionmaker() as db:
+        # Per-user compact ratios are derived from the user's full session
+        # history, so cache them across the loop instead of re-querying per session.
+        user_ratio_cache: dict[str | None, float] = {}
         for (trace_id, _session_id, _trace, _spans), result, task_result, project_guess in zip(
             work_items, analysis_results, task_results, project_guesses, strict=True
         ):
@@ -1788,18 +1860,27 @@ async def _analyze_async(
                     continue
                 if project_guess.project_name and not coding_session.project_name:
                     coding_session.project_name = project_guess.project_name
-                n_insights = await _store_insights(db, coding_session, result)
-                await _store_tasks(db, coding_session, task_result)
+                n_insights = 0 if tasks_only else await _store_insights(db, coding_session, result)
+                if coding_session.user_id not in user_ratio_cache:
+                    user_ratio_cache[coding_session.user_id] = await _compute_user_compact_ratio(
+                        db, coding_session.user_id
+                    )
+                await _store_tasks(
+                    db,
+                    coding_session,
+                    task_result,
+                    compact_ratio=user_ratio_cache[coding_session.user_id],
+                )
                 await update_daily_trend(db, coding_session)
                 await db.commit()
                 analyzed += 1
                 if run is not None:
                     run.sessions_analyzed += 1
-                    run.total_prompt_tokens += (
-                        result.usage_prompt_tokens + project_guess.usage_prompt_tokens
-                    )
+                    insight_in = 0 if result is None else result.usage_prompt_tokens
+                    insight_out = 0 if result is None else result.usage_completion_tokens
+                    run.total_prompt_tokens += insight_in + project_guess.usage_prompt_tokens
                     run.total_completion_tokens += (
-                        result.usage_completion_tokens + project_guess.usage_completion_tokens
+                        insight_out + project_guess.usage_completion_tokens
                     )
                     # Track scope for doctor page
                     scope_ids = run.extra.get("session_ids", [])
