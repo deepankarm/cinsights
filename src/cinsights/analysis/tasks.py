@@ -37,6 +37,8 @@ class TaskSegmentationResult(BaseModel):
     """LLM output: list of tasks covering the full session."""
 
     tasks: list[TaskItem]
+    usage_prompt_tokens: int = 0
+    usage_completion_tokens: int = 0
 
 
 # --- Prompts (proven in experiments) ---
@@ -264,7 +266,7 @@ class TaskAnalyzer(LLMAnalyzer):
 
         from cinsights.db.models import LLMCallKind, LLMCallScopeType
 
-        result, _, _ = await self._run_llm(
+        result, prompt_tokens, completion_tokens = await self._run_llm(
             TaskSegmentationResult,
             SYSTEM_PROMPT,
             user_prompt,
@@ -273,7 +275,9 @@ class TaskAnalyzer(LLMAnalyzer):
             scope_id=trace.trace_id,
             max_tokens=4096,
         )
-
+        if result is not None:
+            result.usage_prompt_tokens = prompt_tokens
+            result.usage_completion_tokens = completion_tokens
         return result
 
     async def segment_batch(

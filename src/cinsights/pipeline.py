@@ -1878,9 +1878,21 @@ async def _analyze_async(
                     run.sessions_analyzed += 1
                     insight_in = 0 if result is None else result.usage_prompt_tokens
                     insight_out = 0 if result is None else result.usage_completion_tokens
-                    run.total_prompt_tokens += insight_in + project_guess.usage_prompt_tokens
+                    task_in = (
+                        getattr(task_result, "usage_prompt_tokens", 0)
+                        if not isinstance(task_result, BaseException)
+                        else 0
+                    )
+                    task_out = (
+                        getattr(task_result, "usage_completion_tokens", 0)
+                        if not isinstance(task_result, BaseException)
+                        else 0
+                    )
+                    run.total_prompt_tokens += (
+                        insight_in + task_in + project_guess.usage_prompt_tokens
+                    )
                     run.total_completion_tokens += (
-                        insight_out + project_guess.usage_completion_tokens
+                        insight_out + task_out + project_guess.usage_completion_tokens
                     )
                     # Track scope for doctor page
                     scope_ids = run.extra.get("session_ids", [])

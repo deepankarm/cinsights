@@ -138,24 +138,40 @@ async def _track_run(command: str) -> AsyncIterator[_RunHandle]:
             except OSError:
                 db_size = None
 
+        # Drop no-op runs entirely — successful invocations that did no
+        # measurable work (no sessions analyzed, no digests, no LLM tokens)
+        # add noise to the operations log without telling us anything useful.
+        # Failed runs are always kept so error history stays intact.
+        is_noop = (
+            error is None
+            and handle.sessions_analyzed == 0
+            and handle.digests_generated == 0
+            and handle.total_prompt_tokens == 0
+            and handle.total_completion_tokens == 0
+        )
+
         async with sessionmaker() as db:
             run = await db.get(RefreshRun, run_id)
             if run is not None:
-                run.completed_at = datetime.now(UTC)
-                run.wall_seconds = wall
-                run.status = RefreshRunStatus.FAILED if error else RefreshRunStatus.SUCCESS
-                run.db_size_bytes = db_size
-                run.sessions_analyzed = handle.sessions_analyzed
-                run.digests_generated = handle.digests_generated
-                run.total_prompt_tokens = handle.total_prompt_tokens
-                run.total_completion_tokens = handle.total_completion_tokens
-                if error:
-                    run.error_message = error[:2000]
-                if handle.extra and run.metadata_json:
-                    merged = _json.loads(run.metadata_json)
-                    merged.update(handle.extra)
-                    run.metadata_json = _json.dumps(merged)
-                elif handle.extra:
-                    run.metadata_json = _json.dumps(handle.extra)
-                db.add(run)
-                await db.commit()
+                if is_noop:
+                    await db.delete(run)
+                    await db.commit()
+                else:
+                    run.completed_at = datetime.now(UTC)
+                    run.wall_seconds = wall
+                    run.status = RefreshRunStatus.FAILED if error else RefreshRunStatus.SUCCESS
+                    run.db_size_bytes = db_size
+                    run.sessions_analyzed = handle.sessions_analyzed
+                    run.digests_generated = handle.digests_generated
+                    run.total_prompt_tokens = handle.total_prompt_tokens
+                    run.total_completion_tokens = handle.total_completion_tokens
+                    if error:
+                        run.error_message = error[:2000]
+                    if handle.extra and run.metadata_json:
+                        merged = _json.loads(run.metadata_json)
+                        merged.update(handle.extra)
+                        run.metadata_json = _json.dumps(merged)
+                    elif handle.extra:
+                        run.metadata_json = _json.dumps(handle.extra)
+                    db.add(run)
+                    await db.commit()
