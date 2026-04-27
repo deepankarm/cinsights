@@ -323,8 +323,8 @@
 						ticks: {
 							font: { size: 9 },
 							color: '#94a3b8',
-							autoSkip: false,
-							autoSkipPadding: 2,
+							autoSkip: true,
+							maxTicksLimit: 25,
 						},
 					},
 				},
