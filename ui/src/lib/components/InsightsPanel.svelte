@@ -7,7 +7,7 @@
 	import ActivityCharts from './ActivityCharts.svelte';
 	import MoodQuotes from './MoodQuotes.svelte';
 
-	let { digest, moodGroups = [], scopeStats = undefined }: { digest: DigestDetail; moodGroups?: MoodGroup[]; scopeStats?: DigestStatsData } = $props();
+	let { digest, moodGroups = [], scopeStats = undefined, showActivity = true }: { digest: DigestDetail; moodGroups?: MoodGroup[]; scopeStats?: DigestStatsData; showActivity?: boolean } = $props();
 
 	let expandedCards: Record<string, boolean> = $state({});
 	let savedExpandState: Record<string, boolean> = {};
@@ -115,7 +115,7 @@
 {/if}
 
 <!-- Charts — bento style -->
-{#if activityStats}
+{#if activityStats && showActivity}
 	<section class="sect">
 		<h2 class="sect-title">Activity</h2>
 		<ActivityCharts

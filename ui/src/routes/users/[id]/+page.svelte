@@ -119,33 +119,54 @@
 				</div>
 			{/if}
 
-			<!-- Task Activity -->
-			{#if userTasks.length > 0 || (user && user.total_tasks > 0)}
+			{#if scopeStats}
+				{@const stats = scopeStats}
 				<div class="section">
-					<h2>Task Activity
-						{#if user?.avg_efficiency_score != null}
-							{@const eff = user.avg_efficiency_score}
-							<span class="eff-badge" style="background: {eff > 80 ? '#f0fdf4' : eff > 50 ? '#fffbeb' : '#fef2f2'}; color: {eff > 80 ? '#16a34a' : eff > 50 ? '#d97706' : '#dc2626'}">{Math.round(eff)} efficiency</span>
-						{/if}
-					</h2>
-					<div class="task-stats-row">
-						{#if user?.total_tasks}<span class="task-stat">{user.total_tasks} tasks</span>{/if}
-						{#if user?.avg_tasks_per_session}<span class="task-stat">{user.avg_tasks_per_session} avg/session</span>{/if}
-					</div>
-					{#if userTasks.length > 0}
-						<div class="user-task-list">
-							{#each userTasks.slice(0, 10) as task}
-								<a href="/sessions/{encodeURIComponent(task.session_id)}" class="user-task-row">
-									<span class="ut-name">{task.name}</span>
-									<span class="ut-project">{task.project_name ?? ''}</span>
-									<span class="ut-turns">{task.turn_count} turns</span>
-									<span class="ut-tokens">{fmtTokens(task.prompt_tokens_total)}</span>
-								</a>
-							{/each}
+					<h2>Activity</h2>
+					<ActivityCharts
+						toolDistribution={stats.tool_distribution ?? {}}
+						languageDistribution={stats.language_distribution ?? {}}
+						timeOfDay={stats.time_of_day ?? {}}
+						errorTypes={stats.error_types ?? {}}
+						insightLabels={stats.insight_labels ?? {}}
+						labelCategories={stats.label_categories ?? {}}
+						labelTrends={stats.label_trends ?? []}
+						analyzedCount={stats.analyzed_count ?? 0}
+						sessionCount={stats.session_count ?? 0}
+						scopeUser={userId}
+					/>
+					<MoodQuotes moodGroups={moodData?.mood_groups ?? []} />
+
+					{#if userTasks.length > 0 || (user && user.total_tasks > 0)}
+						<div class="subsection">
+							<h3>Tasks
+								{#if user?.avg_efficiency_score != null}
+									{@const eff = user.avg_efficiency_score}
+									<span class="eff-badge" style="background: {eff > 80 ? '#f0fdf4' : eff > 50 ? '#fffbeb' : '#fef2f2'}; color: {eff > 80 ? '#16a34a' : eff > 50 ? '#d97706' : '#dc2626'}">{Math.round(eff)} efficiency</span>
+								{/if}
+							</h3>
+							<div class="task-stats-row">
+								{#if user?.total_tasks}<span class="task-stat">{user.total_tasks} tasks</span>{/if}
+								{#if user?.avg_tasks_per_session}<span class="task-stat">{user.avg_tasks_per_session} avg/session</span>{/if}
+							</div>
+							{#if userTasks.length > 0}
+								<div class="user-task-list">
+									{#each userTasks.slice(0, 10) as task}
+										<a href="/sessions/{encodeURIComponent(task.session_id)}" class="user-task-row" title="Open session">
+											<span class="ut-name">{task.name}</span>
+											<span class="ut-project">{task.project_name ?? ''}</span>
+											<span class="ut-date">{task.session_start_time ? new Date(task.session_start_time).toLocaleDateString() : ''}</span>
+											<span class="ut-turns">{task.turn_count} turns</span>
+											<span class="ut-tokens">{fmtTokens(task.prompt_tokens_total)}</span>
+											<span class="ut-go" aria-hidden="true">→</span>
+										</a>
+									{/each}
+								</div>
+								{#if userTasks.length > 10}
+									<a href="/tasks?user={encodeURIComponent(userId)}" class="see-all">See all tasks</a>
+								{/if}
+							{/if}
 						</div>
-						{#if userTasks.length > 10}
-							<a href="/tasks?user={encodeURIComponent(userId)}" class="see-all">See all tasks</a>
-						{/if}
 					{/if}
 				</div>
 			{/if}
@@ -159,28 +180,9 @@
 							<span class="generated-at">{new Date(digest.created_at).toLocaleDateString()}</span>
 						</span>
 					</div>
-					<InsightsPanel {digest} moodGroups={moodData?.mood_groups ?? []} scopeStats={scopeStats ?? undefined} />
+					<InsightsPanel {digest} moodGroups={moodData?.mood_groups ?? []} scopeStats={scopeStats ?? undefined} showActivity={false} />
 				</div>
 			{:else}
-				{@const stats = scopeStats}
-				{#if stats}
-					<div class="section">
-						<h2>Activity</h2>
-						<ActivityCharts
-							toolDistribution={stats.tool_distribution ?? {}}
-							languageDistribution={stats.language_distribution ?? {}}
-							timeOfDay={stats.time_of_day ?? {}}
-							errorTypes={stats.error_types ?? {}}
-							insightLabels={stats.insight_labels ?? {}}
-							labelCategories={stats.label_categories ?? {}}
-							labelTrends={stats.label_trends ?? []}
-							analyzedCount={stats.analyzed_count ?? 0}
-							sessionCount={stats.session_count ?? 0}
-							scopeUser={userId}
-						/>
-						<MoodQuotes moodGroups={moodData?.mood_groups ?? []} />
-					</div>
-				{/if}
 				<div class="section">
 					<div class="empty-insights">
 						No report yet. Run <code>cinsights digest user {userId} --days 30</code> to generate.
@@ -234,16 +236,30 @@
 	.empty-insights { text-align: center; padding: 40px; color: #94a3b8; font-size: 14px; background: white; border-radius: 12px; }
 	.empty-insights code { background: #f4f4f5; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
 
+	.subsection { margin-top: 24px; }
+	h3 { font-size: 14px; font-weight: 700; color: #232326; margin-bottom: 10px; display: flex; align-items: center; }
+
 	.eff-badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 5px; margin-left: 8px; }
 	.task-stats-row { display: flex; gap: 12px; margin-bottom: 10px; }
 	.task-stat { font-size: 13px; color: #64748b; background: #f1f5f9; padding: 4px 10px; border-radius: 6px; }
 	.user-task-list { background: white; border: 1px solid #e8e5e0; border-radius: 10px; overflow: hidden; }
-	.user-task-row { display: grid; grid-template-columns: 2fr 1fr 80px 80px; padding: 10px 14px; border-bottom: 1px solid #f1f5f9; text-decoration: none; color: inherit; font-size: 13px; transition: background 0.1s; }
+	.user-task-row {
+		display: grid;
+		grid-template-columns: 2fr 1fr 90px 80px 80px 18px;
+		gap: 12px; align-items: center;
+		padding: 10px 14px; border-bottom: 1px solid #f1f5f9;
+		text-decoration: none; color: inherit; font-size: 13px;
+		transition: background 0.1s;
+	}
 	.user-task-row:hover { background: #fafafa; }
+	.user-task-row:hover .ut-name { color: #3b82f6; }
+	.user-task-row:hover .ut-go { color: #3b82f6; transform: translateX(2px); }
 	.user-task-row:last-child { border-bottom: none; }
-	.ut-name { font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.ut-name { font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.1s; }
 	.ut-project { color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.ut-date { color: #94a3b8; font-size: 12px; font-variant-numeric: tabular-nums; }
 	.ut-turns, .ut-tokens { color: #94a3b8; font-variant-numeric: tabular-nums; text-align: right; }
+	.ut-go { color: #cbd5e1; text-align: center; transition: color 0.1s, transform 0.1s; }
 	.see-all { display: block; text-align: center; padding: 8px; font-size: 12px; color: #3b82f6; text-decoration: none; margin-top: 6px; }
 	.see-all:hover { text-decoration: underline; }
 
