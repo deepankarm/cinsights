@@ -50,13 +50,63 @@ Task boundaries occur when the developer:
 - Starts working on unrelated files/features after completing something
 - Resumes after a context continuation message
 - Shifts from one area (e.g. backend) to a completely different one (e.g. UI)
+- Shifts between sub-features even within a larger feature (e.g. "build the API" → "build the UI for it")
 
-Rules:
+Segmentation rules:
 - Every turn must belong to exactly one task (no gaps, no overlaps)
-- Tasks should be 2-30 turns typically (not 1 turn unless truly isolated)
-- Iterative refinement on the same feature is ONE task, not many
-- Name tasks concisely: "Add token tracking UI", "Refactor scenario API", etc.
-- If a turn is just a quick follow-up to the previous topic, it's part of the same task
+- Tasks should be 3-25 turns typically. Avoid 1-2 turn tasks: a trailing
+  "commit and push" or "run tests" turn belongs to the task it concludes,
+  not its own task.
+- Break large features into sub-tasks: "Add auth API endpoint", "Build auth UI form",
+  "Write auth tests" — not just "Add auth"
+- For long sessions (50+ turns), expect 5-15+ tasks — a single 50-turn task is too coarse
+
+NAMING — this is the most important rule. Generic activity labels are useless.
+
+Two requirements for every name:
+
+1. The name must answer "what feature/file/bug is this about?", not "what
+   activity is this?". Look across ALL turns in the task (not just the first
+   user prompt) for the specific subject: file names, function names, test
+   names, error names, features being built. Slash-command templates the user
+   invoked (e.g. "Simplify: Code Review and Cleanup", "Implement plan") are
+   NOT the subject — they tell you the activity, not the work product.
+
+2. The most DISTINCTIVE word must come early in the name. Lead with the
+   specific noun (feature, component, file, test). Burying it after generic
+   verbs ("Code review and cleanup of search-related files") makes the name
+   indistinguishable from other code-cleanup tasks. Rewrite to put the
+   distinctive subject up front: "Search TUI cleanup and review".
+
+Good names (illustrative — these are HYPOTHETICAL examples from unrelated
+projects, NOT hints about the current session's content):
+  - "User session timeout — fix race in renewal"
+  - "Stripe webhook retry — add exponential backoff"
+  - "Email queue worker — switch from sync to background"
+  - "TestUserAuth_RefreshTokenExpiry — debug intermittent failure"
+  - "OAuth callback URL parsing — fix encoding bug"
+  - "Mobile push registration — add iOS support"
+  - "Admin CSV export — add date filtering"
+  - "Image upload pipeline — switch to presigned URLs"
+
+Bad names (REJECT and rewrite — these patterns generalize):
+  - "Code review and cleanup of changes" → name the subject area being reviewed
+  - "Commit and push changes" → fold into prior task, or name what was committed
+  - "Debug failing test" → "<test name> — debug"
+  - "Create pull request" → "<feature name> — open PR"
+  - "Implement plan" → "<plan subject> — implement"
+  - "Address bug, env detection, and refactor file ops"
+      → "File operations refactor + env-detection bug"
+  - "Address rate limit bypass and notification changes"
+      → "Rate-limit bypass fix + notification changes"
+
+Pull the actual subject from THIS session's transcript — the file names,
+test names, errors, features mentioned in the turns. The examples above
+show the SHAPE only; do not copy their domain content.
+
+If the only signal you have for a turn-range is a slash-command template and
+no specific files/tests/topics, prefer folding it into the adjacent task rather
+than emitting a generic-named standalone task.
 """
 
 USER_PROMPT_TEMPLATE = """\
@@ -127,7 +177,15 @@ def compute_task_waste(
     context_growth: list[dict],
     compact_ratio: float,
 ) -> list[dict]:
-    """Compute per-task waste using the 'compact at task boundary' model.
+    """Compute per-task token usage and total savings from hypothetical compactions.
+
+    Simulates a counterfactual where /compact runs at every task boundary.
+    The hypothetical context at each turn is tracked forward so that
+    compaction at boundary N correctly reduces the starting point for
+    boundary N+1.
+
+    Total savings = sum(actual_prompt) - sum(hypothetical_prompt) across
+    all turns in tasks 2+.
 
     Returns a list of dicts with per-task metrics:
     - prompt_tokens_total, completion_tokens_total
@@ -136,9 +194,20 @@ def compute_task_waste(
     # Build turn → context_growth lookup
     growth_by_turn = {entry["turn"]: entry for entry in context_growth}
 
+    # First pass: collect actual context at start/end of each task
+    task_actual = []
+    for task in tasks:
+        first_entry = growth_by_turn.get(task.start_turn, {})
+        last_entry = growth_by_turn.get(task.end_turn, {})
+        context_at_start = first_entry.get("prompt_tokens", 0)
+        context_at_end = last_entry.get("prompt_tokens", 0)
+        task_actual.append((context_at_start, context_at_end))
+
+    # Second pass: simulate hypothetical context and compute waste
+    hypothetical_context = task_actual[0][0] if task_actual else 0
     results = []
     for i, task in enumerate(tasks):
-        # Sum tokens across turns in this task
+        # Sum billed tokens across turns in this task
         prompt_total = 0
         completion_total = 0
         for turn_num in range(task.start_turn, task.end_turn + 1):
@@ -146,26 +215,28 @@ def compute_task_waste(
             prompt_total += entry.get("total_billed_prompt", 0) or entry.get("prompt_tokens", 0)
             completion_total += entry.get("completion_tokens", 0)
 
-        # Context at task start = prompt_tokens at first turn
-        first_entry = growth_by_turn.get(task.start_turn, {})
-        context_at_start = first_entry.get("prompt_tokens", 0)
+        actual_start, actual_end = task_actual[i]
+        growth = actual_end - actual_start
 
-        # Waste: for first task, 0 (fresh session). For subsequent tasks,
-        # estimate how much a /compact would save at this boundary.
-        if i == 0:
-            waste = 0
-        else:
-            saveable_per_turn = int(context_at_start * (1 - compact_ratio))
-            waste = saveable_per_turn * task.turn_count
+        if i > 0:
+            # Compact at this boundary
+            hypothetical_context *= compact_ratio
+
+        # Per-turn saving is constant within a task (same growth rate)
+        saving_per_turn = actual_start - hypothetical_context
+        waste = max(0, int(saving_per_turn * task.turn_count))
 
         results.append(
             {
                 "prompt_tokens_total": prompt_total,
                 "completion_tokens_total": completion_total,
-                "context_at_start": context_at_start,
+                "context_at_start": actual_start,
                 "estimated_waste_tokens": waste,
             }
         )
+
+        # Grow hypothetical by the same amount as actual during this task
+        hypothetical_context += growth
 
     return results
 
@@ -179,14 +250,8 @@ class TaskAnalyzer(LLMAnalyzer):
     async def segment(
         self, trace: TraceData, spans: list[SpanData]
     ) -> TaskSegmentationResult | None:
-        """Segment a session into tasks. Returns None for small sessions."""
+        """Segment a session into tasks."""
         turn_summary, turn_count = build_turn_summary(spans)
-
-        if turn_count < 3:
-            logger.debug(
-                "Skipping task segmentation for %s (only %d turns)", trace.trace_id, turn_count
-            )
-            return None
 
         user_prompt = USER_PROMPT_TEMPLATE.format(turn_count=turn_count, turns=turn_summary)
 
