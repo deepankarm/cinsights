@@ -516,6 +516,44 @@ async def _store_digest_sections(
     await db.commit()
 
 
+async def _extract_project_themes(
+    db: AsyncSession,
+    project_name: str,
+    tenant_id: str,
+    digest_id: str,
+) -> tuple[int, int]:
+    """Run ThemeAnalyzer for a project and store results idempotently.
+
+    Returns ``(prompt_tokens, completion_tokens)`` so the caller can roll the
+    cost into the run-level totals. Returns ``(0, 0)`` when there are too few
+    tasks to bother with extraction.
+    """
+    from cinsights.analysis.themes import ThemeAnalyzer, replace_project_themes
+    from cinsights.settings import get_llm_config
+
+    analyzer = ThemeAnalyzer(llm_config=get_llm_config(digest=True))
+    tasks = await analyzer.load_tasks(db, project_name, tenant_id)
+    if len(tasks) < ThemeAnalyzer.MIN_TASKS:
+        logger.info(
+            "Skipping theme extraction for %s — only %d tasks (<%d)",
+            project_name,
+            len(tasks),
+            ThemeAnalyzer.MIN_TASKS,
+        )
+        return (0, 0)
+
+    extracted, p_tok, c_tok = await analyzer.extract(project_name, tasks, digest_id=digest_id)
+    n_themes = await replace_project_themes(db, project_name, tenant_id, tasks, extracted)
+    logger.info(
+        "Stored %d themes for project=%s (%d→%d tokens)",
+        n_themes,
+        project_name,
+        p_tok,
+        c_tok,
+    )
+    return (p_tok, c_tok)
+
+
 async def _run_one_digest(
     *,
     sessionmaker: async_sessionmaker[AsyncSession],
@@ -739,11 +777,29 @@ async def _run_one_digest(
             assert analyzer is not None  # not stats_only path
             result = await analyzer.analyze(stats, digest_id=digest_record.id)
             await _store_digest_sections(db, digest_record, result, json_mod)
+
+            # Theme extraction is project-scoped and best-effort. Failure here
+            # must not surface as a digest failure — themes are an enhancement.
+            theme_pt = theme_ct = 0
+            if scope_project:
+                try:
+                    theme_pt, theme_ct = await _extract_project_themes(
+                        db, scope_project, settings.tenant_id, digest_record.id
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Theme extraction failed for %s: %s — digest unaffected",
+                        scope_project,
+                        exc,
+                    )
+
+            total_pt = result.total_prompt_tokens + theme_pt
+            total_ct = result.total_completion_tokens + theme_ct
             console.print(
                 f"  [green]✓[/green] {label} — {stats.session_count} sessions, "
-                f"{result.total_prompt_tokens + result.total_completion_tokens:,} LLM tokens"
+                f"{total_pt + total_ct:,} LLM tokens"
             )
-            return (True, result.total_prompt_tokens, result.total_completion_tokens)
+            return (True, total_pt, total_ct)
         except Exception as e:
             digest_record.status = DigestStatus.FAILED
             digest_record.error_message = str(e)[:500]

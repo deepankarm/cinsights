@@ -121,6 +121,35 @@ class Task(SQLModel, table=True):
     session: CodingSession = Relationship(back_populates="tasks")
 
 
+class Theme(SQLModel, table=True):
+    """A coherent work area within a project, extracted from grouped tasks via LLM."""
+
+    __tablename__ = "theme"
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    tenant_id: str = Field(default="default", index=True)
+    project_name: str = Field(index=True)
+    name: str  # e.g. "Checkpoints V2 — Data model, storage, and migration"
+    summary: str  # 1-2 sentences explaining the work area
+    total_tokens: int = 0
+    task_count: int = 0
+    first_date: datetime | None = None  # earliest member-task start_time
+    last_date: datetime | None = None  # latest member-task start_time
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ThemeTask(SQLModel, table=True):
+    """Junction: one task belongs to exactly one theme by extraction rules,
+    but the relation stays many-to-many for forward flexibility (re-extraction,
+    splits, manual reassignment)."""
+
+    __tablename__ = "theme_task"
+
+    theme_id: str = Field(foreign_key="theme.id", primary_key=True)
+    task_id: str = Field(foreign_key="task.id", primary_key=True)
+    tenant_id: str = Field(default="default", index=True)
+
+
 class ToolCall(SQLModel, table=True):
     __tablename__ = "tool_call"
 
@@ -307,6 +336,7 @@ class LLMCallKind(StrEnum):
     DIGEST_ACTIONS = "digest_actions"
     DIGEST_FORWARD = "digest_forward"
     TASK_SEGMENTATION = "task_segmentation"
+    THEME_EXTRACTION = "theme_extraction"
 
 
 class LLMCallScopeType(StrEnum):
