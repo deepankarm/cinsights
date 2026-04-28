@@ -14,7 +14,6 @@
 				<a href="/projects" class="nav-link">Projects</a>
 				<a href="/developers" class="nav-link">Developers</a>
 				<a href="/sessions" class="nav-link">Sessions</a>
-				<a href="/tasks" class="nav-link">Tasks</a>
 				<a href="/doctor" class="nav-link">Doctor</a>
 			</div>
 		</nav>
