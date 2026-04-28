@@ -320,6 +320,10 @@ export async function getProjectStats(projectName: string): Promise<Record<strin
 	return fetchJSON(`/api/projects/${encodeURIComponent(projectName)}/stats`);
 }
 
+export async function getProjectThemes(projectName: string): Promise<import('./types').ThemeRead[]> {
+	return fetchJSON(`/api/projects/${encodeURIComponent(projectName)}/themes`);
+}
+
 export interface MoodQuote { quote: string; mood: string; project: string | null; session_id: string | null; }
 export interface MoodGroup { mood: string; quotes: MoodQuote[]; }
 export interface UserMoodResponse { user_id: string; total_sessions: number; sessions_with_quotes: number; mood_groups: MoodGroup[]; }

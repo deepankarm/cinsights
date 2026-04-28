@@ -707,11 +707,38 @@ async def _run_one_digest(
         if latest_complete and latest_complete.stats_json:
             old_hash = _content_hash(latest_complete.stats_json)
             if old_hash == new_hash:
+                # Skip the digest LLM calls, but still extract themes if the
+                # project has none — otherwise projects digested before theme
+                # support was added would silently never get themes.
+                theme_pt = theme_ct = 0
+                if scope_project:
+                    from cinsights.db.models import Theme as _Theme
+
+                    existing_theme = (
+                        await db.exec(
+                            select_fn(_Theme.id)
+                            .where(_Theme.project_name == scope_project)
+                            .limit(1)
+                        )
+                    ).first()
+                    if not existing_theme:
+                        try:
+                            tenant_id = get_settings().tenant_id
+                            theme_pt, theme_ct = await _extract_project_themes(
+                                db, scope_project, tenant_id, latest_complete.id
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "Theme extraction failed for %s: %s",
+                                scope_project,
+                                exc,
+                            )
                 console.print(
                     f"  [dim]·[/dim] {label} — stats unchanged since "
                     f"{latest_complete.completed_at:%Y-%m-%d %H:%M}, reused"
+                    + (f" (+ {theme_pt + theme_ct:,} theme tokens)" if theme_pt + theme_ct else "")
                 )
-                return ("unchanged", 0, 0)
+                return ("unchanged", theme_pt, theme_ct)
 
         # Extract previous digest summary before deleting for delta narratives.
         previous_summary = None

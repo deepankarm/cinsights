@@ -1,19 +1,21 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
-	import { getProjects, getDigests, getDigest, getProjectStats, type ProjectRead } from '$lib/api';
-	import type { SessionRead, DigestDetail, DigestStatsData } from '$lib/types';
+	import { getProjects, getDigests, getDigest, getProjectStats, getProjectThemes, type ProjectRead } from '$lib/api';
+	import type { SessionRead, DigestDetail, DigestStatsData, ThemeRead } from '$lib/types';
 	import { fmtTokens, fmtDate, fmtDateRange, fmtDuration } from '$lib/format';
 	import DashboardView from '$lib/components/DashboardView.svelte';
 	import InsightsPanel from '$lib/components/InsightsPanel.svelte';
 	import ActivityCharts from '$lib/components/ActivityCharts.svelte';
 	import ExportHTML from '$lib/components/ExportHTML.svelte';
+	import ThemeSwimlane from '$lib/components/ThemeSwimlane.svelte';
 
 	const projectName = $derived(decodeURIComponent(page.params.name ?? ''));
 
 	let project: ProjectRead | null = $state(null);
 	let digest: DigestDetail | null = $state(null);
 	let scopeStats: DigestStatsData | null = $state(null);
+	let themes: ThemeRead[] = $state([]);
 	let loading = $state(true);
 	let error: string | null = $state(null);
 	let expandedUsers: Set<string> = $state(new Set());
@@ -22,14 +24,16 @@
 
 	onMount(async () => {
 		try {
-			const [projects, digests, stats] = await Promise.all([
+			const [projects, digests, stats, projectThemes] = await Promise.all([
 				getProjects(),
 				getDigests(projectName).catch(() => []),
 				getProjectStats(projectName).catch(() => null),
+				getProjectThemes(projectName).catch(() => []),
 			]);
 			project = projects.find(p => p.name === projectName) ?? null;
 			if (!project) error = `Project not found: ${projectName}`;
 			if (stats) scopeStats = stats as unknown as DigestStatsData;
+			themes = projectThemes;
 
 			const completed = digests.find(d => d.status === 'complete');
 			if (completed) {
@@ -156,6 +160,14 @@
 							{showAllUsers ? 'Show fewer' : `Show all ${sessionsByUser.length} developers`}
 						</button>
 					{/if}
+				</div>
+			{/if}
+
+			<!-- Themes -->
+			{#if themes.length > 0}
+				<div class="section">
+					<h2>Themes <span class="dim">({themes.length} work areas)</span></h2>
+					<ThemeSwimlane {themes} />
 				</div>
 			{/if}
 

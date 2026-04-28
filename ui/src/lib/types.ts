@@ -120,6 +120,26 @@ export interface StatsResponse {
 	insight_counts: Record<string, number>;
 }
 
+export interface ThemeMember {
+	task_id: string;
+	task_name: string;
+	user_id: string | null;
+	session_id: string;
+	date: string | null;
+	tokens: number;
+}
+
+export interface ThemeRead {
+	id: string;
+	name: string;
+	summary: string;
+	total_tokens: number;
+	task_count: number;
+	first_date: string | null;
+	last_date: string | null;
+	members: ThemeMember[];
+}
+
 export interface DigestRead {
 	id: string;
 	user_id: string | null;
