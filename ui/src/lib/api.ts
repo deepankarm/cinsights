@@ -1,4 +1,4 @@
-import type { SessionRead, SessionDetail, StatsResponse, DigestRead, DigestDetail } from './types';
+import type { SessionRead, SessionDetail, StatsResponse, DigestRead, DigestDetail, TaskRead } from './types';
 
 const BASE = '/api/sessions';
 
@@ -160,6 +160,11 @@ export interface UserSummary {
 	projects: string[];
 	agents: string[];
 	sources: string[];
+
+	// Token efficiency
+	avg_efficiency_score: number | null;
+	avg_tasks_per_session: number | null;
+	total_tasks: number;
 }
 
 // Doctor API
@@ -315,6 +320,14 @@ export async function getProjectStats(projectName: string): Promise<Record<strin
 	return fetchJSON(`/api/projects/${encodeURIComponent(projectName)}/stats`);
 }
 
+export async function getProjectThemes(projectName: string): Promise<import('./types').ThemeRead[]> {
+	return fetchJSON(`/api/projects/${encodeURIComponent(projectName)}/themes`);
+}
+
+export async function getUserThemes(userId: string, limit = 50): Promise<import('./types').UserThemeRead[]> {
+	return fetchJSON(`/api/users/${encodeURIComponent(userId)}/themes?limit=${limit}`);
+}
+
 export interface MoodQuote { quote: string; mood: string; project: string | null; session_id: string | null; }
 export interface MoodGroup { mood: string; quotes: MoodQuote[]; }
 export interface UserMoodResponse { user_id: string; total_sessions: number; sessions_with_quotes: number; mood_groups: MoodGroup[]; }
@@ -322,3 +335,4 @@ export interface UserMoodResponse { user_id: string; total_sessions: number; ses
 export async function getUserMoodQuotes(userId: string): Promise<UserMoodResponse> {
 	return fetchJSON(`/api/users/${encodeURIComponent(userId)}/mood-quotes`);
 }
+

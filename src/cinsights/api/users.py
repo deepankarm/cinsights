@@ -38,6 +38,11 @@ class UserSummary(BaseModel):
     agents: list[str]
     sources: list[str]
 
+    # Token efficiency
+    avg_efficiency_score: float | None = None
+    avg_tasks_per_session: float | None = None
+    total_tasks: int = 0
+
 
 @router.get("/", response_model=list[UserSummary])
 async def list_users(
@@ -106,6 +111,9 @@ async def list_users(
                 projects=projects,
                 agents=agents,
                 sources=sources,
+                avg_efficiency_score=_avg(s.efficiency_score for s in user_sessions),
+                avg_tasks_per_session=_avg(s.task_count for s in user_sessions),
+                total_tasks=sum(s.task_count or 0 for s in user_sessions),
             )
         )
 
@@ -210,3 +218,138 @@ async def get_user_mood_quotes(
         sessions_with_quotes=sessions_with,
         mood_groups=mood_groups,
     )
+
+
+class UserTaskInTheme(BaseModel):
+    task_id: str
+    name: str
+    session_id: str
+    date: datetime | None
+    tokens: int
+    turn_count: int
+
+
+class UserThemeRead(BaseModel):
+    theme_id: str
+    theme_name: str
+    project_name: str
+    user_tokens: int  # tokens this user contributed to the theme
+    theme_total_tokens: int  # total tokens across all contributors
+    share_pct: float  # user_tokens / theme_total_tokens * 100
+    user_task_count: int
+    theme_dev_count: int  # distinct developers in the theme; UI hides share bar when 1
+    last_active: datetime | None
+    tasks: list[UserTaskInTheme] = []  # user's tasks within this theme, newest first
+
+
+@router.get("/{user_id}/themes", response_model=list[UserThemeRead])
+async def get_user_themes(
+    user_id: str,
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+) -> list[UserThemeRead]:
+    """Themes this user has contributed to, ranked by recency-weighted volume.
+
+    A theme is "the user's" if any of their tasks (joined via
+    CodingSession.user_id) appear in the theme's task set.
+    """
+    from sqlmodel import func
+
+    from cinsights.db.models import Task, Theme, ThemeTask
+
+    # User-scoped aggregates per theme: their tokens, task count, last active
+    user_agg_q = (
+        select(
+            Theme.id,
+            Theme.name,
+            Theme.project_name,
+            Theme.total_tokens,
+            func.sum(Task.prompt_tokens_total + Task.completion_tokens_total).label("user_tokens"),
+            func.count(Task.id).label("user_task_count"),
+            func.max(CodingSession.start_time).label("last_active"),
+        )
+        .join(ThemeTask, ThemeTask.theme_id == Theme.id)
+        .join(Task, Task.id == ThemeTask.task_id)
+        .join(CodingSession, CodingSession.id == Task.session_id)
+        .where(CodingSession.user_id == user_id)
+        .group_by(Theme.id, Theme.name, Theme.project_name, Theme.total_tokens)
+    )
+    rows = (await db.exec(user_agg_q)).all()
+    if not rows:
+        return []
+
+    theme_ids = [row[0] for row in rows]
+
+    # Theme-level: distinct developer count (so the UI knows when share % is meaningful)
+    dev_count_q = (
+        select(Theme.id, func.count(func.distinct(CodingSession.user_id)))
+        .join(ThemeTask, ThemeTask.theme_id == Theme.id)
+        .join(Task, Task.id == ThemeTask.task_id)
+        .join(CodingSession, CodingSession.id == Task.session_id)
+        .where(col(Theme.id).in_(theme_ids))
+        .group_by(Theme.id)
+    )
+    dev_counts = dict((await db.exec(dev_count_q)).all())
+
+    # User's tasks within each of those themes (one query, then group)
+    tasks_q = (
+        select(
+            ThemeTask.theme_id,
+            Task.id,
+            Task.name,
+            Task.session_id,
+            Task.prompt_tokens_total,
+            Task.completion_tokens_total,
+            Task.turn_count,
+            CodingSession.start_time,
+        )
+        .join(Task, Task.id == ThemeTask.task_id)
+        .join(CodingSession, CodingSession.id == Task.session_id)
+        .where(col(ThemeTask.theme_id).in_(theme_ids))
+        .where(CodingSession.user_id == user_id)
+        .order_by(col(CodingSession.start_time).desc())
+    )
+    tasks_by_theme: dict[str, list[UserTaskInTheme]] = {tid: [] for tid in theme_ids}
+    for row in (await db.exec(tasks_q)).all():
+        theme_id, task_id, task_name, session_id, p_tok, c_tok, turn_count, start_time = row
+        tasks_by_theme[theme_id].append(
+            UserTaskInTheme(
+                task_id=task_id,
+                name=task_name,
+                session_id=session_id,
+                date=start_time,
+                tokens=int((p_tok or 0) + (c_tok or 0)),
+                turn_count=int(turn_count or 0),
+            )
+        )
+
+    now = datetime.utcnow()
+    items: list[UserThemeRead] = []
+    for theme_id, name, project_name, theme_total, user_tok, task_count, last_active in rows:
+        user_tok = int(user_tok or 0)
+        share = (user_tok / theme_total * 100) if theme_total > 0 else 0.0
+        items.append(
+            UserThemeRead(
+                theme_id=theme_id,
+                theme_name=name,
+                project_name=project_name,
+                user_tokens=user_tok,
+                theme_total_tokens=theme_total,
+                share_pct=round(share, 1),
+                user_task_count=int(task_count or 0),
+                theme_dev_count=int(dev_counts.get(theme_id, 1)),
+                last_active=last_active,
+                tasks=tasks_by_theme.get(theme_id, []),
+            )
+        )
+
+    # Recency-weighted sort: tokens * 1/(1 + days_since/7).
+    # Today's work weighted full; 7d old -> half; 30d old -> ~20%.
+    def score(t: UserThemeRead) -> float:
+        if not t.last_active:
+            return 0.0
+        days = (now - t.last_active).total_seconds() / 86400
+        return t.user_tokens / (1 + days / 7)
+
+    items.sort(key=score, reverse=True)
+    return items[:limit]

@@ -1,19 +1,21 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
-	import { getProjects, getDigests, getDigest, getProjectStats, type ProjectRead } from '$lib/api';
-	import type { SessionRead, DigestDetail, DigestStatsData } from '$lib/types';
+	import { getProjects, getDigests, getDigest, getProjectStats, getProjectThemes, type ProjectRead } from '$lib/api';
+	import type { SessionRead, DigestDetail, DigestStatsData, ThemeRead } from '$lib/types';
 	import { fmtTokens, fmtDate, fmtDateRange, fmtDuration } from '$lib/format';
 	import DashboardView from '$lib/components/DashboardView.svelte';
 	import InsightsPanel from '$lib/components/InsightsPanel.svelte';
 	import ActivityCharts from '$lib/components/ActivityCharts.svelte';
 	import ExportHTML from '$lib/components/ExportHTML.svelte';
+	import ThemeSwimlane from '$lib/components/ThemeSwimlane.svelte';
 
 	const projectName = $derived(decodeURIComponent(page.params.name ?? ''));
 
 	let project: ProjectRead | null = $state(null);
 	let digest: DigestDetail | null = $state(null);
 	let scopeStats: DigestStatsData | null = $state(null);
+	let themes: ThemeRead[] = $state([]);
 	let loading = $state(true);
 	let error: string | null = $state(null);
 	let expandedUsers: Set<string> = $state(new Set());
@@ -22,14 +24,16 @@
 
 	onMount(async () => {
 		try {
-			const [projects, digests, stats] = await Promise.all([
+			const [projects, digests, stats, projectThemes] = await Promise.all([
 				getProjects(),
 				getDigests(projectName).catch(() => []),
 				getProjectStats(projectName).catch(() => null),
+				getProjectThemes(projectName).catch(() => []),
 			]);
 			project = projects.find(p => p.name === projectName) ?? null;
 			if (!project) error = `Project not found: ${projectName}`;
 			if (stats) scopeStats = stats as unknown as DigestStatsData;
+			themes = projectThemes;
 
 			const completed = digests.find(d => d.status === 'complete');
 			if (completed) {
@@ -159,6 +163,36 @@
 				</div>
 			{/if}
 
+			<!-- Activity (with Themes as a subsection) -->
+			{#if scopeStats || themes.length > 0}
+				<div class="section">
+					<h2>Activity</h2>
+					{#if scopeStats}
+						<ActivityCharts
+							toolDistribution={scopeStats.tool_distribution}
+							languageDistribution={scopeStats.language_distribution}
+							timeOfDay={scopeStats.time_of_day}
+							errorTypes={scopeStats.error_types}
+							sessionCount={scopeStats.session_count}
+							analyzedCount={scopeStats.analyzed_count}
+						/>
+					{/if}
+
+					{#if themes.length > 0}
+						<div class="subsection">
+							<h3>Themes <span class="dim">({themes.length} work areas)</span></h3>
+							<ThemeSwimlane {themes} />
+						</div>
+					{/if}
+
+					{#if !digest && scopeStats}
+						<div class="empty-insights" style="margin-top: 16px">
+							Run <code>cinsights digest project {projectName} --days 30</code> to generate insights.
+						</div>
+					{/if}
+				</div>
+			{/if}
+
 			<!-- Insights -->
 			{#if digest}
 				<div class="section">
@@ -169,24 +203,9 @@
 							<span class="generated-at">{new Date(digest.created_at).toLocaleDateString()}</span>
 						</span>
 					</div>
-					<InsightsPanel {digest} scopeStats={scopeStats ?? undefined} />
+					<InsightsPanel {digest} scopeStats={scopeStats ?? undefined} showActivity={false} />
 				</div>
-			{:else if scopeStats}
-				<div class="section">
-					<h2>Activity</h2>
-					<ActivityCharts
-						toolDistribution={scopeStats.tool_distribution}
-						languageDistribution={scopeStats.language_distribution}
-						timeOfDay={scopeStats.time_of_day}
-						errorTypes={scopeStats.error_types}
-						sessionCount={scopeStats.session_count}
-						analyzedCount={scopeStats.analyzed_count}
-					/>
-					<div class="empty-insights" style="margin-top: 16px">
-						Run <code>cinsights digest project {projectName} --days 30</code> to generate insights.
-					</div>
-				</div>
-			{:else}
+			{:else if !scopeStats && themes.length === 0}
 				<div class="section">
 					<div class="empty-insights">
 						No insights yet. Run <code>cinsights digest project {projectName} --days 30</code> to generate.
@@ -220,6 +239,8 @@
 
 	.section { margin-bottom: 28px; }
 	h2 { font-size: 17px; font-weight: 700; color: #232326; margin-bottom: 12px; }
+	h3 { font-size: 14px; font-weight: 700; color: #232326; margin-bottom: 12px; }
+	.subsection { margin-top: 24px; }
 	.dim { font-size: 13px; font-weight: 400; color: #94a3b8; }
 
 	.user-list { display: flex; flex-direction: column; gap: 8px; }

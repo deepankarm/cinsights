@@ -15,6 +15,7 @@ from cinsights.db.models import (
     InsightCategory,
     InsightSeverity,
     SessionStatus,
+    Task,
     ToolCall,
 )
 
@@ -62,6 +63,20 @@ class SessionRead(BaseModel):
     effort_level: str | None = None
 
 
+class TaskRead(BaseModel):
+    id: str
+    task_number: int
+    name: str
+    description: str
+    start_turn: int
+    end_turn: int
+    turn_count: int
+    prompt_tokens_total: int
+    completion_tokens_total: int
+    context_at_start: int | None = None
+    estimated_waste_tokens: int | None = None
+
+
 class SessionDetail(BaseModel):
     id: str
     session_id: str | None
@@ -78,6 +93,7 @@ class SessionDetail(BaseModel):
     tool_calls: list[ToolCallRead]
     total_tool_calls: int = 0
     insights: list[InsightRead]
+    tasks: list[TaskRead] = []
     notable_quotes: list[dict] | None = None
     interrupt_count: int | None = None
     agent_version: str | None = None
@@ -98,6 +114,16 @@ class SessionDetail(BaseModel):
     error_retry_sequences: int | None = None
     context_resets: int | None = None
     duplicate_read_count: int | None = None
+
+    # Token efficiency — waste metrics
+    compaction_cycle_waste: int | None = None
+    floor_drift_score: float | None = None
+    interrupted_turn_waste: int | None = None
+    repeated_edit_waste: int | None = None
+    failed_retry_waste: int | None = None
+    efficiency_score: float | None = None
+    task_count: int | None = None
+    estimated_task_waste_tokens: int | None = None
 
     # Baseline averages for comparison
     baseline: dict | None = None
@@ -333,6 +359,12 @@ async def get_session_detail(
                 "avg_duplicate_read_count": round(row[11], 1) if row[11] else None,
             }
 
+    # Load tasks
+    tasks_result = await db.exec(
+        select(Task).where(Task.session_id == session.id).order_by(Task.task_number)
+    )
+    task_rows = tasks_result.all()
+
     return SessionDetail(
         id=session.id,
         session_id=session.session_id,
@@ -373,6 +405,22 @@ async def get_session_detail(
             )
             for ins in insights
         ],
+        tasks=[
+            TaskRead(
+                id=t.id,
+                task_number=t.task_number,
+                name=t.name,
+                description=t.description,
+                start_turn=t.start_turn,
+                end_turn=t.end_turn,
+                turn_count=t.turn_count,
+                prompt_tokens_total=t.prompt_tokens_total,
+                completion_tokens_total=t.completion_tokens_total,
+                context_at_start=t.context_at_start,
+                estimated_waste_tokens=t.estimated_waste_tokens,
+            )
+            for t in task_rows
+        ],
         notable_quotes=_parse_notable_quotes(session),
         interrupt_count=session.interrupt_count,
         agent_version=session.agent_version,
@@ -389,6 +437,14 @@ async def get_session_detail(
         error_retry_sequences=session.error_retry_sequences,
         context_resets=session.context_resets,
         duplicate_read_count=session.duplicate_read_count,
+        compaction_cycle_waste=session.compaction_cycle_waste,
+        floor_drift_score=session.floor_drift_score,
+        interrupted_turn_waste=session.interrupted_turn_waste,
+        repeated_edit_waste=session.repeated_edit_waste,
+        failed_retry_waste=session.failed_retry_waste,
+        efficiency_score=session.efficiency_score,
+        task_count=session.task_count,
+        estimated_task_waste_tokens=session.estimated_task_waste_tokens,
         baseline=baseline_data,
     )
 
@@ -427,11 +483,13 @@ async def update_session(
 
 @router.post("/{session_id}/analyze", response_model=SessionDetail)
 async def trigger_analysis(session_id: str, db: AsyncSession = Depends(get_db)) -> SessionDetail:
-    """Manually trigger LLM analysis for a session."""
+    """Manually trigger LLM analysis (insights + task segmentation) for a session."""
     import asyncio
 
     from cinsights.analysis.session import SessionAnalyzer
-    from cinsights.settings import get_settings
+    from cinsights.analysis.tasks import TaskAnalyzer
+    from cinsights.pipeline import _compute_user_compact_ratio, _store_insights, _store_tasks
+    from cinsights.settings import get_llm_config, get_settings
     from cinsights.sources.base import TraceData
     from cinsights.sources.factory import create_source
 
@@ -439,9 +497,7 @@ async def trigger_analysis(session_id: str, db: AsyncSession = Depends(get_db)) 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    settings = get_settings()
-
-    source = create_source(settings)
+    source = create_source(get_settings())
     spans = await asyncio.to_thread(source.get_spans_by_session, session_id)
     if not spans:
         raise HTTPException(status_code=404, detail="No spans found for session")
@@ -453,44 +509,21 @@ async def trigger_analysis(session_id: str, db: AsyncSession = Depends(get_db)) 
         spans=spans,
     )
 
-    # Clear existing insights
-    existing_result = await db.exec(select(Insight).where(Insight.session_id == session_id))
-    for ins in existing_result.all():
-        await db.delete(ins)
-    await db.flush()
-
-    extra_headers = None
-    if settings.anthropic_extra_headers:
-        extra_headers = json.loads(settings.anthropic_extra_headers)
-
-    analyzer = SessionAnalyzer(
-        api_key=settings.anthropic_api_key,
-        model=settings.anthropic_model,
-        base_url=settings.anthropic_base_url,
-        extra_headers=extra_headers,
+    llm = get_llm_config()
+    insights_result, task_result = await asyncio.gather(
+        SessionAnalyzer(llm_config=llm).analyze(trace, spans),
+        TaskAnalyzer(llm_config=llm).segment(trace, spans),
+        return_exceptions=True,
     )
-    result = await analyzer.analyze(trace, spans)
 
-    for item in result.insights:
-        try:
-            cat = InsightCategory(item.category)
-        except ValueError:
-            cat = InsightCategory.PATTERN
-        try:
-            sev = InsightSeverity(item.severity)
-        except ValueError:
-            sev = InsightSeverity.INFO
+    if isinstance(insights_result, BaseException):
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {insights_result}")
 
-        insight = Insight(
-            session_id=session_id,
-            category=cat,
-            title=item.title,
-            content=item.content,
-            severity=sev,
-        )
-        db.add(insight)
+    await _store_insights(db, session, insights_result)
 
-    session.status = SessionStatus.ANALYZED
+    ratio = await _compute_user_compact_ratio(db, session.user_id)
+    await _store_tasks(db, session, task_result, compact_ratio=ratio)
+
     await db.commit()
     await db.refresh(session)
 

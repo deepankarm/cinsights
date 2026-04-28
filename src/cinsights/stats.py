@@ -198,6 +198,13 @@ class DigestStats(BaseModel):
     label_members: dict[str, list[str]] | None = None  # canonical → [raw labels in cluster]
     label_trends: list[dict] | None = None  # [{date, labels: {label: count}}]
 
+    # Token efficiency & task analytics
+    total_tasks: int = 0
+    avg_tasks_per_session: float = 0
+    avg_efficiency_score: float | None = None
+    total_estimated_waste: int = 0
+    waste_breakdown: dict[str, int] | None = None  # {compaction, interrupted, repeated, ...}
+
 
 def _session_filter(
     start: datetime | None,
@@ -1145,6 +1152,29 @@ async def compute_all(
         insight_labels, label_cat_counts, label_by_day
     )
 
+    # Task & efficiency analytics
+    total_tasks = sum(s.task_count or 0 for s in sessions)
+    sessions_with_tasks = [s for s in sessions if s.task_count and s.task_count > 0]
+    avg_tasks_per_session = (
+        round(total_tasks / len(sessions_with_tasks), 1) if sessions_with_tasks else 0
+    )
+    eff_scores = [s.efficiency_score for s in sessions if s.efficiency_score is not None]
+    avg_efficiency = round(sum(eff_scores) / len(eff_scores), 1) if eff_scores else None
+    total_waste = sum(
+        (s.compaction_cycle_waste or 0)
+        + (s.interrupted_turn_waste or 0)
+        + (s.repeated_edit_waste or 0)
+        + (s.failed_retry_waste or 0)
+        for s in sessions
+    )
+    waste_breakdown = {
+        "compaction_cycle": sum(s.compaction_cycle_waste or 0 for s in sessions),
+        "interrupted_turns": sum(s.interrupted_turn_waste or 0 for s in sessions),
+        "repeated_edits": sum(s.repeated_edit_waste or 0 for s in sessions),
+        "failed_retries": sum(s.failed_retry_waste or 0 for s in sessions),
+        "task_boundaries": sum(s.estimated_task_waste_tokens or 0 for s in sessions),
+    }
+
     return DigestStats(
         period_start=start
         or (min(s.start_time for s in sessions) if sessions else datetime.now(UTC)),
@@ -1181,4 +1211,9 @@ async def compute_all(
         label_categories=label_categories or None,
         label_members=label_members or None,
         label_trends=label_trends,
+        total_tasks=total_tasks,
+        avg_tasks_per_session=avg_tasks_per_session,
+        avg_efficiency_score=avg_efficiency,
+        total_estimated_waste=total_waste,
+        waste_breakdown=waste_breakdown if any(waste_breakdown.values()) else None,
     )

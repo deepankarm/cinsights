@@ -79,7 +79,13 @@ async def _store_indexed(
         [s for s in spans if s.name.startswith("Turn ")],
         key=lambda s: s.start_time,
     )
-    total_prompt = sum(s.prompt_tokens for s in turn_spans)
+    # prompt_tokens = context window (max per message ID) — for context growth analysis
+    # total_billed_prompt = sum across message IDs — for cost tracking
+    total_billed_prompt = sum(
+        int(s.attributes.get("llm.token_count.total_billed_prompt", 0) or s.prompt_tokens)
+        for s in turn_spans
+    )
+    total_prompt = total_billed_prompt  # session-level totals use billed amount
     total_completion = sum(s.completion_tokens for s in turn_spans)
     total_tokens = total_prompt + total_completion
 
@@ -88,7 +94,10 @@ async def _store_indexed(
         [
             {
                 "turn": int(s.name.replace("Turn ", "")),
-                "prompt_tokens": s.prompt_tokens,
+                "prompt_tokens": s.prompt_tokens,  # context window (max)
+                "total_billed_prompt": int(
+                    s.attributes.get("llm.token_count.total_billed_prompt", 0) or s.prompt_tokens
+                ),
                 "completion_tokens": s.completion_tokens,
                 "duration_ms": s.duration_ms,
                 "interrupted": _INTERRUPT_MARKER in (s.attributes.get("input.value") or ""),
@@ -228,11 +237,36 @@ async def _store_indexed(
         if atd is not None:
             coding_session.adaptive_thinking_disabled = bool(atd)
 
-    # User-interrupt count (structural, no LLM)
-    _INTERRUPT_MARKER = "[Request interrupted by user]"
-    coding_session.interrupt_count = sum(
-        1 for s in spans if _INTERRUPT_MARKER in (s.attributes.get("input.value") or "")
-    )
+        # Slash-command / skill / interrupt signals → metadata_json
+        signals_dict: dict = {}
+        signals_raw = root.attributes.get("harness.session_signals")
+        if signals_raw:
+            import contextlib
+
+            existing_meta: dict = {}
+            if coding_session.metadata_json:
+                with contextlib.suppress(Exception):
+                    existing_meta = json_mod.loads(coding_session.metadata_json)
+            with contextlib.suppress(Exception):
+                signals_dict = json_mod.loads(signals_raw)
+                existing_meta["slash_commands"] = signals_dict.get("slash_commands", [])
+                existing_meta["skills_used"] = signals_dict.get("skills_used", [])
+                existing_meta["interrupts"] = signals_dict.get("interrupts", {})
+            coding_session.metadata_json = json_mod.dumps(existing_meta)
+
+        # Interrupt count: prefer the signals extractor (counts raw interrupt
+        # lines BEFORE noise filtering). Fall back to span-based counting only
+        # if signals are unavailable (e.g., older sessions).
+        interrupt_count_from_signals = (
+            signals_dict.get("interrupts", {}).get("total") if signals_dict else None
+        )
+        if interrupt_count_from_signals is not None:
+            coding_session.interrupt_count = interrupt_count_from_signals
+        else:
+            _INTERRUPT_MARKER = "[Request interrupted by user]"
+            coding_session.interrupt_count = sum(
+                1 for s in spans if _INTERRUPT_MARKER in (s.attributes.get("input.value") or "")
+            )
 
     from cinsights.costs import estimate_session_analysis_tokens
 
@@ -303,6 +337,99 @@ async def _store_insights(
     coding_session.analysis_prompt_tokens = result.usage_prompt_tokens
     coding_session.analysis_completion_tokens = result.usage_completion_tokens
     return len(result.insights)
+
+
+async def _compute_user_compact_ratio(db: AsyncSession, user_id: str | None) -> float:
+    """Median post/pre compaction ratio across this user's historical sessions.
+
+    Falls back to 0.15 when the user has no detected compaction events. Used by
+    `_store_tasks` so per-task waste estimation reflects the user's own /compact
+    behavior instead of a global guess.
+    """
+    import contextlib
+    import json as json_mod
+
+    from cinsights.db.models import CodingSession as CodingSessionRT
+    from cinsights.metrics import compute_compact_ratio
+
+    if user_id is None:
+        return 0.15
+
+    rows = await db.exec(
+        select_fn(CodingSessionRT.context_growth_json)
+        .where(CodingSessionRT.user_id == user_id)
+        .where(CodingSessionRT.context_growth_json.is_not(None))
+    )
+    growths: list[list[dict]] = []
+    for cg_json in rows.all():
+        if not cg_json:
+            continue
+        with contextlib.suppress(Exception):
+            growths.append(json_mod.loads(cg_json))
+    return compute_compact_ratio(growths)
+
+
+async def _store_tasks(
+    db: AsyncSession,
+    coding_session: CodingSession,
+    task_result: object,
+    compact_ratio: float = 0.15,
+) -> int:
+    """Store task segmentation results on an already-INDEXED session.
+
+    Returns the number of tasks persisted. Gracefully handles None/errors.
+    """
+    from cinsights.analysis.tasks import TaskSegmentationResult, compute_task_waste
+    from cinsights.db.models import Task
+
+    # Handle None (skipped), BaseException (failed), or non-result types
+    if not isinstance(task_result, TaskSegmentationResult):
+        if isinstance(task_result, BaseException):
+            logger.warning("Task segmentation failed for %s: %s", coding_session.id, task_result)
+        return 0
+
+    # Clear old tasks on re-analysis
+    old_tasks = await db.exec(select_fn(Task).where(Task.session_id == coding_session.id))
+    for old in old_tasks.all():
+        await db.delete(old)
+
+    # Compute per-task waste if context_growth is available
+    import json as json_mod
+
+    context_growth = None
+    if coding_session.context_growth_json:
+        import contextlib
+
+        with contextlib.suppress(Exception):
+            context_growth = json_mod.loads(coding_session.context_growth_json)
+
+    waste_data = []
+    if context_growth and task_result.tasks:
+        waste_data = compute_task_waste(task_result.tasks, context_growth, compact_ratio)
+
+    total_task_waste = 0
+    for i, task_item in enumerate(task_result.tasks):
+        waste = waste_data[i] if i < len(waste_data) else {}
+        task_row = Task(
+            tenant_id=coding_session.tenant_id,
+            session_id=coding_session.id,
+            task_number=i + 1,
+            name=task_item.name,
+            description=task_item.description,
+            start_turn=task_item.start_turn,
+            end_turn=task_item.end_turn,
+            turn_count=task_item.turn_count,
+            prompt_tokens_total=waste.get("prompt_tokens_total", 0),
+            completion_tokens_total=waste.get("completion_tokens_total", 0),
+            context_at_start=waste.get("context_at_start"),
+            estimated_waste_tokens=waste.get("estimated_waste_tokens"),
+        )
+        total_task_waste += waste.get("estimated_waste_tokens", 0)
+        db.add(task_row)
+
+    coding_session.task_count = len(task_result.tasks)
+    coding_session.estimated_task_waste_tokens = total_task_waste
+    return len(task_result.tasks)
 
 
 async def _store_digest_sections(
@@ -387,6 +514,44 @@ async def _store_digest_sections(
     digest_record.analysis_completion_tokens = result.total_completion_tokens
     digest_record.completed_at = datetime.now(UTC)
     await db.commit()
+
+
+async def _extract_project_themes(
+    db: AsyncSession,
+    project_name: str,
+    tenant_id: str,
+    digest_id: str,
+) -> tuple[int, int]:
+    """Run ThemeAnalyzer for a project and store results idempotently.
+
+    Returns ``(prompt_tokens, completion_tokens)`` so the caller can roll the
+    cost into the run-level totals. Returns ``(0, 0)`` when there are too few
+    tasks to bother with extraction.
+    """
+    from cinsights.analysis.themes import ThemeAnalyzer, replace_project_themes
+    from cinsights.settings import get_llm_config
+
+    analyzer = ThemeAnalyzer(llm_config=get_llm_config(digest=True))
+    tasks = await analyzer.load_tasks(db, project_name, tenant_id)
+    if len(tasks) < ThemeAnalyzer.MIN_TASKS:
+        logger.info(
+            "Skipping theme extraction for %s — only %d tasks (<%d)",
+            project_name,
+            len(tasks),
+            ThemeAnalyzer.MIN_TASKS,
+        )
+        return (0, 0)
+
+    extracted, p_tok, c_tok = await analyzer.extract(project_name, tasks, digest_id=digest_id)
+    n_themes = await replace_project_themes(db, project_name, tenant_id, tasks, extracted)
+    logger.info(
+        "Stored %d themes for project=%s (%d→%d tokens)",
+        n_themes,
+        project_name,
+        p_tok,
+        c_tok,
+    )
+    return (p_tok, c_tok)
 
 
 async def _run_one_digest(
@@ -542,11 +707,38 @@ async def _run_one_digest(
         if latest_complete and latest_complete.stats_json:
             old_hash = _content_hash(latest_complete.stats_json)
             if old_hash == new_hash:
+                # Skip the digest LLM calls, but still extract themes if the
+                # project has none — otherwise projects digested before theme
+                # support was added would silently never get themes.
+                theme_pt = theme_ct = 0
+                if scope_project:
+                    from cinsights.db.models import Theme as _Theme
+
+                    existing_theme = (
+                        await db.exec(
+                            select_fn(_Theme.id)
+                            .where(_Theme.project_name == scope_project)
+                            .limit(1)
+                        )
+                    ).first()
+                    if not existing_theme:
+                        try:
+                            tenant_id = get_settings().tenant_id
+                            theme_pt, theme_ct = await _extract_project_themes(
+                                db, scope_project, tenant_id, latest_complete.id
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "Theme extraction failed for %s: %s",
+                                scope_project,
+                                exc,
+                            )
                 console.print(
                     f"  [dim]·[/dim] {label} — stats unchanged since "
                     f"{latest_complete.completed_at:%Y-%m-%d %H:%M}, reused"
+                    + (f" (+ {theme_pt + theme_ct:,} theme tokens)" if theme_pt + theme_ct else "")
                 )
-                return ("unchanged", 0, 0)
+                return ("unchanged", theme_pt, theme_ct)
 
         # Extract previous digest summary before deleting for delta narratives.
         previous_summary = None
@@ -612,11 +804,29 @@ async def _run_one_digest(
             assert analyzer is not None  # not stats_only path
             result = await analyzer.analyze(stats, digest_id=digest_record.id)
             await _store_digest_sections(db, digest_record, result, json_mod)
+
+            # Theme extraction is project-scoped and best-effort. Failure here
+            # must not surface as a digest failure — themes are an enhancement.
+            theme_pt = theme_ct = 0
+            if scope_project:
+                try:
+                    theme_pt, theme_ct = await _extract_project_themes(
+                        db, scope_project, settings.tenant_id, digest_record.id
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Theme extraction failed for %s: %s — digest unaffected",
+                        scope_project,
+                        exc,
+                    )
+
+            total_pt = result.total_prompt_tokens + theme_pt
+            total_ct = result.total_completion_tokens + theme_ct
             console.print(
                 f"  [green]✓[/green] {label} — {stats.session_count} sessions, "
-                f"{result.total_prompt_tokens + result.total_completion_tokens:,} LLM tokens"
+                f"{total_pt + total_ct:,} LLM tokens"
             )
-            return (True, result.total_prompt_tokens, result.total_completion_tokens)
+            return (True, total_pt, total_ct)
         except Exception as e:
             digest_record.status = DigestStatus.FAILED
             digest_record.error_message = str(e)[:500]
@@ -1381,6 +1591,7 @@ async def _analyze_async(
     run: _RunHandle | None = None,
     min_score: float = 0.0,
     yes: bool = False,
+    tasks_only: bool = False,
 ) -> None:
     """LLM-analyze INDEXED sessions that meet the score threshold.
 
@@ -1405,6 +1616,7 @@ async def _analyze_async(
 
     from cinsights.analysis.project_detection import ProjectDetector
     from cinsights.analysis.session import SessionAnalyzer
+    from cinsights.analysis.tasks import TaskAnalyzer
     from cinsights.db.engine import get_sessionmaker
     from cinsights.db.models import CodingSession, SessionStatus
     from cinsights.settings import get_llm_config
@@ -1415,6 +1627,7 @@ async def _analyze_async(
 
     llm = get_llm_config()
     analyzer = SessionAnalyzer(llm_config=llm)
+    task_analyzer = TaskAnalyzer(llm_config=llm)
     project_detector = ProjectDetector(llm_config=llm)
 
     async with sessionmaker() as _kp_db:
@@ -1659,19 +1872,37 @@ async def _analyze_async(
     from cinsights.analysis.project_detection import ProjectGuess
 
     # Project detection for phoenix source (others already have project names)
-    if settings.source not in (SourceType.ENTIREIO, SourceType.LOCAL):
+    if tasks_only:
+        console.print("  [dim]--tasks-only: skipping insight + project-detection LLM calls[/dim]")
+        task_results = await task_analyzer.segment_batch(
+            analysis_input, max_concurrency=concurrency
+        )
+        analysis_results = [None] * len(work_items)
+        project_guesses = [
+            ProjectGuess(
+                project_name=previous_tags.get(tid),
+                confidence="high",
+                reasoning="--tasks-only (kept existing project tag)",
+            )
+            for tid, _, _, _ in work_items
+        ]
+    elif settings.source not in (SourceType.ENTIREIO, SourceType.LOCAL):
         detect_items_list: list[tuple[str, str | None, list[SpanData]]] = [
             (trace_id, previous_tags[trace_id], _filter_tool_spans(spans))
             for trace_id, _, _, spans in work_items
         ]
-        analysis_results, project_guesses = await asyncio.gather(
+        analysis_results, task_results, project_guesses = await asyncio.gather(
             analyzer.analyze_batch(analysis_input, max_concurrency=concurrency),
+            task_analyzer.segment_batch(analysis_input, max_concurrency=concurrency),
             project_detector.detect_batch(
                 detect_items_list, known_projects, max_concurrency=concurrency
             ),
         )
     else:
-        analysis_results = await analyzer.analyze_batch(analysis_input, max_concurrency=concurrency)
+        analysis_results, task_results = await asyncio.gather(
+            analyzer.analyze_batch(analysis_input, max_concurrency=concurrency),
+            task_analyzer.segment_batch(analysis_input, max_concurrency=concurrency),
+        )
         project_guesses = [
             ProjectGuess(
                 project_name=_get_project_name(settings, source, tid, previous_tags.get(tid))[0],
@@ -1687,8 +1918,11 @@ async def _analyze_async(
     analyzed = 0
     failed = 0
     async with sessionmaker() as db:
-        for (trace_id, _session_id, _trace, _spans), result, project_guess in zip(
-            work_items, analysis_results, project_guesses, strict=True
+        # Per-user compact ratios are derived from the user's full session
+        # history, so cache them across the loop instead of re-querying per session.
+        user_ratio_cache: dict[str | None, float] = {}
+        for (trace_id, _session_id, _trace, _spans), result, task_result, project_guess in zip(
+            work_items, analysis_results, task_results, project_guesses, strict=True
         ):
             # Skip sessions where LLM call failed (503, timeout, etc.)
             if isinstance(result, BaseException):
@@ -1709,17 +1943,39 @@ async def _analyze_async(
                     continue
                 if project_guess.project_name and not coding_session.project_name:
                     coding_session.project_name = project_guess.project_name
-                n_insights = await _store_insights(db, coding_session, result)
+                n_insights = 0 if tasks_only else await _store_insights(db, coding_session, result)
+                if coding_session.user_id not in user_ratio_cache:
+                    user_ratio_cache[coding_session.user_id] = await _compute_user_compact_ratio(
+                        db, coding_session.user_id
+                    )
+                await _store_tasks(
+                    db,
+                    coding_session,
+                    task_result,
+                    compact_ratio=user_ratio_cache[coding_session.user_id],
+                )
                 await update_daily_trend(db, coding_session)
                 await db.commit()
                 analyzed += 1
                 if run is not None:
                     run.sessions_analyzed += 1
+                    insight_in = 0 if result is None else result.usage_prompt_tokens
+                    insight_out = 0 if result is None else result.usage_completion_tokens
+                    task_in = (
+                        getattr(task_result, "usage_prompt_tokens", 0)
+                        if not isinstance(task_result, BaseException)
+                        else 0
+                    )
+                    task_out = (
+                        getattr(task_result, "usage_completion_tokens", 0)
+                        if not isinstance(task_result, BaseException)
+                        else 0
+                    )
                     run.total_prompt_tokens += (
-                        result.usage_prompt_tokens + project_guess.usage_prompt_tokens
+                        insight_in + task_in + project_guess.usage_prompt_tokens
                     )
                     run.total_completion_tokens += (
-                        result.usage_completion_tokens + project_guess.usage_completion_tokens
+                        insight_out + task_out + project_guess.usage_completion_tokens
                     )
                     # Track scope for doctor page
                     scope_ids = run.extra.get("session_ids", [])

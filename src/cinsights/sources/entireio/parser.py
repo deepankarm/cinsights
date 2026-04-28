@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from cinsights.sources.base import SpanData, TraceData
 from cinsights.sources.entireio.models import CommittedMetadata
 from cinsights.sources.jsonl_utils import (
+    extract_session_signals,
     extract_user_content,
     group_into_turns,
     parse_dt,
@@ -207,6 +208,10 @@ def parse_full_jsonl(
                 )
                 all_spans.append(tool_span)
 
+    # Slash-command / skill / interrupt signals — extracted from raw lines
+    # BEFORE noise filtering so we don't lose them.
+    session_signals = extract_session_signals(lines)
+
     # Root span
     root_span = SpanData(
         span_id=root_id,
@@ -224,6 +229,7 @@ def parse_full_jsonl(
             "harness.agent_version": agent_version,
             "harness.effort_level": effort_level,
             "harness.adaptive_thinking_disabled": adaptive_thinking_disabled,
+            "harness.session_signals": json.dumps(session_signals),
         },
     )
     all_spans.insert(0, root_span)

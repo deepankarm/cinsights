@@ -6,6 +6,8 @@
 	import { fmtTokens, fmtDateRange, fmtNum, gradeColor, gradeBg } from '$lib/format';
 	import type { QualityMetric } from '$lib/format';
 	import type { SessionDetail } from '$lib/types';
+	import LineChart from '$lib/components/charts/LineChart.svelte';
+	import type { MarkerPoint, TaskBand, ReferenceLine } from '$lib/components/charts/LineChart.svelte';
 	import ActivityCharts, { type ErrorDetail } from '$lib/components/ActivityCharts.svelte';
 	import QualityBar from '$lib/components/QualityBar.svelte';
 	import InsightLabel from '$lib/components/BehavioralTag.svelte';
@@ -18,25 +20,10 @@
 	let analyzing = $state(false);
 	let toolsExpanded = $state(false);
 	let errorsExpanded = $state(false);
-	let hoverIdx: number | null = $state(null);
-	let durHoverIdx: number | null = $state(null);
 	let copied = $state(false);
+	let chartExpanded = $state(false);
 
 	const id = $derived(page.params.id ?? '');
-
-	const W = 720, H = 180;
-	const PAD = { l: 52, r: 16, t: 16, b: 28 };
-	const iW = W - PAD.l - PAD.r;
-	const iH = H - PAD.t - PAD.b;
-
-	function xOf(i: number, n: number): number { return PAD.l + (i / Math.max(n - 1, 1)) * iW; }
-
-	function chartMove(e: MouseEvent, n: number, setter: (v: number) => void) {
-		const rect = (e.currentTarget as SVGElement).getBoundingClientRect();
-		const relX = ((e.clientX - rect.left) / rect.width) * W;
-		const idx = Math.round(((relX - PAD.l) / iW) * (n - 1));
-		setter(Math.max(0, Math.min(n - 1, idx)));
-	}
 
 	onMount(async () => {
 		try { session = await getSession(id); }
@@ -224,6 +211,68 @@
 		return items;
 	});
 
+	// Chart data for context growth — filter out turns with 0 tokens, sort by turn number
+	const ctxPts = $derived.by(() => {
+		if (!session?.context_growth) return [];
+		return session.context_growth
+			.filter(p => p.prompt_tokens > 0)
+			.sort((a, b) => a.turn - b.turn);
+	});
+	const ctxLabels = $derived.by(() => ctxPts.map(p => String(p.turn)));
+	const ctxData = $derived.by(() => ctxPts.map(p => p.prompt_tokens));
+	const ctxMarkers = $derived.by((): MarkerPoint[] => {
+		const pts = ctxPts;
+		const result: MarkerPoint[] = [];
+		for (let i = 1; i < pts.length; i++) {
+			if (pts[i].prompt_tokens < pts[i-1].prompt_tokens * 0.85) {
+				result.push({ index: i, color: '#f59e0b' });
+			}
+		}
+		for (let i = 0; i < pts.length; i++) {
+			if (pts[i].interrupted) {
+				result.push({ index: i, color: '#ef4444', verticalLine: true });
+			}
+		}
+		return result;
+	});
+	const ctxTaskBands = $derived.by((): TaskBand[] => {
+		if (!ctxPts.length || !session?.tasks) return [];
+		const pts = ctxPts;
+		return session.tasks.map((task, ti) => {
+			const startIdx = pts.findIndex(p => p.turn >= task.start_turn);
+			const endIdx = pts.findIndex(p => p.turn > task.end_turn);
+			if (startIdx < 0) return null; // task beyond data range
+			const ei = endIdx >= 0 ? endIdx - 1 : pts.length - 1;
+			if (ei < startIdx) return null; // no data points in this task
+			const tokenLabel = task.prompt_tokens_total > 0 ? ` (${fmtTokens(task.prompt_tokens_total)})` : '';
+			return { startIndex: startIdx, endIndex: ei, name: task.name + tokenLabel, description: task.description, colorIndex: ti };
+		}).filter((b): b is NonNullable<typeof b> => b !== null);
+	});
+	const compactionCount = $derived.by(() => ctxMarkers.filter(m => m.color === '#f59e0b').length);
+	const interruptCount2 = $derived.by(() => ctxMarkers.filter(m => m.color === '#ef4444').length);
+
+	// Duration chart data
+	const durPts = $derived.by(() => {
+		if (!session?.context_growth) return [];
+		return session.context_growth.filter(p => p.duration_ms != null);
+	});
+	const durLabels = $derived.by(() => durPts.map(p => String(p.turn)));
+	const durData = $derived.by(() => durPts.map(p => p.duration_ms!));
+	const durMedian = $derived.by(() => {
+		if (durData.length === 0) return 0;
+		const sorted = [...durData].sort((a, b) => a - b);
+		return sorted[Math.floor(sorted.length / 2)];
+	});
+	const durMarkers = $derived.by((): MarkerPoint[] => {
+		return durPts
+			.map((p, i) => p.duration_ms! > durMedian * 2 ? { index: i, color: '#ef4444' } as MarkerPoint : null)
+			.filter((m): m is MarkerPoint => m !== null);
+	});
+	const durRefLines = $derived.by((): ReferenceLine[] => {
+		if (durMedian === 0) return [];
+		return [{ value: durMedian, color: '#94a3b8', label: `median ${fmtSecs(durMedian)}` }];
+	});
+
 	function categoryColor(cat: string): string {
 		const m: Record<string, string> = { friction: '#dc2626', win: '#16a34a', recommendation: '#2563eb', pattern: '#7c3aed', skill_proposal: '#0891b2', summary: '#0f172a' };
 		return m[cat] ?? '#64748b';
@@ -329,125 +378,97 @@
 		<QualityBar metrics={qualityMetrics} />
 	{/if}
 
-	<!-- 4. Activity Charts (includes Context Growth + Turn Duration in bento grid) -->
+	<!-- Tasks & Turns -->
 	<div class="section">
-		<ActivityCharts {toolDistribution} {languageDistribution} {timeOfDay} {errorTypes} errorDetails={[]}>
-			{#snippet extra()}
-				{#if session?.context_growth && session.context_growth.length > 1}
-					{@const pts = session.context_growth}
-					{@const n = pts.length}
-					{@const maxY = Math.max(...pts.map(p => p.prompt_tokens), 1)}
-					{@const yOf = (v: number) => PAD.t + iH - (v / maxY) * iH}
-					{@const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, n).toFixed(1)} ${yOf(p.prompt_tokens).toFixed(1)}`).join(' ')}
-					{@const areaPath = `${linePath} L ${xOf(n-1, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, n).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
-					{@const compactionIdxs = pts.map((p, i) => (i > 0 && p.prompt_tokens < pts[i-1].prompt_tokens * 0.85 ? i : -1)).filter(i => i >= 0)}
-					{@const interruptIdxs = pts.map((p, i) => (p.interrupted ? i : -1)).filter(i => i >= 0)}
-					{@const hover = hoverIdx !== null ? pts[hoverIdx] : null}
-					<!-- Context Growth -->
-					<div class="chart-card">
+		<h2>Tasks & Turns</h2>
+
+		<!-- Context Growth chart (tall, full-width) -->
+		{#if session?.context_growth && session.context_growth.length > 1}
+			{@const hasDuration = ctxPts.some(p => p.duration_ms != null && p.duration_ms > 0)}
+			{#snippet ctxChart(chartHeight: number)}
+				<LineChart
+					labels={ctxLabels}
+					datasets={[
+						{ label: 'Context Window', data: ctxData, color: '#6366f1', fill: true },
+						...(hasDuration ? [{ label: 'Turn Duration', data: ctxPts.map(p => p.duration_ms ?? 0), color: '#10b981', fill: false, xAxisID: 'x1' as const, barMode: true as const }] : []),
+					]}
+					markers={ctxMarkers}
+					taskBands={ctxTaskBands}
+					height={chartHeight}
+					horizontal={true}
+					yFormat={fmtTokens}
+					secondaryXFormat={fmtSecs}
+					tooltipFormat={(di, i, v) => {
+						const turn = ctxLabels[i];
+						if (di === 1) return `Duration: ${fmtSecs(v)}`;
+						return `Turn ${turn}: ${fmtTokens(v)}`;
+					}}
+				/>
+			{/snippet}
+
+			<div class="chart-card">
+				<div class="chart-header">
+					<h3>Context Growth</h3>
+					<div class="chart-header-right">
+						{#if compactionCount > 0}
+							<span class="trend-badge down">{compactionCount} compaction{compactionCount > 1 ? 's' : ''}</span>
+						{/if}
+						{#if interruptCount2 > 0}
+							<span class="trend-badge interrupt">{interruptCount2} interrupt{interruptCount2 > 1 ? 's' : ''}</span>
+						{/if}
+						<button class="expand-btn" onclick={() => chartExpanded = true} title="Expand chart">⛶</button>
+					</div>
+				</div>
+				<div class="chart-desc">Context window per turn, bars show turn duration</div>
+				{@render ctxChart(Math.min(800, Math.max(300, ctxPts.length * 22 + 60)))}
+			</div>
+
+			<!-- Expanded overlay -->
+			{#if chartExpanded}
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div class="chart-overlay" onkeydown={(e) => { if (e.key === 'Escape') chartExpanded = false; }}>
+					<!-- svelte-ignore a11y_no_static_element_interactions -->
+					<div class="chart-overlay-backdrop" onclick={() => chartExpanded = false}></div>
+					<div class="chart-overlay-content">
 						<div class="chart-header">
 							<h3>Context Growth</h3>
 							<div class="chart-header-right">
-								{#if hover && hoverIdx !== null}
-									<span class="chart-hover-val">Turn {hover.turn}: {fmtTokens(hover.prompt_tokens)}</span>
+								{#if compactionCount > 0}
+									<span class="trend-badge down">{compactionCount} compaction{compactionCount > 1 ? 's' : ''}</span>
 								{/if}
-								{#if compactionIdxs.length > 0}
-									<span class="trend-badge down">{compactionIdxs.length} compaction{compactionIdxs.length > 1 ? 's' : ''}</span>
+								{#if interruptCount2 > 0}
+									<span class="trend-badge interrupt">{interruptCount2} interrupt{interruptCount2 > 1 ? 's' : ''}</span>
 								{/if}
-								{#if interruptIdxs.length > 0}
-									<span class="trend-badge interrupt">{interruptIdxs.length} interrupt{interruptIdxs.length > 1 ? 's' : ''}</span>
-								{/if}
+								<button class="expand-btn" onclick={() => chartExpanded = false} title="Close">✕</button>
 							</div>
 						</div>
-						<div class="chart-desc">Prompt tokens per turn</div>
-						<svg viewBox="0 0 {W} {H}" class="trend-svg"
-							onmousemove={(e) => chartMove(e, n, v => hoverIdx = v)}
-							onmouseleave={() => hoverIdx = null}>
-							<defs>
-								<linearGradient id="ctxG" x1="0" y1="0" x2="0" y2="1">
-									<stop offset="0%" stop-color="#6366f1" stop-opacity="0.25" />
-									<stop offset="100%" stop-color="#6366f1" stop-opacity="0" />
-								</linearGradient>
-							</defs>
-							{#each [0, 0.5, 1] as frac}
-								{@const gy = PAD.t + iH * (1 - frac)}
-								<line x1={PAD.l} x2={W - PAD.r} y1={gy} y2={gy} stroke="#f1f5f9" stroke-width="1" />
-								<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtTokens(Math.round(maxY * frac))}</text>
-							{/each}
-							<path d={areaPath} fill="url(#ctxG)" />
-							<path d={linePath} fill="none" stroke="#6366f1" stroke-width="1.5" stroke-linejoin="round" />
-							{#each compactionIdxs as i}
-								<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#f59e0b" stroke="white" stroke-width="1" />
-							{/each}
-							{#each interruptIdxs as i}
-								<line x1={xOf(i, n)} x2={xOf(i, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#ef4444" stroke-width="1" stroke-opacity="0.4" />
-								<circle cx={xOf(i, n)} cy={yOf(pts[i].prompt_tokens)} r="3" fill="#ef4444" stroke="white" stroke-width="1" />
-							{/each}
-							{#if hoverIdx !== null}
-								<line x1={xOf(hoverIdx, n)} x2={xOf(hoverIdx, n)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
-								<circle cx={xOf(hoverIdx, n)} cy={yOf(pts[hoverIdx].prompt_tokens)} r="3.5" fill="#6366f1" stroke="white" stroke-width="1.5" />
-							{/if}
-							<rect x={PAD.l} y={PAD.t} width={iW} height={iH} fill="transparent" />
-						</svg>
+						<div class="chart-desc">Context window per turn, bars show turn duration</div>
+						{@render ctxChart(Math.round(window.innerHeight * 0.7))}
 					</div>
+				</div>
+			{/if}
 
-					<!-- Turn Duration -->
-					{#if session?.context_growth?.some(p => p.duration_ms != null)}
-						{@const dPts = session!.context_growth!.filter(p => p.duration_ms != null)}
-						{@const dn = dPts.length}
-						{#if dn > 1}
-							{@const durations = dPts.map(p => p.duration_ms!)}
-							{@const maxD = Math.max(...durations, 1)}
-							{@const sortedD = [...durations].sort((a, b) => a - b)}
-							{@const median = sortedD[Math.floor(sortedD.length / 2)]}
-							{@const dyOf = (v: number) => PAD.t + iH - (v / maxD) * iH}
-							{@const dLine = dPts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i, dn).toFixed(1)} ${dyOf(p.duration_ms!).toFixed(1)}`).join(' ')}
-							{@const dArea = `${dLine} L ${xOf(dn-1, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} L ${xOf(0, dn).toFixed(1)} ${(PAD.t + iH).toFixed(1)} Z`}
-							{@const slowIdxs = dPts.map((p, i) => (p.duration_ms! > median * 2 ? i : -1)).filter(i => i >= 0)}
-							{@const dHover = durHoverIdx !== null ? dPts[durHoverIdx] : null}
-							<div class="chart-card">
-								<div class="chart-header">
-									<h3>Turn Duration</h3>
-									<div class="chart-header-right">
-										{#if dHover && durHoverIdx !== null}
-											<span class="chart-hover-val">Turn {dHover.turn}: {fmtSecs(dHover.duration_ms!)}</span>
-										{/if}
-										<span class="chart-total">median {fmtSecs(median)}</span>
-									</div>
-								</div>
-								<div class="chart-desc">Time per turn (slow turns highlighted)</div>
-								<svg viewBox="0 0 {W} {H}" class="trend-svg"
-									onmousemove={(e) => chartMove(e, dn, v => durHoverIdx = v)}
-									onmouseleave={() => durHoverIdx = null}>
-									<defs>
-										<linearGradient id="durG" x1="0" y1="0" x2="0" y2="1">
-											<stop offset="0%" stop-color="#10b981" stop-opacity="0.25" />
-											<stop offset="100%" stop-color="#10b981" stop-opacity="0" />
-										</linearGradient>
-									</defs>
-									{#each [0, 0.5, 1] as frac}
-										{@const gy = PAD.t + iH * (1 - frac)}
-										<line x1={PAD.l} x2={W - PAD.r} y1={gy} y2={gy} stroke="#f1f5f9" stroke-width="1" />
-										<text x={PAD.l - 6} y={gy + 3} text-anchor="end" class="ax">{fmtSecs(maxD * frac)}</text>
-									{/each}
-									<path d={dArea} fill="url(#durG)" />
-									<path d={dLine} fill="none" stroke="#10b981" stroke-width="1.5" stroke-linejoin="round" />
-									<line x1={PAD.l} x2={W - PAD.r} y1={dyOf(median)} y2={dyOf(median)} stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3" />
-									{#each slowIdxs as i}
-										<circle cx={xOf(i, dn)} cy={dyOf(dPts[i].duration_ms!)} r="3" fill="#ef4444" stroke="white" stroke-width="1" />
-									{/each}
-									{#if durHoverIdx !== null}
-										<line x1={xOf(durHoverIdx, dn)} x2={xOf(durHoverIdx, dn)} y1={PAD.t} y2={PAD.t + iH} stroke="#94a3b8" stroke-width="1" stroke-dasharray="2 2" />
-										<circle cx={xOf(durHoverIdx, dn)} cy={dyOf(dPts[durHoverIdx].duration_ms!)} r="3.5" fill="#10b981" stroke="white" stroke-width="1.5" />
-									{/if}
-									<rect x={PAD.l} y={PAD.t} width={iW} height={iH} fill="transparent" />
-								</svg>
-							</div>
-						{/if}
-					{/if}
-				{/if}
-			{/snippet}
-		</ActivityCharts>
+		{/if}
+
+
+		<!-- Task boundary savings estimate -->
+		{#if session.estimated_task_waste_tokens && session.estimated_task_waste_tokens > 0 && session.task_count && session.task_count > 1}
+			{@const pct = Math.round((session.estimated_task_waste_tokens / session.total_tokens) * 100)}
+			<div class="task-savings-hint">
+				<span class="task-savings-value">~{fmtTokens(session.estimated_task_waste_tokens)}</span>
+				<span class="task-savings-label">({pct}%) estimated saveable by running /compact at task boundaries</span>
+				<span class="task-savings-how-wrap">
+						<span class="task-savings-how">how?</span>
+						<span class="task-savings-tooltip">Simulates compacting context at the start of each task. Hypothetical token usage is computed by reducing context by the average compaction ratio at each boundary, then tracking growth forward. Savings = actual total − hypothetical total.</span>
+					</span>
+			</div>
+		{/if}
+	</div>
+
+	<!-- Activity -->
+	<div class="section">
+		<h2>Activity</h2>
+		<ActivityCharts {toolDistribution} {languageDistribution} {timeOfDay} {errorTypes} errorDetails={[]} />
 	</div>
 
 	<!-- 5. Notable Quotes -->
@@ -583,8 +604,29 @@
 	.effort-high, .effort-max { color: #16a34a; font-weight: 600; }
 	.effort-medium { color: #d97706; font-weight: 600; }
 	.effort-low { color: #94a3b8; }
-	.trend-svg { width: 100%; height: auto; cursor: crosshair; }
-	.ax { font-size: 10px; fill: #94a3b8; font-family: inherit; }
+
+	.expand-btn {
+		background: none; border: 1px solid #e2e8f0; border-radius: 6px;
+		padding: 2px 7px; cursor: pointer; font-size: 14px; color: #94a3b8;
+		transition: color 0.15s, border-color 0.15s;
+	}
+	.expand-btn:hover { color: #3b82f6; border-color: #3b82f6; }
+
+	.chart-overlay {
+		position: fixed; inset: 0; z-index: 1000;
+		display: flex; align-items: center; justify-content: center;
+	}
+	.chart-overlay-backdrop {
+		position: absolute; inset: 0;
+		background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(4px);
+	}
+	.chart-overlay-content {
+		position: relative; z-index: 1;
+		background: white; border-radius: 16px; padding: 28px 32px;
+		width: 92vw; max-width: 1600px;
+		max-height: 90vh; overflow: auto;
+		box-shadow: 0 24px 48px rgba(0, 0, 0, 0.2);
+	}
 
 	.reanalyze-btn {
 		background: #2563eb; color: white; border: none; border-radius: 8px;
@@ -639,7 +681,20 @@
 	.tool-io pre { margin-top: 4px; padding: 8px; background: #f8fafc; border-radius: 4px; font-size: 11px; overflow-x: auto; max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
 	.empty { padding: 32px; text-align: center; color: #64748b; background: white; border: 1px solid #e2e8f0; border-radius: 12px; }
 
+	/* Tasks & Turns */
+	.waste-badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 5px; background: #fef2f2; color: #dc2626; }
+
+	/* Token Efficiency (inside Tasks section) */
+	.task-savings-hint { margin-top: 16px; font-size: 13px; color: #64748b; display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
+	.task-savings-value { font-weight: 600; color: #475569; }
+	.task-savings-label { }
+	.task-savings-how-wrap { position: relative; display: inline-block; margin-left: 2px; }
+	.task-savings-how { font-size: 11px; color: #94a3b8; border-bottom: 1px dashed #cbd5e1; cursor: default; }
+	.task-savings-tooltip { display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); width: 280px; font-size: 12px; color: #334155; background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); line-height: 1.5; z-index: 10; }
+	.task-savings-how-wrap:hover .task-savings-tooltip { display: block; }
+
 	@media (max-width: 768px) {
 		.session-header { flex-direction: column; align-items: flex-start; }
+		.task-savings-hint { font-size: 12px; }
 	}
 </style>

@@ -11,6 +11,8 @@ from cinsights.db.models import (  # noqa: F401
     DigestSection,
     Insight,
     RefreshRun,
+    Theme,
+    ThemeTask,
     ToolCall,
 )
 from cinsights.settings import get_settings

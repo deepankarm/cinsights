@@ -75,6 +75,16 @@
 {% endfor %}
 {% endif %}
 
+{% if total_tasks > 0 %}
+## Task & Token Efficiency
+- **Total tasks detected**: {{ total_tasks }} across {{ session_count }} sessions ({{ avg_tasks_per_session }} avg/session)
+{% if avg_efficiency_score is not none %}- **Average efficiency score**: {{ avg_efficiency_score }}/100{% endif %}
+{% if total_estimated_waste > 0 %}- **Total estimated waste**: {{ total_estimated_waste }} tokens{% endif %}
+{% if waste_breakdown %}
+- Waste breakdown: compaction={{ waste_breakdown.compaction_cycle }}, interrupted={{ waste_breakdown.interrupted_turns }}, repeated_edits={{ waste_breakdown.repeated_edits }}, failed_retries={{ waste_breakdown.failed_retries }}, task_boundaries={{ waste_breakdown.task_boundaries }}
+{% endif %}
+{% endif %}
+
 ## Session Health ({{ session_health | length }} sessions{% if session_health | length > max_health %}, showing top {{ max_health }}{% endif %})
 {% for h in session_health[:max_health] %}
 - {{ h.start_time.strftime('%m/%d %H:%M') }} | {{ h.duration_minutes }}min | {{ h.tool_count }} tools | {{ h.error_count }} errors | Grade {{ h.grade }}

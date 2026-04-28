@@ -32,6 +32,7 @@ def test_auto_migrate_creates_all_tables(migrated_db):
         "coding_session",
         "tool_call",
         "insight",
+        "task",
         "session_daily_trend",
         "session_baseline",
         "digest",
@@ -76,6 +77,7 @@ def test_alembic_head_matches_models(tmp_path):
         DigestSection,
         Insight,
         RefreshRun,
+        Task,
         ToolCall,
     )
 

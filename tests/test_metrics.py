@@ -9,11 +9,18 @@ from types import SimpleNamespace
 import pytest
 
 from cinsights.metrics import (
+    compaction_cycle_waste,
     compute_all,
+    compute_compact_ratio,
     context_pressure,
     edits_without_read_pct,
+    efficiency_score,
     error_rate,
+    failed_retry_waste,
+    floor_drift_score,
+    interrupted_turn_waste,
     read_edit_ratio,
+    repeated_edit_waste,
     repeated_edits_to_same_file,
     research_mutation_ratio,
     subagent_spawn_rate,
@@ -267,6 +274,13 @@ def test_compute_all_returns_all_keys():
         "error_retry_sequences",
         "context_resets",
         "duplicate_read_count",
+        # Token efficiency
+        "compaction_cycle_waste",
+        "floor_drift_score",
+        "interrupted_turn_waste",
+        "repeated_edit_waste",
+        "failed_retry_waste",
+        "efficiency_score",
     }
     assert set(result.keys()) == expected_keys
 
@@ -275,3 +289,190 @@ def test_compute_all_turn_count_from_growth():
     growth = [{"prompt_tokens": 100}] * 5
     result = compute_all([], context_growth=growth)
     assert result["turn_count"] == 5
+
+
+# --- compaction_cycle_waste ---
+
+
+def test_compaction_cycle_waste_no_compaction():
+    growth = [{"prompt_tokens": 100}, {"prompt_tokens": 150}, {"prompt_tokens": 200}]
+    assert compaction_cycle_waste(growth) == 0
+
+
+def test_compaction_cycle_waste_single_cycle():
+    # Grows from 10K to 100K, then compacts to 40K, then grows to 80K
+    growth = [
+        {"prompt_tokens": 10000},
+        {"prompt_tokens": 50000},
+        {"prompt_tokens": 100000},
+        {"prompt_tokens": 40000},  # compaction event at index 3
+        {"prompt_tokens": 60000},
+        {"prompt_tokens": 80000},
+    ]
+    # After compaction at index 3 (floor=40K):
+    # waste = (40K-40K) + (60K-40K) + (80K-40K) = 0 + 20K + 40K = 60K
+    assert compaction_cycle_waste(growth) == 60000
+
+
+def test_compaction_cycle_waste_none():
+    assert compaction_cycle_waste(None) == 0
+
+
+def test_compaction_cycle_waste_empty():
+    assert compaction_cycle_waste([]) == 0
+
+
+# --- floor_drift_score ---
+
+
+def test_floor_drift_stable_floor():
+    growth = [
+        {"prompt_tokens": 100000},
+        {"prompt_tokens": 40000},  # compaction 1, floor=40K
+        {"prompt_tokens": 100000},
+        {"prompt_tokens": 40000},  # compaction 2, floor=40K (stable)
+        {"prompt_tokens": 100000},
+        {"prompt_tokens": 40000},  # compaction 3, floor=40K (stable)
+    ]
+    assert floor_drift_score(growth) == 0.0
+
+
+def test_floor_drift_rising_floor():
+    growth = [
+        {"prompt_tokens": 100000},
+        {"prompt_tokens": 40000},  # floor=40K
+        {"prompt_tokens": 100000},
+        {"prompt_tokens": 50000},  # floor=50K (rising)
+        {"prompt_tokens": 100000},
+        {"prompt_tokens": 60000},  # floor=60K (rising)
+    ]
+    assert floor_drift_score(growth) == 1.0
+
+
+def test_floor_drift_insufficient_events():
+    growth = [
+        {"prompt_tokens": 100000},
+        {"prompt_tokens": 40000},  # only 1 compaction
+    ]
+    assert floor_drift_score(growth) is None
+
+
+def test_floor_drift_none():
+    assert floor_drift_score(None) is None
+
+
+# --- interrupted_turn_waste ---
+
+
+def test_interrupted_turn_waste_with_interrupts():
+    growth = [
+        {"prompt_tokens": 50000, "interrupted": False},
+        {"prompt_tokens": 80000, "interrupted": True},
+        {"prompt_tokens": 60000, "interrupted": False},
+        {"prompt_tokens": 90000, "interrupted": True},
+    ]
+    assert interrupted_turn_waste(growth) == 80000 + 90000
+
+
+def test_interrupted_turn_waste_no_interrupts():
+    growth = [
+        {"prompt_tokens": 50000, "interrupted": False},
+        {"prompt_tokens": 80000, "interrupted": False},
+    ]
+    assert interrupted_turn_waste(growth) == 0
+
+
+def test_interrupted_turn_waste_none():
+    assert interrupted_turn_waste(None) == 0
+
+
+# --- repeated_edit_waste ---
+
+
+def test_repeated_edit_waste_with_thrashing():
+    calls = [
+        tc("Edit", input_value='{"file_path": "/a.py"}'),
+        tc("Edit", input_value='{"file_path": "/a.py"}'),  # repeat
+        tc("Edit", input_value='{"file_path": "/a.py"}'),  # repeat
+    ]
+    growth = [{"prompt_tokens": 100}, {"prompt_tokens": 200}, {"prompt_tokens": 300}]
+    result = repeated_edit_waste(calls, growth)
+    # 2 repeats x avg(200) = 400
+    assert result == 400
+
+
+def test_repeated_edit_waste_no_thrashing():
+    calls = [tc("Read"), tc("Edit", input_value='{"file_path": "/a.py"}')]
+    growth = [{"prompt_tokens": 100}, {"prompt_tokens": 200}]
+    assert repeated_edit_waste(calls, growth) == 0
+
+
+# --- failed_retry_waste ---
+
+
+def test_failed_retry_waste_with_retries():
+    calls = [
+        tc("Bash", success=False),
+        tc("Bash"),  # retry
+    ]
+    growth = [{"prompt_tokens": 1000}, {"prompt_tokens": 2000}]
+    result = failed_retry_waste(calls, growth)
+    # 1 retry x avg(1500) = 1500
+    assert result == 1500
+
+
+def test_failed_retry_waste_no_retries():
+    calls = [tc("Read"), tc("Edit")]
+    growth = [{"prompt_tokens": 100}, {"prompt_tokens": 200}]
+    assert failed_retry_waste(calls, growth) == 0
+
+
+# --- efficiency_score ---
+
+
+def test_efficiency_score_no_waste():
+    assert efficiency_score(100000) == 100.0
+
+
+def test_efficiency_score_all_waste():
+    assert efficiency_score(100000, compaction_waste=100000) == 0.0
+
+
+def test_efficiency_score_partial_waste():
+    score = efficiency_score(100000, compaction_waste=50000)
+    assert score == 50.0
+
+
+def test_efficiency_score_with_floor_drift():
+    score = efficiency_score(100000, floor_drift=1.0)
+    # 100 * (1 - 0) * (1 - 0.3*1.0) = 70
+    assert score == 70.0
+
+
+def test_efficiency_score_too_small():
+    assert efficiency_score(100) is None
+
+
+# --- compute_compact_ratio ---
+
+
+def test_compact_ratio_no_events():
+    assert compute_compact_ratio([]) == 0.15
+    assert compute_compact_ratio([[{"prompt_tokens": 100}, {"prompt_tokens": 200}]]) == 0.15
+
+
+def test_compact_ratio_single_event():
+    growth = [{"prompt_tokens": 100000}, {"prompt_tokens": 40000}]
+    assert compute_compact_ratio([growth]) == 0.4
+
+
+def test_compact_ratio_multiple_events():
+    growth = [
+        {"prompt_tokens": 100000},
+        {"prompt_tokens": 40000},  # ratio 0.4
+        {"prompt_tokens": 200000},
+        {"prompt_tokens": 30000},  # ratio 0.15
+    ]
+    ratio = compute_compact_ratio([growth])
+    # median of [0.15, 0.4] = 0.275
+    assert ratio == pytest.approx(0.275, abs=0.01)

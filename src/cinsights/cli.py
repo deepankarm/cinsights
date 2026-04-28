@@ -37,8 +37,37 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 app = typer.Typer(name="cinsights", help="LLM-powered insights from coding agent sessions.")
 
 
-def _apply_source_overrides(source: str | None, repo: str | None) -> None:
-    """Override settings.source and entireio_repo_path from CLI flags."""
+def _infer_source_from_trace_ids(trace_ids: list[str] | None) -> str | None:
+    """Infer the source from trace_id prefixes (entireio:..., local:...).
+
+    Trace IDs from local/entireio sources carry their source as the first
+    colon-delimited segment, so when the user passes specific IDs we don't
+    need them to also pass --source. Returns the source name if all
+    trace_ids agree on one of the known prefixes, else None.
+    """
+    if not trace_ids:
+        return None
+    prefixes = {tid.split(":", 1)[0] for tid in trace_ids if ":" in tid}
+    if len(prefixes) == 1:
+        prefix = next(iter(prefixes))
+        if prefix in ("entireio", "local"):
+            return prefix
+    return None
+
+
+def _apply_source_overrides(
+    source: str | None,
+    repo: str | None,
+    trace_ids: list[str] | None = None,
+) -> None:
+    """Override settings.source and entireio_repo_path from CLI flags.
+
+    When source is not given but trace_ids are, infer the source from the
+    trace_id prefix so users don't have to pass --source for IDs that
+    already carry it (e.g., `entireio:abc:0`).
+    """
+    if not source:
+        source = _infer_source_from_trace_ids(trace_ids)
     if source or repo:
         settings = get_settings()
         if source:
@@ -59,7 +88,7 @@ def index(
     trace_ids: list[str] | None = typer.Argument(None, help="Specific trace/session IDs to index."),
 ) -> None:
     """Discover sessions, extract metadata + quality metrics, score against baselines. Zero LLM cost."""
-    _apply_source_overrides(source, repo)
+    _apply_source_overrides(source, repo, trace_ids)
 
     async def _entry() -> None:
         async with _track_run("analyze") as run:
@@ -106,18 +135,24 @@ def analyze(
         0.0, "--min-score", help="Only analyze sessions with score >= this."
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+    tasks_only: bool = typer.Option(
+        False,
+        "--tasks-only",
+        help="Re-run task segmentation only; skip insights + project detection LLM calls.",
+    ),
     trace_ids: list[str] | None = typer.Argument(
         None, help="Specific trace/session IDs to analyze."
     ),
 ) -> None:
     """LLM-analyze INDEXED sessions above the score threshold. Costs tokens."""
-    _apply_source_overrides(source, repo)
+    _apply_source_overrides(source, repo, trace_ids)
 
     async def _entry() -> None:
         async with _track_run("analyze") as run:
             run.extra["source"] = source
             run.extra["min_score"] = min_score
             run.extra["limit"] = limit
+            run.extra["tasks_only"] = tasks_only
             await _analyze_async(
                 hours=4380,  # only used when trace_ids are passed
                 limit=limit,
@@ -128,6 +163,7 @@ def analyze(
                 run=run,
                 min_score=min_score,
                 yes=yes,
+                tasks_only=tasks_only,
             )
 
     asyncio.run(_entry())

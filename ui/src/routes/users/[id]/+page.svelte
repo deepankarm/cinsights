@@ -1,13 +1,14 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
-	import { getUsers, getDigests, getDigest, getUserMoodQuotes, getUserStats, type UserSummary, type UserMoodResponse } from '$lib/api';
-	import type { SessionRead, DigestDetail, DigestStatsData } from '$lib/types';
+	import { getUsers, getDigests, getDigest, getUserMoodQuotes, getUserStats, getUserThemes, type UserSummary, type UserMoodResponse } from '$lib/api';
+	import type { SessionRead, DigestDetail, DigestStatsData, UserThemeRead } from '$lib/types';
 	import { fmtTokens, avatarColor } from '$lib/format';
 	import DashboardView from '$lib/components/DashboardView.svelte';
 	import InsightsPanel from '$lib/components/InsightsPanel.svelte';
 	import ActivityCharts from '$lib/components/ActivityCharts.svelte';
 	import MoodQuotes from '$lib/components/MoodQuotes.svelte';
+	import UserThemes from '$lib/components/UserThemes.svelte';
 	import ExportHTML from '$lib/components/ExportHTML.svelte';
 	import SessionTable from '$lib/components/SessionTable.svelte';
 
@@ -17,6 +18,7 @@
 	let digest: DigestDetail | null = $state(null);
 	let moodData: UserMoodResponse | null = $state(null);
 	let scopeStats: DigestStatsData | null = $state(null);
+	let userThemes: UserThemeRead[] = $state([]);
 	let loading = $state(true);
 	let error: string | null = $state(null);
 	let expandedProjects: Set<string> = $state(new Set());
@@ -24,12 +26,14 @@
 
 	onMount(async () => {
 		try {
-			const [users, digests, mood, stats] = await Promise.all([
+			const [users, digests, mood, stats, themes] = await Promise.all([
 				getUsers(),
 				getDigests(undefined, userId).catch(() => []),
 				getUserMoodQuotes(userId).catch(() => null),
 				getUserStats(userId).catch(() => null),
+				getUserThemes(userId).catch(() => []),
 			]);
+			userThemes = themes;
 			user = users.find(u => u.user_id === userId) ?? null;
 			if (!user) error = `User not found: ${userId}`;
 			moodData = mood;
@@ -116,6 +120,42 @@
 				</div>
 			{/if}
 
+			{#if scopeStats}
+				{@const stats = scopeStats}
+				<div class="section">
+					<h2>Activity</h2>
+					<ActivityCharts
+						toolDistribution={stats.tool_distribution ?? {}}
+						languageDistribution={stats.language_distribution ?? {}}
+						timeOfDay={stats.time_of_day ?? {}}
+						errorTypes={stats.error_types ?? {}}
+						insightLabels={stats.insight_labels ?? {}}
+						labelCategories={stats.label_categories ?? {}}
+						labelTrends={stats.label_trends ?? []}
+						analyzedCount={stats.analyzed_count ?? 0}
+						sessionCount={stats.session_count ?? 0}
+						scopeUser={userId}
+					/>
+					<MoodQuotes moodGroups={moodData?.mood_groups ?? []} />
+
+					{#if userThemes.length > 0}
+						<div class="subsection">
+							<h3>Themes <span class="dim">({userThemes.length} work area{userThemes.length === 1 ? '' : 's'})</span>
+								{#if user?.avg_efficiency_score != null}
+									{@const eff = user.avg_efficiency_score}
+									<span class="eff-badge" style="background: {eff > 80 ? '#f0fdf4' : eff > 50 ? '#fffbeb' : '#fef2f2'}; color: {eff > 80 ? '#16a34a' : eff > 50 ? '#d97706' : '#dc2626'}" title="Token efficiency score (0–100). Penalises waste from compaction cycles, interrupted turns, repeated edits, and failed retries. Higher is better.">{Math.round(eff)} efficiency</span>
+								{/if}
+							</h3>
+							<div class="task-stats-row">
+								{#if user?.total_tasks}<span class="task-stat">{user.total_tasks} tasks</span>{/if}
+								{#if user?.avg_tasks_per_session}<span class="task-stat">{user.avg_tasks_per_session} avg/session</span>{/if}
+							</div>
+							<UserThemes themes={userThemes} />
+						</div>
+					{/if}
+				</div>
+			{/if}
+
 			{#if digest}
 				<div class="section">
 					<div class="insights-header">
@@ -125,28 +165,9 @@
 							<span class="generated-at">{new Date(digest.created_at).toLocaleDateString()}</span>
 						</span>
 					</div>
-					<InsightsPanel {digest} moodGroups={moodData?.mood_groups ?? []} scopeStats={scopeStats ?? undefined} />
+					<InsightsPanel {digest} moodGroups={moodData?.mood_groups ?? []} scopeStats={scopeStats ?? undefined} showActivity={false} />
 				</div>
 			{:else}
-				{@const stats = scopeStats}
-				{#if stats}
-					<div class="section">
-						<h2>Activity</h2>
-						<ActivityCharts
-							toolDistribution={stats.tool_distribution ?? {}}
-							languageDistribution={stats.language_distribution ?? {}}
-							timeOfDay={stats.time_of_day ?? {}}
-							errorTypes={stats.error_types ?? {}}
-							insightLabels={stats.insight_labels ?? {}}
-							labelCategories={stats.label_categories ?? {}}
-							labelTrends={stats.label_trends ?? []}
-							analyzedCount={stats.analyzed_count ?? 0}
-							sessionCount={stats.session_count ?? 0}
-							scopeUser={userId}
-						/>
-						<MoodQuotes moodGroups={moodData?.mood_groups ?? []} />
-					</div>
-				{/if}
 				<div class="section">
 					<div class="empty-insights">
 						No report yet. Run <code>cinsights digest user {userId} --days 30</code> to generate.
@@ -199,5 +220,12 @@
 
 	.empty-insights { text-align: center; padding: 40px; color: #94a3b8; font-size: 14px; background: white; border-radius: 12px; }
 	.empty-insights code { background: #f4f4f5; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+
+	.subsection { margin-top: 24px; }
+	h3 { font-size: 14px; font-weight: 700; color: #232326; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+	.eff-badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 5px; margin-left: 8px; }
+	.task-stats-row { display: flex; gap: 12px; margin-bottom: 10px; }
+	.task-stat { font-size: 13px; color: #64748b; background: #f1f5f9; padding: 4px 10px; border-radius: 6px; }
 
 </style>

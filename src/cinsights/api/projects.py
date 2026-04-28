@@ -9,7 +9,7 @@ from sqlmodel import col, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from cinsights.db.engine import get_db
-from cinsights.db.models import CodingSession, Digest, ToolCall
+from cinsights.db.models import CodingSession, Digest, Task, Theme, ThemeTask, ToolCall
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -124,3 +124,90 @@ async def get_project_stats(
     if not row or not row.stats_json:
         return {}
     return json.loads(row.stats_json)
+
+
+class ThemeMember(BaseModel):
+    task_id: str
+    task_name: str
+    user_id: str | None
+    session_id: str
+    date: datetime | None
+    tokens: int
+
+
+class ThemeRead(BaseModel):
+    id: str
+    name: str
+    summary: str
+    total_tokens: int
+    task_count: int
+    first_date: datetime | None
+    last_date: datetime | None
+    members: list[ThemeMember]
+
+
+@router.get("/{project_name}/themes", response_model=list[ThemeRead])
+async def list_project_themes(
+    project_name: str,
+    db: AsyncSession = Depends(get_db),
+) -> list[ThemeRead]:
+    """All themes for a project, ordered by total_tokens desc, members hydrated.
+
+    Returns ``[]`` when the project has no themes (not yet digested or
+    skipped due to too few tasks).
+    """
+    themes_result = await db.exec(
+        select(Theme)
+        .where(Theme.project_name == project_name)
+        .order_by(col(Theme.total_tokens).desc())
+    )
+    themes = themes_result.all()
+    if not themes:
+        return []
+
+    theme_ids = [t.id for t in themes]
+
+    # Hydrate members in one go: ThemeTask → Task → CodingSession
+    members_result = await db.exec(
+        select(
+            ThemeTask.theme_id,
+            Task.id,
+            Task.name,
+            Task.prompt_tokens_total,
+            Task.completion_tokens_total,
+            Task.session_id,
+            CodingSession.user_id,
+            CodingSession.start_time,
+        )
+        .join(Task, Task.id == ThemeTask.task_id)
+        .join(CodingSession, CodingSession.id == Task.session_id)
+        .where(col(ThemeTask.theme_id).in_(theme_ids))
+        .order_by(CodingSession.start_time)
+    )
+    members_by_theme: dict[str, list[ThemeMember]] = {tid: [] for tid in theme_ids}
+    for row in members_result.all():
+        (theme_id, task_id, task_name, p_tok, c_tok, session_id, user_id, start_time) = row
+        members_by_theme[theme_id].append(
+            ThemeMember(
+                task_id=task_id,
+                task_name=task_name,
+                user_id=user_id,
+                session_id=session_id,
+                date=start_time,
+                tokens=(p_tok or 0) + (c_tok or 0),
+            )
+        )
+
+    return [
+        ThemeRead(
+            id=t.id,
+            name=t.name,
+            summary=t.summary,
+            total_tokens=t.total_tokens,
+            task_count=t.task_count,
+            first_date=t.first_date,
+            last_date=t.last_date,
+            members=members_by_theme.get(t.id, []),
+        )
+        for t in themes
+    ]

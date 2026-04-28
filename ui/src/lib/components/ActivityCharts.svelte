@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { barPct, maxVal } from '$lib/format';
+	import BarChart from '$lib/components/charts/BarChart.svelte';
 
 	export interface ErrorDetail {
 		tool: string;
@@ -75,48 +76,43 @@
 <div class="chart-bento">
 	<div class="chart-box">
 		<h3>Tools</h3>
-		<div class="hbars">
-			{#each Object.entries(toolDistribution).slice(0, 8) as [name, count]}
-				{@const pct = barPct(count, maxVal(toolDistribution))}
-				<div class="hbar">
-					<span class="hbar-name" title="{name}">{name}</span>
-					<div class="hbar-track"><div class="hbar-fill hbar-c1" style="width:{pct}%"></div></div>
-					<span class="hbar-val">{count}</span>
-				</div>
-			{/each}
-			{#if Object.keys(toolDistribution).length === 0}
-				<span class="chart-empty">No data</span>
-			{/if}
-		</div>
+		{#if Object.keys(toolDistribution).length > 0}
+			{@const entries = Object.entries(toolDistribution).slice(0, 8)}
+			<BarChart
+				labels={entries.map(([n]) => n)}
+				data={entries.map(([, c]) => c)}
+				color="#6366f1"
+				horizontal={true}
+				height={Math.max(entries.length * 28, 120)}
+			/>
+		{:else}
+			<span class="chart-empty">No data</span>
+		{/if}
 	</div>
 	<div class="chart-box">
 		<h3>Languages</h3>
-		<div class="hbars">
-			{#each Object.entries(languageDistribution).slice(0, 6) as [lang, count]}
-				{@const pct = barPct(count, maxVal(languageDistribution))}
-				<div class="hbar">
-					<span class="hbar-name" title="{lang}">{lang}</span>
-					<div class="hbar-track"><div class="hbar-fill hbar-c2" style="width:{pct}%"></div></div>
-					<span class="hbar-val">{count}</span>
-				</div>
-			{/each}
-			{#if Object.keys(languageDistribution).length === 0}
-				<span class="chart-empty">No data</span>
-			{/if}
-		</div>
+		{#if Object.keys(languageDistribution).length > 0}
+			{@const entries = Object.entries(languageDistribution).slice(0, 6)}
+			<BarChart
+				labels={entries.map(([n]) => n)}
+				data={entries.map(([, c]) => c)}
+				color="#10b981"
+				horizontal={true}
+				height={Math.max(entries.length * 28, 120)}
+			/>
+		{:else}
+			<span class="chart-empty">No data</span>
+		{/if}
 	</div>
 	<div class="chart-box">
 		<h3>Coding hours <span style="font-weight:400;color:#94a3b8;font-size:11px">(UTC)</span></h3>
-		<div class="hour-bars">
-			{#each Array.from({length: 24}, (_, i) => i) as hour}
-				{@const count = timeOfDay[String(hour)] ?? 0}
-				{@const pct = barPct(count, maxVal(timeOfDay))}
-				<div class="hour-col" title="{hour}:00 UTC — {count} sessions">
-					<div class="hour-fill" style="height:{pct}%"></div>
-					<span class="hour-label">{hour}</span>
-				</div>
-			{/each}
-		</div>
+		<BarChart
+			labels={Array.from({length: 24}, (_, i) => String(i))}
+			data={Array.from({length: 24}, (_, i) => timeOfDay[String(i)] ?? 0)}
+			color="#8b5cf6"
+			horizontal={false}
+			height={140}
+		/>
 	</div>
 	<div class="chart-box" class:chart-wide={errorDetails && errorDetails.length > 0}>
 		<h3>Errors</h3>
@@ -132,20 +128,17 @@
 					</div>
 				{/each}
 			</div>
+		{:else if Object.keys(errorTypes).length > 0}
+			{@const entries = Object.entries(errorTypes).slice(0, 5)}
+			<BarChart
+				labels={entries.map(([n]) => n)}
+				data={entries.map(([, c]) => c)}
+				color="#ef4444"
+				horizontal={true}
+				height={Math.max(entries.length * 28, 120)}
+			/>
 		{:else}
-			<div class="hbars">
-				{#each Object.entries(errorTypes).slice(0, 5) as [type, count]}
-					{@const pct = barPct(count, maxVal(errorTypes))}
-					<div class="hbar">
-						<span class="hbar-name" title="{type}">{type}</span>
-						<div class="hbar-track"><div class="hbar-fill hbar-c4" style="width:{pct}%"></div></div>
-						<span class="hbar-val">{count}</span>
-					</div>
-				{/each}
-				{#if Object.keys(errorTypes).length === 0}
-					<span class="chart-empty">No errors</span>
-				{/if}
-			</div>
+			<span class="chart-empty">No errors</span>
 		{/if}
 	</div>
 
@@ -215,23 +208,6 @@
 	.chart-wide { grid-column: span 2; }
 	.chart-box h3 { font-size: 13px; font-weight: 700; color: #232326; margin-bottom: 16px; }
 	.chart-empty { font-size: 13px; color: #a1a1aa; }
-
-	.hbars { display: flex; flex-direction: column; gap: 8px; }
-	.hbar { display: flex; align-items: center; gap: 10px; }
-	.hbar-name { width: 100px; font-size: 13px; color: #52525b; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.hbar-track { flex: 1; height: 10px; background: #f4f4f5; border-radius: 5px; overflow: hidden; }
-	.hbar-fill { height: 100%; border-radius: 5px; transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
-	.hbar-c1 { background: linear-gradient(90deg, #6366f1, #a5b4fc); }
-	.hbar-c2 { background: linear-gradient(90deg, #10b981, #6ee7b7); }
-	.hbar-name-wide { width: 150px; text-transform: capitalize; }
-	.hbar-c3 { background: linear-gradient(90deg, #8b5cf6, #c4b5fd); }
-	.hbar-c4 { background: linear-gradient(90deg, #ef4444, #fca5a5); }
-	.hbar-val { width: 40px; font-size: 13px; font-weight: 600; color: #71717a; text-align: right; font-variant-numeric: tabular-nums; }
-
-	.hour-bars { display: flex; align-items: flex-end; gap: 4px; height: 120px; padding-top: 8px; }
-	.hour-col { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; }
-	.hour-fill { width: 100%; border-radius: 4px 4px 0 0; background: linear-gradient(180deg, #8b5cf6, #ddd6fe); transition: height 0.4s; min-height: 2px; }
-	.hour-label { font-size: 10px; color: #a1a1aa; margin-top: 4px; }
 
 	.error-details { display: flex; flex-direction: column; gap: 8px; }
 	.error-card { background: #fef2f2; border: 1px solid #fecaca; border-radius: 10px; padding: 12px 16px; }

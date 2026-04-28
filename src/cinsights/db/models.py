@@ -32,7 +32,7 @@ class CodingSession(SQLModel, table=True):
 
     id: str = Field(primary_key=True)  # source-specific session key
     tenant_id: str = Field(default="default", index=True)  # multi-tenant boundary
-    source: str = Field(default="phoenix")  # observability backend
+    source: str = Field(default="local")  # observability backend
     agent_type: str = Field(default="claude-code")  # coding agent identity
     session_id: str | None = Field(default=None, index=True)  # source-native session grouping key
     user_id: str | None = Field(default=None, index=True)  # user.id from spans
@@ -66,6 +66,18 @@ class CodingSession(SQLModel, table=True):
     context_resets: int | None = None
     duplicate_read_count: int | None = None
 
+    # Token efficiency — waste metrics (computed during indexing, zero LLM cost)
+    compaction_cycle_waste: int | None = None  # tokens in growth-reset cycles
+    floor_drift_score: float | None = None  # 0-1, growing post-compaction floor
+    interrupted_turn_waste: int | None = None  # prompt tokens for interrupted turns
+    repeated_edit_waste: int | None = None  # thrashing cost
+    failed_retry_waste: int | None = None  # error retry cost
+    efficiency_score: float | None = None  # 0-100 composite score
+
+    # Task-based metrics (computed during analyze, LLM)
+    task_count: int | None = None  # number of detected tasks
+    estimated_task_waste_tokens: int | None = None  # total compact-at-boundary waste
+
     interrupt_count: int | None = None
     agent_version: str | None = None
     effort_level: str | None = None  # low / medium / high / max
@@ -83,6 +95,59 @@ class CodingSession(SQLModel, table=True):
 
     tool_calls: list["ToolCall"] = Relationship(back_populates="session")
     insights: list["Insight"] = Relationship(back_populates="session")
+    tasks: list["Task"] = Relationship(back_populates="session")
+
+
+class Task(SQLModel, table=True):
+    """A coherent unit of work within a session, detected by LLM segmentation."""
+
+    __tablename__ = "task"
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    tenant_id: str = Field(default="default", index=True)
+    session_id: str = Field(foreign_key="coding_session.id", index=True)
+    task_number: int  # 1-indexed within session
+    name: str  # 3-8 word concise name
+    description: str  # 1-2 sentences
+    start_turn: int
+    end_turn: int
+    turn_count: int
+    prompt_tokens_total: int = 0  # total prompt tokens across turns in this task
+    completion_tokens_total: int = 0
+    context_at_start: int | None = None  # context window size at first turn
+    estimated_waste_tokens: int | None = None  # compact-at-boundary waste
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    session: CodingSession = Relationship(back_populates="tasks")
+
+
+class Theme(SQLModel, table=True):
+    """A coherent work area within a project, extracted from grouped tasks via LLM."""
+
+    __tablename__ = "theme"
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    tenant_id: str = Field(default="default", index=True)
+    project_name: str = Field(index=True)
+    name: str  # e.g. "Checkpoints V2 — Data model, storage, and migration"
+    summary: str  # 1-2 sentences explaining the work area
+    total_tokens: int = 0
+    task_count: int = 0
+    first_date: datetime | None = None  # earliest member-task start_time
+    last_date: datetime | None = None  # latest member-task start_time
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ThemeTask(SQLModel, table=True):
+    """Junction: one task belongs to exactly one theme by extraction rules,
+    but the relation stays many-to-many for forward flexibility (re-extraction,
+    splits, manual reassignment)."""
+
+    __tablename__ = "theme_task"
+
+    theme_id: str = Field(foreign_key="theme.id", primary_key=True)
+    task_id: str = Field(foreign_key="task.id", primary_key=True)
+    tenant_id: str = Field(default="default", index=True)
 
 
 class ToolCall(SQLModel, table=True):
@@ -194,6 +259,8 @@ class DigestSectionType(StrEnum):
     WORKFLOW_PATTERNS = "workflow_patterns"
     AMBITIOUS_WORKFLOWS = "ambitious_workflows"
     STOP_HOOK_SUGGESTIONS = "stop_hook_suggestions"
+    TASK_ANALYSIS = "task_analysis"
+    EFFICIENCY_INSIGHTS = "efficiency_insights"
     # Legacy values kept for SQLite CHECK constraint compatibility.
     FUN_ENDING = "fun_ending"
 
@@ -268,6 +335,8 @@ class LLMCallKind(StrEnum):
     DIGEST_NARRATIVE = "digest_narrative"
     DIGEST_ACTIONS = "digest_actions"
     DIGEST_FORWARD = "digest_forward"
+    TASK_SEGMENTATION = "task_segmentation"
+    THEME_EXTRACTION = "theme_extraction"
 
 
 class LLMCallScopeType(StrEnum):

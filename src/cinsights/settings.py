@@ -215,7 +215,7 @@ class Settings(BaseSettings):
 
     tenant_id: str = "default"
     agent_type: str = "claude-code"
-    source: SourceType = SourceType.PHOENIX
+    source: SourceType = SourceType.LOCAL
     prompt_version_session: str = "session-v1"
     prompt_version_digest: str = "digest-v1"
 

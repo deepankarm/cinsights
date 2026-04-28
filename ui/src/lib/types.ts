@@ -40,6 +40,20 @@ export interface InsightRead {
 }
 
 
+export interface TaskRead {
+	id: string;
+	task_number: number;
+	name: string;
+	description: string;
+	start_turn: number;
+	end_turn: number;
+	turn_count: number;
+	prompt_tokens_total: number;
+	completion_tokens_total: number;
+	context_at_start: number | null;
+	estimated_waste_tokens: number | null;
+}
+
 export interface SessionDetail {
 	id: string;
 	session_id: string | null;
@@ -56,6 +70,7 @@ export interface SessionDetail {
 	tool_calls: ToolCallRead[];
 	total_tool_calls: number;
 	insights: InsightRead[];
+	tasks: TaskRead[];
 	notable_quotes: Array<{ quote: string; mood?: string; vibe?: string }> | null;
 	interrupt_count: number | null;
 	agent_version: string | null;
@@ -77,6 +92,16 @@ export interface SessionDetail {
 	context_resets: number | null;
 	duplicate_read_count: number | null;
 
+	// Token efficiency — waste metrics
+	compaction_cycle_waste: number | null;
+	floor_drift_score: number | null;
+	interrupted_turn_waste: number | null;
+	repeated_edit_waste: number | null;
+	failed_retry_waste: number | null;
+	efficiency_score: number | null;
+	task_count: number | null;
+	estimated_task_waste_tokens: number | null;
+
 	// Baseline averages for comparison
 	baseline: {
 		avg_read_edit_ratio: number;
@@ -93,6 +118,48 @@ export interface StatsResponse {
 	distinct_tool_count: number;
 	top_tools: Record<string, number>;
 	insight_counts: Record<string, number>;
+}
+
+export interface ThemeMember {
+	task_id: string;
+	task_name: string;
+	user_id: string | null;
+	session_id: string;
+	date: string | null;
+	tokens: number;
+}
+
+export interface ThemeRead {
+	id: string;
+	name: string;
+	summary: string;
+	total_tokens: number;
+	task_count: number;
+	first_date: string | null;
+	last_date: string | null;
+	members: ThemeMember[];
+}
+
+export interface UserTaskInTheme {
+	task_id: string;
+	name: string;
+	session_id: string;
+	date: string | null;
+	tokens: number;
+	turn_count: number;
+}
+
+export interface UserThemeRead {
+	theme_id: string;
+	theme_name: string;
+	project_name: string;
+	user_tokens: number;
+	theme_total_tokens: number;
+	share_pct: number;
+	user_task_count: number;
+	theme_dev_count: number;
+	last_active: string | null;
+	tasks: UserTaskInTheme[];
 }
 
 export interface DigestRead {
@@ -195,4 +262,11 @@ export interface DigestStatsData {
 		duration_min: number;
 		summary: string;
 	}>;
+
+	// Token efficiency & task analytics
+	total_tasks?: number;
+	avg_tasks_per_session?: number;
+	avg_efficiency_score?: number | null;
+	total_estimated_waste?: number;
+	waste_breakdown?: Record<string, number> | null;
 }

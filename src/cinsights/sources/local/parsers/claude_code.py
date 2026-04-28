@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 
 from cinsights.sources.base import SpanData, TraceData
 from cinsights.sources.jsonl_utils import (
+    extract_session_signals,
     extract_user_content,
     group_into_turns,
     parse_dt,
@@ -102,7 +103,10 @@ def parse_claude_code(
             if m:
                 model_name = m
 
-        total_prompt = sum(p for p, _ in msg_tokens.values())
+        # Context window size = max across message IDs (what the model "sees")
+        # Total billed = sum across message IDs (what you pay for)
+        context_window_prompt = max((p for p, _ in msg_tokens.values()), default=0)
+        total_billed_prompt = sum(p for p, _ in msg_tokens.values())
         total_completion = sum(c for _, c in msg_tokens.values())
 
         user_query = ""
@@ -130,8 +134,9 @@ def parse_claude_code(
             attributes={
                 "input.value": user_query[:2000] if user_query else "",
                 "output.value": assistant_text[:2000] if assistant_text else "",
-                "llm.token_count.prompt": total_prompt,
+                "llm.token_count.prompt": context_window_prompt,
                 "llm.token_count.completion": total_completion,
+                "llm.token_count.total_billed_prompt": total_billed_prompt,
                 "llm.model_name": model_name,
             },
         )
@@ -189,6 +194,43 @@ def parse_claude_code(
                 )
                 all_spans.append(tool_span)
 
+    # Deduplicate turns created by session continuations replaying earlier messages.
+    # Continuations re-serialize the same user/assistant exchanges, producing turns
+    # with identical (start_time, end_time, prompt_tokens).  Keep only the first.
+    seen_turn_keys: set[tuple] = set()
+    skip_span_ids: set[str] = set()
+    deduped_spans: list[SpanData] = []
+    for span in all_spans:
+        if span.name.startswith("Turn "):
+            key = (span.start_time, span.end_time, span.attributes.get("llm.token_count.prompt", 0))
+            if key in seen_turn_keys:
+                skip_span_ids.add(span.span_id)
+                continue
+            seen_turn_keys.add(key)
+        elif span.parent_id in skip_span_ids:
+            continue  # drop tool spans belonging to duplicate turns
+        deduped_spans.append(span)
+    all_spans = deduped_spans
+
+    # Renumber turns sequentially after dedup so there are no gaps
+    # (e.g., Turn 93 → Turn 133 becomes Turn 93 → Turn 94)
+    turn_num = 0
+    old_to_new_id: dict[str, str] = {}
+    for span in all_spans:
+        if span.name.startswith("Turn "):
+            turn_num += 1
+            old_id = span.span_id
+            new_id = f"{trace_id}:turn:{turn_num}"
+            span.name = f"Turn {turn_num}"
+            span.span_id = new_id
+            old_to_new_id[old_id] = new_id
+        elif span.parent_id in old_to_new_id:
+            span.parent_id = old_to_new_id[span.parent_id]
+
+    # Slash-command / skill / interrupt signals — extracted from raw lines
+    # BEFORE noise filtering so we don't lose them.
+    session_signals = extract_session_signals(lines)
+
     # Root span
     root_span = SpanData(
         span_id=root_id,
@@ -207,6 +249,7 @@ def parse_claude_code(
             "harness.agent_version": agent_version,
             "harness.effort_level": effort_level,
             "harness.adaptive_thinking_disabled": adaptive_thinking_disabled,
+            "harness.session_signals": json.dumps(session_signals),
         },
     )
     all_spans.insert(0, root_span)
