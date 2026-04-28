@@ -324,6 +324,10 @@ export async function getProjectThemes(projectName: string): Promise<import('./t
 	return fetchJSON(`/api/projects/${encodeURIComponent(projectName)}/themes`);
 }
 
+export async function getUserThemes(userId: string, limit = 50): Promise<import('./types').UserThemeRead[]> {
+	return fetchJSON(`/api/users/${encodeURIComponent(userId)}/themes?limit=${limit}`);
+}
+
 export interface MoodQuote { quote: string; mood: string; project: string | null; session_id: string | null; }
 export interface MoodGroup { mood: string; quotes: MoodQuote[]; }
 export interface UserMoodResponse { user_id: string; total_sessions: number; sessions_with_quotes: number; mood_groups: MoodGroup[]; }

@@ -140,6 +140,28 @@ export interface ThemeRead {
 	members: ThemeMember[];
 }
 
+export interface UserTaskInTheme {
+	task_id: string;
+	name: string;
+	session_id: string;
+	date: string | null;
+	tokens: number;
+	turn_count: number;
+}
+
+export interface UserThemeRead {
+	theme_id: string;
+	theme_name: string;
+	project_name: string;
+	user_tokens: number;
+	theme_total_tokens: number;
+	share_pct: number;
+	user_task_count: number;
+	theme_dev_count: number;
+	last_active: string | null;
+	tasks: UserTaskInTheme[];
+}
+
 export interface DigestRead {
 	id: string;
 	user_id: string | null;
