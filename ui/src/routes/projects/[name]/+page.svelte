@@ -163,11 +163,33 @@
 				</div>
 			{/if}
 
-			<!-- Themes -->
-			{#if themes.length > 0}
+			<!-- Activity (with Themes as a subsection) -->
+			{#if scopeStats || themes.length > 0}
 				<div class="section">
-					<h2>Themes <span class="dim">({themes.length} work areas)</span></h2>
-					<ThemeSwimlane {themes} />
+					<h2>Activity</h2>
+					{#if scopeStats}
+						<ActivityCharts
+							toolDistribution={scopeStats.tool_distribution}
+							languageDistribution={scopeStats.language_distribution}
+							timeOfDay={scopeStats.time_of_day}
+							errorTypes={scopeStats.error_types}
+							sessionCount={scopeStats.session_count}
+							analyzedCount={scopeStats.analyzed_count}
+						/>
+					{/if}
+
+					{#if themes.length > 0}
+						<div class="subsection">
+							<h3>Themes <span class="dim">({themes.length} work areas)</span></h3>
+							<ThemeSwimlane {themes} />
+						</div>
+					{/if}
+
+					{#if !digest && scopeStats}
+						<div class="empty-insights" style="margin-top: 16px">
+							Run <code>cinsights digest project {projectName} --days 30</code> to generate insights.
+						</div>
+					{/if}
 				</div>
 			{/if}
 
@@ -181,24 +203,9 @@
 							<span class="generated-at">{new Date(digest.created_at).toLocaleDateString()}</span>
 						</span>
 					</div>
-					<InsightsPanel {digest} scopeStats={scopeStats ?? undefined} />
+					<InsightsPanel {digest} scopeStats={scopeStats ?? undefined} showActivity={false} />
 				</div>
-			{:else if scopeStats}
-				<div class="section">
-					<h2>Activity</h2>
-					<ActivityCharts
-						toolDistribution={scopeStats.tool_distribution}
-						languageDistribution={scopeStats.language_distribution}
-						timeOfDay={scopeStats.time_of_day}
-						errorTypes={scopeStats.error_types}
-						sessionCount={scopeStats.session_count}
-						analyzedCount={scopeStats.analyzed_count}
-					/>
-					<div class="empty-insights" style="margin-top: 16px">
-						Run <code>cinsights digest project {projectName} --days 30</code> to generate insights.
-					</div>
-				</div>
-			{:else}
+			{:else if !scopeStats && themes.length === 0}
 				<div class="section">
 					<div class="empty-insights">
 						No insights yet. Run <code>cinsights digest project {projectName} --days 30</code> to generate.
@@ -232,6 +239,8 @@
 
 	.section { margin-bottom: 28px; }
 	h2 { font-size: 17px; font-weight: 700; color: #232326; margin-bottom: 12px; }
+	h3 { font-size: 14px; font-weight: 700; color: #232326; margin-bottom: 12px; }
+	.subsection { margin-top: 24px; }
 	.dim { font-size: 13px; font-weight: 400; color: #94a3b8; }
 
 	.user-list { display: flex; flex-direction: column; gap: 8px; }
